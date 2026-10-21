@@ -1,5 +1,5 @@
 import { io } from "/socket.io/socket.io.esm.min.js";
-export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, metadataFor, mapRegionsFor } from "./game-config.js";
+export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity } from "./game-config.js";
 
 export const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 const getToken = key => { try { return sessionStorage.getItem(key) || undefined; } catch { return undefined; } };
@@ -68,8 +68,16 @@ export class GameEngine {
   adjustPoints(regionId, delta) { return this.request("adjustPoints", { regionId, delta }); }
   adjustEconomy(regionId, delta) { return this.request("adjustEconomy", { regionId, delta }); }
   addCustomQuestion(text, options, correctIdx, points) { return this.request("addCustomQuestion", { text, options, correctIdx, points }); }
-  createTeam(name, baseRegionId) { return this.request("createTeam",{name,baseRegionId}); }
+  createTeam(name, baseRegionId, capacity, points, economy) { return this.request("createTeam",{name,baseRegionId,capacity,points,economy}); }
   expandTeams(count) { return this.request("expandTeams",{count}); }
+  async planTeamCount(count) { return (await this.request("planTeamCount",{count})).plan; }
+  setTeamCount(count,layoutToken) { return this.request("setTeamCount",{count,layoutToken}); }
+  setTeamCapacity(teamId,capacity) { return this.request("setTeamCapacity",{teamId,capacity}); }
+  setAllCapacities(capacity) { return this.request("setAllCapacities",{capacity}); }
+  updateTeam(teamId,changes) { return this.request("updateTeam",{teamId,changes}); }
+  movePlayer(pid,toTeamId) { return this.request("movePlayer",{pid,toTeamId}); }
+  renamePlayer(pid,name) { return this.request("renamePlayer",{pid,name}); }
+  updatePlayer(pid,name,toTeamId) { return this.request("updatePlayer",{pid,name,toTeamId}); }
   renameTeam(teamId,name,baseRegionId) { return this.request("renameTeam",{teamId,name,baseRegionId}); }
   removeTeam(teamId) { return this.request("removeTeam",{teamId}); }
   editQuestion(questionId,question,version) { return this.request("editQuestion",{questionId,question,version}); }

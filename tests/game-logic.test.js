@@ -185,5 +185,64 @@ test("импорт вопросов атомарен, убирает дубли�
 test("новая версия загружает прежние четыре региона без удаления участников",()=>{
  const f=fixture(),old=structuredClone(f.game.state);old.schemaVersion=2;
  for(const r of old.regions){delete r.name;delete r.baseRegionId}
- const restored=new GameLogic(old);assert.equal(restored.state.schemaVersion,3);assert.equal(restored.region("saryarka").name,"Сарыарқа");assert.equal(restored.region("saryarka").members.length,2);
+ const restored=new GameLogic(old);assert.equal(restored.state.schemaVersion,4);assert.equal(restored.region("saryarka").name,"Сарыарқа");assert.equal(restored.region("saryarka").members.length,2);
+});
+
+test("вместимость меняется для всех или одной команды, переполнение не удаляет игроков",()=>{
+ const game=new GameLogic();game.setAllCapacities(6);
+ for(let i=0;i<6;i++)game.joinTeam('saryarka',`Участник ${i}`);
+ assert.throws(()=>game.joinTeam('saryarka','Седьмой'),/6\/6/);
+ const before=structuredClone(game.state);
+ assert.throws(()=>game.setAllCapacities(5),/Сначала перенесите/);assert.deepEqual(game.state,before);
+ assert.throws(()=>game.setTeamCapacity('saryarka',3),/Сначала перенесите/);
+ game.setTeamCapacity('jetisu',2);assert.equal(game.region('jetisu').capacity,2);
+ const created=game.createTeam('Новая','abai');assert.equal(game.region(created.teamId).capacity,6);
+ for(const n of [0,51,2.5,'6',NaN])assert.throws(()=>game.setAllCapacities(n));
+ const restored=new GameLogic(game.state);assert.equal(restored.region('saryarka').capacity,6);assert.equal(restored.state.settings.teamCapacity,6);
+ restored.resetGame();assert.equal(restored.region('jetisu').capacity,2);assert.equal(restored.state.settings.teamCapacity,6);
+});
+test("38 команд с 150 игроками уменьшаются до 30 по 5 без потери сессий",()=>{
+ const game=new GameLogic();game.expandTeams(38);const tokens=[];
+ for(let i=0;i<150;i++)tokens.push(game.joinTeam(game.state.regions[Math.floor(i/4)].id,`Студент ${i}`).playerToken);
+ const before=structuredClone(game.state),blocked=game.planTeamCount(30);
+ assert.equal(blocked.overflow,30);assert.throws(()=>game.setTeamCount(30,blocked.layoutToken),/Не хватает/);assert.deepEqual(game.state,before);
+ game.setAllCapacities(5);const plan=game.planTeamCount(30);assert.equal(plan.overflow,0);assert.equal(plan.moves.length,30);
+ const result=game.setTeamCount(30,plan.layoutToken);assert.equal(result.removed,8);assert.equal(game.state.regions.length,30);
+ assert.ok(game.state.regions.every(t=>t.members.length===5));
+ for(const token of tokens)assert.ok(game.findPlayer(hashToken(token)));
+ const restored=new GameLogic(game.state);assert.equal(restored.state.regions.flatMap(t=>t.members).length,150);
+});
+test("точное число 36 → 4 убирает пустые команды; план проверяет изменения состава",()=>{
+ const game=new GameLogic();game.expandTeams(36);game.adjustPoints('saryarka',500);
+ const p=game.joinTeam(game.state.regions.at(-1).id,'Последний');const plan=game.planTeamCount(4);
+ assert.equal(plan.removed.length,32);assert.equal(plan.overflow,0);
+ const revision=game.state.revision;game.planTeamCount(4);assert.equal(game.state.revision,revision);
+ game.joinTeam('jetisu','Новый');assert.throws(()=>game.setTeamCount(4,plan.layoutToken),/изменился/);
+ game.setTeamCount(4,game.planTeamCount(4).layoutToken);assert.equal(game.state.regions.length,4);
+ assert.equal(game.region('saryarka').points,500);assert.ok(game.findPlayer(hashToken(p.playerToken)));
+ game.setTeamCount(8);assert.equal(game.state.regions.length,8);assert.ok(game.state.regions.every(t=>t.capacity===4));
+});
+test("перенос и имя сохраняют токен, очищают голос и открывают ответы двух команд",()=>{
+ const f=fixture(),third=f.game.joinTeam('jetisu','Третий');
+ f.game.castVote('saryarka',f.a.player.pid,0,f.round);f.game.teamSubmit('saryarka',f.a.player.pid,f.round);
+ f.game.castVote('jetisu',third.player.pid,1,f.round);f.game.teamSubmit('jetisu',third.player.pid,f.round);
+ f.game.updatePlayer(f.a.player.pid,'Ернур новый','jetisu');
+ const player=f.game.findPlayer(hashToken(f.a.playerToken));assert.equal(player.regionId,'jetisu');assert.equal(player.name,'Ернур новый');
+ assert.equal(f.game.state.round.ballots[f.a.player.pid],undefined);assert.equal(f.game.state.round.submitted.saryarka,undefined);assert.equal(f.game.state.round.submitted.jetisu,undefined);
+ assert.deepEqual(f.game.votesFor('jetisu'),{1:1});f.game.castVote('jetisu',f.a.player.pid,0,f.round);
+ f.game.setTeamCapacity('mangystau',1);f.game.joinTeam('mangystau','Занято');const before=structuredClone(f.game.state);
+ assert.throws(()=>f.game.updatePlayer(f.a.player.pid,'Другое имя','mangystau'),/нет свободных мест/);assert.deepEqual(f.game.state,before);
+ f.game.leaveTeam('jetisu',third.player.pid);assert.equal(f.game.findPlayer(hashToken(third.playerToken)),null);
+});
+test("старые сохранения мигрируют в 17 областей и 3 города, JSON-перенос очищает голоса",async()=>{
+ const {REGIONS}=await import('../game-config.js');const {GEOGRAPHY}=await import('../region-geography.js');
+ assert.equal(REGIONS.length,20);assert.equal(new Set(REGIONS.map(r=>r.geoId)).size,20);
+ for(const r of REGIONS)assert.ok(GEOGRAPHY.regions.some(g=>g.id===r.id&&g.cityRadius>0));
+ const f=fixture(),old=structuredClone(f.game.state);old.schemaVersion=3;delete old.settings;
+ for(const team of old.regions){delete team.capacity;if(team.id==='saryarka')team.baseRegionId='saryarka'}
+ const restored=new GameLogic(old,f.game.now);assert.equal(restored.region('saryarka').baseRegionId,'karaganda');assert.ok(restored.state.regions.every(t=>t.capacity===4));
+ restored.castVote('saryarka',f.a.player.pid,0,f.round);restored.teamSubmit('saryarka',f.a.player.pid,f.round);
+ const patch=restored.editorSnapshot(),member=patch.regions[0].members.shift();patch.regions[1].members.push(member);patch.regions[1].capacity=6;
+ restored.applyRawState(patch);assert.equal(restored.findPlayer(hashToken(f.a.playerToken)).regionId,'jetisu');assert.equal(restored.state.round.ballots[member.pid],undefined);assert.equal(restored.state.round.submitted.saryarka,undefined);
+ const created=restored.createTeam('Астана команда','astana');assert.equal(restored.region(created.teamId).baseRegionId,'astana');
 });

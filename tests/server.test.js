@@ -35,7 +35,7 @@ const login = socket => command(socket, "teacherLogin", { password: config.teach
 
 test("без входа нельзя выполнять ни одну административную команду", async t => {
   const f = await fixture(t), socket = await f.connect();
-  for (const event of ["startRound", "pauseRound", "resetTimer", "resolveRound", "endRound", "adjustPoints", "adjustEconomy", "freeSlot", "addCustomQuestion", "resetGame", "applyRawState", "getSnapshot", "exportSummary", "createTeam", "expandTeams", "renameTeam", "removeTeam", "editQuestion", "deleteQuestion", "importQuestions", "analyzeSyllabus", "generateQuestions"]) {
+  for (const event of ["startRound", "pauseRound", "resetTimer", "resolveRound", "endRound", "adjustPoints", "adjustEconomy", "freeSlot", "addCustomQuestion", "resetGame", "applyRawState", "getSnapshot", "exportSummary", "createTeam", "expandTeams", "planTeamCount", "setTeamCount", "setTeamCapacity", "setAllCapacities", "updateTeam", "movePlayer", "renamePlayer", "updatePlayer", "renameTeam", "removeTeam", "editQuestion", "deleteQuestion", "importQuestions", "analyzeSyllabus", "generateQuestions"]) {
     const result = await command(socket, event, {}); assert.equal(result.code, "FORBIDDEN", event);
   }
   assert.equal((await command(socket, "teacherLogin", { password: "incorrect" })).ok, false);
@@ -163,4 +163,20 @@ test("редактор и генератор доступны преподава
  const q=f.server.game.state.questions.at(-1),edit=await command(teacher,"editQuestion",{questionId:q.id,question:{...q,text:"Отредактированный вопрос?"},version:q.version});assert.equal(edit.ok,true);
  await command(student,"joinTeam",{regionId:"saryarka",name:"Участник"});await command(teacher,"startRound",{questionId:q.id,duration:30});await waitFor(()=>student.latest.round?.question.id===q.id);
  assert.equal(student.latest.round.question.text,"Отредактированный вопрос?");assert.equal(student.latest.round.question.correct,undefined);assert.equal(student.latest.round.question.explanation,undefined);assert.equal(student.latest.round.question.sourceExcerpt,undefined);
+});
+
+test("только преподаватель меняет места, переносит игроков и сокращает команды с живой синхронизацией",async t=>{
+ const f=await fixture(t),teacher=await f.connect(),student=await f.connect();await login(teacher);
+ const joined=await command(student,'joinTeam',{regionId:'saryarka',name:'Студент',capacity:50});
+ for(const event of ['planTeamCount','setTeamCount','setAllCapacities','setTeamCapacity','updateTeam','movePlayer','renamePlayer','updatePlayer'])assert.equal((await command(student,event,{count:1,capacity:50,pid:joined.player.pid,toTeamId:'jetisu'})).code,'FORBIDDEN');
+ assert.equal((await command(teacher,'setAllCapacities',{capacity:5})).ok,true);
+ assert.equal((await command(teacher,'updatePlayer',{pid:joined.player.pid,name:'Исправленное имя',toTeamId:'jetisu'})).ok,true);
+ await waitFor(()=>student.latest.viewer.player?.regionId==='jetisu');assert.equal(student.latest.viewer.player.name,'Исправленное имя');
+ assert.equal((await command(student,'joinTeam',{regionId:'mangystau',name:'Дубликат'})).ok,false);
+ await command(teacher,'setTeamCount',{count:20});const {plan}=await command(teacher,'planTeamCount',{count:4});
+ assert.equal(plan.removed.length,16);assert.equal((await command(teacher,'setTeamCount',{count:4,layoutToken:plan.layoutToken})).ok,true);
+ await waitFor(()=>student.latest.regions.length===4);assert.equal(student.latest.regions.find(r=>r.id==='jetisu').capacity,5);
+ student.disconnect();const resumed=await f.connect({playerToken:joined.playerToken});assert.equal(resumed.latest.viewer.player.regionId,'jetisu');
+ const snapshot=structuredClone(f.server.store.snapshot);f.server.store.fail=true;
+ assert.equal((await command(teacher,'setTeamCount',{count:1})).ok,false);assert.deepEqual(f.server.game.state,snapshot);
 });

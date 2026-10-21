@@ -9,11 +9,14 @@ const smooth = (a, b, value) => { const t = clamp((value - a) / (b - a), 0, 1); 
 function rng(seed) { let n = seed >>> 0; return () => { n = (Math.imul(n, 1664525) + 1013904223) >>> 0; return n / 4294967296; }; }
 const pointOnMap = (lon, lat) => [(lon - 67) * 1.91, -(lat - 47.6) * 2.8];
 const palettes = {
-  saryarka: { low: 0x727d47, high: 0xc1b581, wall: 0x5b4935, roof: 0x527b75, stone: 0xe1cba2 },
-  jetisu: { low: 0x427e62, high: 0x99ad93, wall: 0x425b55, roof: 0x337d8a, stone: 0xe3e0c6 },
-  mangystau: { low: 0xb99b6c, high: 0xf2dbb3, wall: 0x82614c, roof: 0xa26548, stone: 0xebd8ba },
-  turkistan: { low: 0x939257, high: 0xc1b47d, wall: 0x755e45, roof: 0x268c9a, stone: 0xd2ae7c }
+  steppe: { low: 0x727d47, high: 0xc1b581, wall: 0x5b4935, roof: 0x527b75, stone: 0xe1cba2 },
+  mountain: { low: 0x427e62, high: 0x99ad93, wall: 0x425b55, roof: 0x337d8a, stone: 0xe3e0c6 },
+  desert: { low: 0xb99b6c, high: 0xf2dbb3, wall: 0x82614c, roof: 0xa26548, stone: 0xebd8ba },
+  south: { low: 0x939257, high: 0xc1b47d, wall: 0x755e45, roof: 0x268c9a, stone: 0xd2ae7c }
 };
+palettes.forest = { low: 0x5b7d56, high: 0xb7b784, wall: 0x514d38, roof: 0x568880, stone: 0xdcd8b9 };
+palettes.city = { low: 0x678970, high: 0xa9c3ac, wall: 0x53615a, roof: 0x4d8292, stone: 0xe2daca };
+const regionMeta = new Map(REGIONS.map(r=>[r.id,r]));
 function polygonContains(polygon, x, z) {
   let inside = false;
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -24,28 +27,35 @@ function polygonContains(polygon, x, z) {
 }
 function heightAt(id, x, z, data) {
   const bump = (a, b, radius, h) => h * Math.exp(-((x - a) ** 2 + (z - b) ** 2) / radius ** 2);
+  const biome = regionMeta.get(id).biome;
   let h = .62 + .07 * Math.sin(x * 2.9) * Math.cos(z * 2.4) + .04 * Math.sin(x * 6 + z * 3);
-  if (id === "saryarka") h += bump(-.2, -2.9, 2.9, 1.1) + bump(16.2, -4.8, 3.1, 1.4) + bump(6, -6, 3.8, .6);
+  if (id === "karaganda" || id === "ulytau") h += bump(-.2, -2.9, 2.9, 1.1) + bump(16.2, -4.8, 3.1, 1.4) + bump(6, -6, 3.8, .6);
   if (id === "jetisu") h += bump(27.2, 7.8, 2.2, 3.4) + bump(25.7, 5.8, 1.8, 2.2) + bump(28.7, 4.7, 1.8, 2.7);
   if (id === "mangystau") h += Math.floor((bump(-24.5, 14.8, 3, 2.2) + bump(-22.4, 7.5, 2.3, 1.2)) * 5) / 5;
   if (id === "turkistan") h += bump(5.7, 8.9, 2.2, 2.1) + bump(6.1, 12.3, 1.7, 1.3);
+  if (biome === "mountain" && id !== "jetisu") {
+    const x0 = data.bounds[0], z0 = data.bounds[1], w = data.bounds[2]-x0, d = data.bounds[3]-z0;
+    h += bump(x0+w*.7,z0+d*.68,Math.max(.5,w*.24),2.4) + bump(x0+w*.38,z0+d*.35,Math.max(.5,w*.18),1.9);
+  }
+  if (biome === "forest") h += bump(data.bounds[0]+(data.bounds[2]-data.bounds[0])*.7,data.bounds[1]+(data.bounds[3]-data.bounds[1])*.5,2.1,.6);
+  if (biome === "south" && id !== "turkistan") h += bump(data.bounds[2]-1,data.bounds[3]-1,2,1.7);
   const d = Math.hypot(x - data.city[0], z - data.city[1]);
   return THREE.MathUtils.lerp(.71, h, smooth(data.cityRadius * .94, data.cityRadius * 1.38, d));
 }
 function reliefGeometry(polygon, id, data) {
   const contour = polygon.slice(0, -1).map(([x, z]) => new THREE.Vector2(x, z));
   const faces = THREE.ShapeUtils.triangulateShape(contour, []), vertices = [], colors = [];
-  const low = new THREE.Color(palettes[id].low), high = new THREE.Color(palettes[id].high), snow = new THREE.Color(0xe7f0ed);
+  const low = new THREE.Color(palettes[regionMeta.get(id).biome].low), high = new THREE.Color(palettes[regionMeta.get(id).biome].high), snow = new THREE.Color(0xe7f0ed);
   function vertex(v) {
     const h = heightAt(id, v.x, v.y, data), color = low.clone().lerp(high, clamp((h - .55) / 2.3, 0, 1));
-    if (id === "jetisu" && h > 2.5) color.lerp(snow, smooth(2.5, 3.4, h));
+    if (regionMeta.get(id).biome === "mountain" && h > 2.5) color.lerp(snow, smooth(2.5, 3.4, h));
     vertices.push(v.x - data.city[0], h, v.y - data.city[1]);
     color.multiplyScalar(.96 + .07 * Math.sin(v.x * 5 + v.y * 3));
     colors.push(color.r, color.g, color.b);
   }
   function subdivide(a, b, c, depth) {
     const longest = Math.max(a.distanceToSquared(b), b.distanceToSquared(c), c.distanceToSquared(a));
-    if (longest > .65 && depth < 7) {
+    if (longest > 1.1 && depth < 7) {
       const ab = a.clone().lerp(b, .5), bc = b.clone().lerp(c, .5), ca = c.clone().lerp(a, .5);
       subdivide(a, ab, ca, depth + 1); subdivide(ab, b, bc, depth + 1);
       subdivide(ca, bc, c, depth + 1); subdivide(ab, bc, ca, depth + 1);
@@ -83,7 +93,7 @@ function labelSprite() {
   return { sprite, canvas, texture, key: "" };
 }
 function paintLabel(label, meta, points, economy) {
-  const key = `${points}:${economy}`; if (label.key === key) return; label.key = key;
+  const key = `${meta.name}:${points}:${economy}`; if (label.key === key) return; label.key = key;
   const ctx = label.canvas.getContext("2d"), done = points >= RESOURCE_CAP, crisis = economy < CRISIS_THRESHOLD;
   const color = crisis ? "#ff7468" : done ? "#ffe2a1" : meta.glow;
   ctx.clearRect(0, 0, 768, 192); ctx.fillStyle = "rgba(5,18,25,.93)"; ctx.strokeStyle = color; ctx.lineWidth = 2;
@@ -104,7 +114,7 @@ export function createScene(canvas, opts = {}) {
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x07151e); scene.fog = new THREE.FogExp2(0x07151e, .004);
   const camera = new THREE.PerspectiveCamera(40, 1, .1, 320);
   const controls = new OrbitControls(camera, canvas);
-  controls.enableDamping = true; controls.dampingFactor = .075; controls.minDistance = 8; controls.maxDistance = 150;
+  controls.enableDamping = true; controls.dampingFactor = .075; controls.minDistance = 2.5; controls.maxDistance = 150;
   controls.maxPolarAngle = Math.PI * .455; controls.minPolarAngle = .15; controls.enabled = opts.interactive !== false;
   controls.target.set(0, 0, 0);
   scene.add(new THREE.HemisphereLight(0xc7eaff, 0x3e3825, 2.1));
@@ -118,14 +128,7 @@ export function createScene(canvas, opts = {}) {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(350, 350), new THREE.MeshStandardMaterial({ color: 0x081b25, roughness: .8, metalness: .15 }));
   floor.rotation.x = -Math.PI / 2; floor.position.y = -2.1; floor.receiveShadow = true; scene.add(floor);
 
-  // The dark provinces give the four playable regions their real location within Kazakhstan.
-  const contextMat = new THREE.MeshStandardMaterial({ color: 0x183842, roughness: .94, metalness: .08 });
-  for (const province of GEOGRAPHY.context) for (const polygon of province.polygons) {
-    const shape = new THREE.Shape(polygon.map(([x, z]) => new THREE.Vector2(x, -z)));
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: .65, bevelEnabled: false, curveSegments: 1 }); geo.rotateX(-Math.PI / 2); geo.translate(0, -.85, 0);
-    const mesh = new THREE.Mesh(geo, contextMat); mesh.receiveShadow = true; scene.add(mesh);
-    scene.add(lineFor(polygon.map(([x, z]) => new THREE.Vector3(x, -.17, z)), 0x547584, .35));
-  }
+  // Every administrative region is a full interactive relief mesh below.
   for (const polygon of GEOGRAPHY.country) scene.add(lineFor(polygon.map(([x, z]) => new THREE.Vector3(x, -.12, z)), 0x8dbbc1, .65));
   function water(lon, lat, rx, rz, rotation = 0) {
     const [x, z] = pointOnMap(lon, lat), mesh = new THREE.Mesh(new THREE.CircleGeometry(1, 64), new THREE.MeshStandardMaterial({ color: 0x186c83, emissive: 0x08394d, emissiveIntensity: .4, metalness: .5, roughness: .25, transparent: true, opacity: .84 }));
@@ -157,7 +160,7 @@ export function createScene(canvas, opts = {}) {
   }
   const surfaces = [], regions = [];
   for (let ri = 0; ri < REGIONS.length; ri++) {
-    const meta = REGIONS[ri], data = GEOGRAPHY.regions.find(r => r.id === meta.id), palette = palettes[meta.id];
+    const meta = REGIONS[ri], data = GEOGRAPHY.regions.find(r => r.id === meta.id), palette = palettes[meta.biome];
     const group = new THREE.Group(); group.position.set(data.city[0], 0, data.city[1]); scene.add(group);
     const topMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: .91, metalness: .03, emissive: meta.color, emissiveIntensity: .025 });
     const sideMat = new THREE.MeshStandardMaterial({ color: palette.wall, roughness: 1, side: THREE.DoubleSide });
@@ -236,7 +239,7 @@ export function createScene(canvas, opts = {}) {
             b.add(cylinder, stone, x + side * unit * .6, footY + unit * .65, z, unit * .09, unit * 1.3, unit * .09);
             b.add(cone, roof, x + side * unit * .6, footY + unit * 1.4, z, unit * .13, unit * .22, unit * .13);
           }
-        } else if (meta.id === "saryarka") {
+        } else if (meta.id === "astana" || meta.id === "karaganda") {
           b.add(cylinder, white, x, footY + unit * .85, z, unit * .13, unit * 1.7, unit * .13);
           b.add(dome, gold, x, footY + unit * 1.65, z, unit * .34, unit * .48, unit * .34);
         } else {
@@ -256,14 +259,14 @@ export function createScene(canvas, opts = {}) {
       const x = THREE.MathUtils.lerp(data.bounds[0], data.bounds[2], random()), z = THREE.MathUtils.lerp(data.bounds[1], data.bounds[3], random());
       if (!data.polygons.some(p => polygonContains(p, x, z)) || Math.hypot(x - data.city[0], z - data.city[1]) < data.cityRadius * 1.3) continue;
       const h = heightAt(meta.id, x, z, data), scale = .1 + random() * .13;
-      if (meta.id === "mangystau") {
+      if (meta.biome === "desert") {
         nature.add(cylinder, stone, x - data.city[0], h + scale, z - data.city[1], scale * .7, scale * 2.8, scale * .65);
       } else if (h < 2.3) {
         nature.add(cone, green, x - data.city[0], h + scale * 1.5, z - data.city[1], scale, scale * 3, scale);
       }
     }
     group.add(nature.finish());
-    const label = labelSprite(); label.sprite.position.set(0, 3.5, -townRadius - 1); group.add(label.sprite);
+    const label = labelSprite(); label.sprite.position.set(0, Math.max(1.5,Math.min(3.5,townRadius+1)), -townRadius - .6); group.add(label.sprite);
     const stem = lineFor([new THREE.Vector3(0, 1, -townRadius - 1), new THREE.Vector3(0, 2.8, -townRadius - 1)], meta.glow, .75); group.add(stem);
     const beacon = new THREE.Mesh(new THREE.OctahedronGeometry(.2), new THREE.MeshStandardMaterial({ color: meta.glow, emissive: meta.glow, emissiveIntensity: 1.2, metalness: .5, roughness: .2 }));
     beacon.position.set(0, 2.6, -townRadius - 1); group.add(beacon);
@@ -280,23 +283,26 @@ export function createScene(canvas, opts = {}) {
   }
   const hud = document.createElement("div"); hud.className = "map-tools";
   const homeButton = document.createElement("button"); homeButton.type = "button"; homeButton.textContent = "↗ Вся карта"; homeButton.title = "Вернуть общий вид Казахстана";
-  hud.append(homeButton); canvas.parentElement.append(hud);
+  const regionSelect = document.createElement("select"); regionSelect.setAttribute("aria-label","Регион карты");
+  regionSelect.innerHTML = '<option value="">Найти регион…</option>' + REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join("");
+  regionSelect.addEventListener("change",()=>{if(regionSelect.value)focusRegion(regionSelect.value)});
+  hud.append(homeButton,regionSelect); canvas.parentElement.append(hud);
   let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true;
   function moveCamera(target, distance) {
     cameraTween = { target, position: target.clone().add(new THREE.Vector3(0, distance * .79, distance * .71)) };
   }
   function overview() {
-    selected = null;
+    selected = null; regionSelect.value="";
     const halfFov = THREE.MathUtils.degToRad(camera.fov / 2), distance = Math.max(44, 44 / (Math.tan(halfFov) * camera.aspect));
     moveCamera(new THREE.Vector3(0, 0, 0), Math.min(138, distance));
   }
   homeButton.addEventListener("click", overview);
   function focusRegion(id) {
     const region = regions.find(r => r.meta.id === id); if (!region) return;
-    selected = id;
+    selected = id; regionSelect.value=id;
     const width = region.data.bounds[2] - region.data.bounds[0], depth = region.data.bounds[3] - region.data.bounds[1];
     const target = new THREE.Vector3(region.data.city[0], .6, region.data.city[1]);
-    const distance = Math.max(14, Math.max(width / Math.max(.8, camera.aspect), depth * .9) * 1.65);
+    const distance = Math.max(4, Math.max(width / Math.max(.8, camera.aspect), depth * .9) * 1.65);
     moveCamera(target, distance);
   }
   const stopTween = () => { cameraTween = null; };
@@ -331,7 +337,24 @@ export function createScene(canvas, opts = {}) {
       region.topMat.emissiveIntensity = crisis ? .18 : .025 + region.points / RESOURCE_CAP * .085;
       for (const border of region.borders) { border.material.color.set(crisis ? 0xff655b : region.points === RESOURCE_CAP ? 0xffdf94 : region.meta.glow); border.material.opacity = region.meta.id === selectedBase || crisis || region.points === RESOURCE_CAP ? .95 : .5; }
       region.victoryRing.visible = region.points === RESOURCE_CAP;
-      paintLabel(region.label, region.meta, region.points, r.economy);
+      region.hasTeams = state.regions.some(t=>metadataFor(t).baseRegionId===r.id);
+      paintLabel(region.label, selectedBase===r.id?{...region.meta,name:selectedTeam.name}:region.meta, region.points, r.economy);
+    }
+  }
+  const projected = new THREE.Vector3();
+  function arrangeLabels(){
+    scene.updateMatrixWorld(); camera.updateMatrixWorld();
+    const width=canvas.clientWidth,height=canvas.clientHeight,placed=[];
+    const ordered=[...regions].sort((a,b)=>Number(b.meta.id===selected)-Number(a.meta.id===selected)||Number(!!b.hasTeams)-Number(!!a.hasTeams));
+    for(const r of ordered){
+      r.label.sprite.getWorldPosition(projected);const distance=camera.position.distanceTo(projected);
+      const size=distance*.065;r.label.sprite.scale.set(size,size/4,1);projected.project(camera);
+      const x=(projected.x+1)*width/2,y=(1-projected.y)*height/2;
+      const box={x:x-63,y:y-18,w:126,h:36};
+      const inView=projected.z>-1&&projected.z<1&&x>0&&x<width&&y>0&&y<height;
+      const overlaps=placed.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y);
+      r.label.sprite.visible=inView&&(!overlaps||r.meta.id===selected);
+      if(r.label.sprite.visible)placed.push(box);
     }
   }
   const clock = new THREE.Clock(), reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -354,7 +377,7 @@ export function createScene(canvas, opts = {}) {
       region.fogMat.opacity = THREE.MathUtils.lerp(region.fogMat.opacity, opacity, rate); region.fog.visible = region.fogMat.opacity > .01;
       region.fog.children.forEach((p, i) => { p.position.y = 1.5 + (reduceMotion ? 0 : Math.sin(t * .45 + i) * .12); });
     }
-    controls.update(); renderer.render(scene, camera);
+    controls.update(); arrangeLabels(); renderer.render(scene, camera);
   }
   animate();
   function dispose() {

@@ -1,10 +1,10 @@
-import { GameEngine, REGIONS, SEAT_LIMIT, MAX_TEAMS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, metadataFor, escapeHTML as h } from "./shared-engine.js";
+import { GameEngine, REGIONS, capacityFor, totalCapacity, MAX_TEAMS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, metadataFor, escapeHTML as h } from "./shared-engine.js";
 import { createScene } from "./scene3d.js";
 import { setupSyllabus } from "./syllabus-ui.js";
 
 const $ = id => document.getElementById(id), engine = new GameEngine("teacher");
 let scene=null,sceneFailed=false,selectedQuestionId=null,duration=30,controlKey="",loggingIn=false;
-let editId=null,editVersion=null,bankKey="",bankPage=0,teamEditId=null,projector=false,mapKey="";
+let editId=null,editVersion=null,bankKey="",bankPage=0,teamEditId=null,projector=false,mapKey="",playerEditId=null,countPlan=null,managerInitialized=false,countDirty=false,capacityDirty=false,playerOptionsKey="",rosterKey="";
 function message(text="",error=false){$("action-message").textContent=text;$("action-message").classList.toggle("red",error)}
 async function act(fn,success=""){try{await fn();message(success)}catch(error){message(error.message,true)}}
 function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
@@ -63,27 +63,87 @@ function renderAnswers(state){
  }).join("")}</div>`;
 }
 function renderRoster(state){
+ const rosterState=JSON.stringify([engine.connected,$("roster-search").value,state.regions]);if(rosterKey===rosterState)return;rosterKey=rosterState;
  const query=$("roster-search").value.trim().toLocaleLowerCase(),teams=state.regions.filter(t=>!query||`${t.name} ${t.members.map(m=>m.name).join(" ")}`.toLocaleLowerCase().includes(query));
- $("team-stats").textContent=`${state.regions.length} / ${MAX_TEAMS} команд · ${state.regions.reduce((s,t)=>s+t.members.length,0)} / ${state.regions.length*SEAT_LIMIT} участников`;
+ $("team-stats").textContent=`${state.regions.length} / ${MAX_TEAMS} команд · ${state.regions.reduce((s,t)=>s+t.members.length,0)} / ${totalCapacity(state.regions)} участников`;
  $("roster-table").innerHTML=`<thead><tr><th>Команда</th><th>Участники</th><th>Ресурс</th><th>Экономика</th><th>Управление</th></tr></thead><tbody>${teams.map(t=>{
   const meta=metadataFor(t),disabled=engine.connected?"":"disabled",base=REGIONS.find(r=>r.id===meta.baseRegionId);
-  return `<tr><td><b style="color:${meta.color}">${h(meta.name)}</b><div class="development-mini">${h(base.name)}</div><button class="ghost compact teacher-private" data-region="${t.id}" data-team-edit ${disabled}>Изменить</button></td><td>${t.members.length}/${SEAT_LIMIT}${t.members.map(m=>`<div class="roster-member"><span class="presence ${m.online?"online":""}"></span><span>${h(m.name)}${!m.online?' <small class="mut">· вне сети</small>':""}</span><button class="ghost remove-player teacher-private" data-region="${t.id}" data-remove="${m.pid}" aria-label="Исключить ${h(m.name)}" ${disabled}>×</button></div>`).join("")||'<p class="mut">Пока никого</p>'}</td><td><b class="gold">${t.points} / ${RESOURCE_CAP}</b><div class="development-mini ${t.points===RESOURCE_CAP?"complete":""}">${developmentFor(t.points).name}</div><div class="bar resource-mini"><i style="width:${t.points/10}%"></i></div></td><td class="${t.economy<CRISIS_THRESHOLD?"crisis":""}">${t.economy}%</td><td><div class="row teacher-private"><button data-region="${t.id}" data-points="25" ${t.points>=RESOURCE_CAP?"disabled":disabled}>+25</button><button data-region="${t.id}" data-points="-25" ${disabled}>−25</button><button data-region="${t.id}" data-economy="10" ${disabled}>+10%</button><button data-region="${t.id}" data-economy="-10" ${disabled}>−10%</button><button class="danger compact" data-region="${t.id}" data-team-remove ${state.regions.length===1?"disabled":disabled}>Удалить команду</button></div></td></tr>`;
+  return `<tr><td><b style="color:${meta.color}">${h(meta.name)}</b><div class="development-mini">${h(base.name)}</div><button class="ghost compact teacher-private" data-region="${t.id}" data-team-edit ${disabled}>Изменить</button></td><td>${t.members.length}/${capacityFor(t)}${t.members.map(m=>`<div class="roster-member"><span class="presence ${m.online?"online":""}"></span><button class="member-name" data-region="${t.id}" data-player-edit="${m.pid}" ${disabled}>${h(m.name)}</button><span>${!m.online?' <small class="mut">· вне сети</small>':""}</span><button class="ghost remove-player teacher-private" data-region="${t.id}" data-remove="${m.pid}" aria-label="Исключить ${h(m.name)}" ${disabled}>×</button></div>`).join("")||'<p class="mut">Пока никого</p>'}</td><td><b class="gold">${t.points} / ${RESOURCE_CAP}</b><div class="development-mini ${t.points===RESOURCE_CAP?"complete":""}">${developmentFor(t.points).name}</div><div class="bar resource-mini"><i style="width:${t.points/10}%"></i></div></td><td class="${t.economy<CRISIS_THRESHOLD?"crisis":""}">${t.economy}%</td><td><div class="row teacher-private"><button data-region="${t.id}" data-points="25" ${t.points>=RESOURCE_CAP?"disabled":disabled}>+25</button><button data-region="${t.id}" data-points="-25" ${disabled}>−25</button><button data-region="${t.id}" data-economy="10" ${disabled}>+10%</button><button data-region="${t.id}" data-economy="-10" ${disabled}>−10%</button><button class="danger compact" data-region="${t.id}" data-team-remove ${state.regions.length===1?"disabled":disabled}>Удалить команду</button></div></td></tr>`;
  }).join("")}</tbody>`;
 }
 $("roster-search").addEventListener("input",()=>{if(engine.state)renderRoster(engine.state)});
+function openTeamEditor(id){
+ const t=engine.state.regions.find(t=>t.id===id);if(!t)return;
+ teamEditId=id;$("team-form").closest("details").open=true;$("team-name").value=t.name;$("team-base").value=t.baseRegionId;$("team-capacity").value=capacityFor(t);$("team-points").value=t.points;$("team-economy").value=t.economy;$("team-save").textContent="Сохранить команду";$("team-cancel").hidden=false;$("team-manager").scrollIntoView({behavior:"smooth",block:"center"});
+}
+function openPlayerEditor(pid){
+ const t=engine.state.regions.find(t=>t.members.some(m=>m.pid===pid)),m=t?.members.find(m=>m.pid===pid);if(!m)return;
+ playerEditId=pid;playerOptionsKey="";$("player-name").value=m.name;$("player-error").textContent="";renderPlayerEditor(engine.state,t.id);$("player-dialog").showModal();
+}
+function renderPlayerEditor(state,selected){
+ if(!playerEditId)return;
+ const source=state.regions.find(t=>t.members.some(m=>m.pid===playerEditId)),member=source?.members.find(m=>m.pid===playerEditId);
+ if(!member){$("player-dialog").close();playerEditId=null;return}
+ const current=selected||$("player-team").value||source.id;
+ $("player-status").textContent=`${source.name} · ${member.online?"в сети":"вне сети"}`;
+ const key=JSON.stringify([source.id,state.regions.map(t=>[t.id,t.name,t.capacity,t.members.length])]);
+ if(playerOptionsKey!==key){playerOptionsKey=key;$("player-team").innerHTML=state.regions.map(t=>`<option value="${t.id}" ${t.id===current?"selected":""} ${t.id!==source.id&&t.members.length>=capacityFor(t)?"disabled":""}>${h(t.name)} · ${t.members.length}/${capacityFor(t)}${t.id===source.id?" · сейчас здесь":""}</option>`).join("");}
+ $("player-save").disabled=!engine.connected;$("player-remove").disabled=!engine.connected;
+}
+$("player-cancel").addEventListener("click",()=>{$("player-dialog").close();playerEditId=null});
+$("player-form").addEventListener("submit",async e=>{
+ e.preventDefault();$("player-save").disabled=true;
+ try{await engine.updatePlayer(playerEditId,$("player-name").value,$("player-team").value);$("player-dialog").close();playerEditId=null;message("Участник обновлён. Изменения отправлены всем игрокам.")}
+ catch(error){$("player-error").textContent=error.message}
+ finally{$("player-save").disabled=!engine.connected}
+});
+$("player-remove").addEventListener("click",async()=>{
+ const source=engine.state.regions.find(t=>t.members.some(m=>m.pid===playerEditId));if(!source)return;
+ if(!confirm(`Исключить ${source.members.find(m=>m.pid===playerEditId).name} из команды?`))return;
+ try{await engine.freeSlot(source.id,playerEditId);$("player-dialog").close();playerEditId=null;message("Участник исключён.")}catch(error){$("player-error").textContent=error.message}
+});
 $("roster-table").addEventListener("click",e=>{
  const b=e.target.closest("button[data-region]");if(!b||b.disabled)return;const id=b.dataset.region,t=engine.state.regions.find(t=>t.id===id);
  if(b.dataset.points!==undefined)act(()=>engine.adjustPoints(id,Number(b.dataset.points)));
  if(b.dataset.economy!==undefined)act(()=>engine.adjustEconomy(id,Number(b.dataset.economy)));
  if(b.hasAttribute("data-remove")&&confirm(`Исключить ${t.members.find(m=>m.pid===b.dataset.remove)?.name||"участника"} из команды?`))act(()=>engine.freeSlot(id,b.dataset.remove),"Участник исключён, место освобождено.");
  if(b.hasAttribute("data-team-remove")&&confirm(`Удалить команду «${t.name}»? ${t.members.length} участников вернутся к регистрации, очки команды будут удалены.`))act(()=>engine.removeTeam(id),"Команда удалена.");
- if(b.hasAttribute("data-team-edit")){teamEditId=id;$("team-form").closest("details").open=true;$("team-name").value=t.name;$("team-base").value=t.baseRegionId;$("team-save").textContent="Сохранить команду";$("team-cancel").hidden=false;$("team-manager").scrollIntoView({behavior:"smooth",block:"center"})}
+ if(b.hasAttribute("data-team-edit"))openTeamEditor(id);
+ if(b.hasAttribute("data-player-edit"))openPlayerEditor(b.dataset.playerEdit);
 });
 $("team-base").innerHTML=REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join("");
-function clearTeamForm(){teamEditId=null;$("team-form").reset();$("team-save").textContent="Создать команду";$("team-cancel").hidden=true}
+function clearTeamForm(){teamEditId=null;$("team-form").reset();$("team-capacity").value=engine.state?.settings.teamCapacity||4;$("team-save").textContent="Создать команду";$("team-cancel").hidden=true}
 $("team-cancel").addEventListener("click",clearTeamForm);
-$("team-form").addEventListener("submit",e=>{e.preventDefault();act(async()=>{if(teamEditId)await engine.renameTeam(teamEditId,$("team-name").value,$("team-base").value);else await engine.createTeam($("team-name").value,$("team-base").value);clearTeamForm()},"Команды обновлены.")});
-$("team-count-form").addEventListener("submit",e=>{e.preventDefault();act(()=>engine.expandTeams(Number($("team-count").value)),"Команды созданы и доступны студентам.")});
+$("team-form").addEventListener("submit",e=>{e.preventDefault();act(async()=>{
+ const changes={name:$("team-name").value,baseRegionId:$("team-base").value,capacity:Number($("team-capacity").value),points:Number($("team-points").value),economy:Number($("team-economy").value)};
+ if(teamEditId)await engine.updateTeam(teamEditId,changes);else await engine.createTeam(changes.name,changes.baseRegionId,changes.capacity,changes.points,changes.economy);clearTeamForm();
+},"Настройки команды сохранены.")});
+$("team-count").addEventListener("input",()=>{countDirty=true});
+$("capacity-all").addEventListener("input",()=>{capacityDirty=true});
+$("capacity-form").addEventListener("submit",e=>{e.preventDefault();act(async()=>{await engine.setAllCapacities(Number($("capacity-all").value));capacityDirty=false;if(!teamEditId)$("team-capacity").value=$("capacity-all").value},"Вместимость всех команд обновлена.")});
+$("team-count-form").addEventListener("submit",async e=>{
+ e.preventDefault();$("team-expand").disabled=true;
+ try{
+  countPlan=await engine.planTeamCount(Number($("team-count").value));
+  if(countPlan.count===countPlan.currentCount){message("Уже установлено это количество команд.");return}
+  if(!countPlan.removed.length){await applyTeamCount();return}
+  $("count-plan").innerHTML=`<p class="small-note">Будет команд: <b>${countPlan.count}</b>. Участников: ${countPlan.totalPlayers}. Мест после изменения: ${countPlan.capacity}.</p><p class="small-note">Перенос игроков в свободные места: ${countPlan.moves.length}. Их вход и имена сохранятся.</p><p class="small-note mut">Будут удалены команды и их ресурсы:</p><ul class="count-removals">${countPlan.removed.map(t=>`<li>${h(t.name)} <span class="mut">· ${t.points} ресурсов · ${t.players} участников</span></li>`).join("")}</ul>${countPlan.overflow?`<p class="red small-note">Не хватает ${countPlan.overflow} мест. Закройте окно и увеличьте вместимость команд. Игроки не будут исключены автоматически.</p>`:'<p class="small-note mut">Голоса перенесённых игроков в текущем раунде будут очищены. Баллы оставшихся команд сохранятся.</p>'}`;
+  $("count-apply").disabled=!!countPlan.overflow;$("count-dialog").showModal();
+ }catch(error){message(error.message,true)}finally{$("team-expand").disabled=!engine.connected}
+});
+async function applyTeamCount(){
+ const result=await engine.setTeamCount(countPlan.count,countPlan.layoutToken);countDirty=false;$("team-count").value=result.count;$("count-dialog").close();countPlan=null;
+ message(`Команд: ${result.count}. Добавлено: ${result.added}; удалено: ${result.removed}; перенесено участников: ${result.moved}.`);
+}
+$("count-cancel").addEventListener("click",()=>{$("count-dialog").close();countPlan=null});
+$("count-apply").addEventListener("click",async()=>{$("count-apply").disabled=true;try{await applyTeamCount()}catch(error){$("count-dialog").close();message(error.message,true)}finally{$("count-apply").disabled=!engine.connected}});
+function renderManager(state){
+ if(!managerInitialized){$("team-count").value=state.regions.length;$("capacity-all").value=state.settings.teamCapacity;$("team-capacity").value=state.settings.teamCapacity;managerInitialized=true}
+ if(!countDirty)$("team-count").value=state.regions.length;
+ if(!capacityDirty)$("capacity-all").value=state.settings.teamCapacity;
+ if(teamEditId&&!state.regions.some(t=>t.id===teamEditId))clearTeamForm();
+ renderPlayerEditor(state);
+}
 
 $("question-builder").innerHTML=`<h2 id="question-form-title">Новый вопрос</h2><form id="question-form" class="qform"><p id="edit-round-note" class="small-note mut"></p><label class="field-label" for="qb-text">Формулировка</label><textarea id="qb-text" rows="3" minlength="3" maxlength="2000" required></textarea>${[0,1,2,3].map(i=>`<label class="field-label" for="qb-o${i}">Вариант ${alphabet(i)}</label><input id="qb-o${i}" type="text" maxlength="500" required>`).join("")}<div class="row"><label for="qb-correct" class="mut">Правильный</label><select id="qb-correct" style="width:80px">${[0,1,2,3].map(i=>`<option value="${i}">${alphabet(i)}</option>`).join("")}</select><label for="qb-pts" class="mut">Баллы</label><input id="qb-pts" type="number" min="1" max="1000" value="25" required style="width:85px"></div><label for="qb-topic" class="field-label">Тема (необязательно)</label><input id="qb-topic" type="text" maxlength="200"><label for="qb-explanation" class="field-label">Пояснение к ответу (необязательно)</label><textarea id="qb-explanation" rows="2" maxlength="1200"></textarea><div class="row"><button class="pri" type="submit" id="qb-add">Добавить вопрос</button><button id="qb-cancel" type="button" hidden>Отменить редактирование</button></div><p id="qb-msg" class="mut" role="status"></p></form>`;
 function clearQuestionForm(){editId=null;editVersion=null;$("question-form").reset();$("question-form-title").textContent="Новый вопрос";$("qb-add").textContent="Добавить вопрос";$("qb-cancel").hidden=true;$("edit-round-note").textContent=""}
@@ -130,10 +190,10 @@ $("dev-backup-btn").addEventListener("click",()=>act(async()=>download("culture-
 engine.onChange(state=>{
  const teacher=state?.viewer.role==="teacher";$("teacher-login").style.display=teacher?"none":"flex";$("teacher-app").style.display=teacher?"flex":"none";$("teacher-login-btn").disabled=!engine.connected||loggingIn;
  $("teacher-login-connection").textContent=engine.connected?"Сервер подключён":engine.error||"Соединение с сервером…";
- if(!teacher){$("dev-overlay").style.display="none";controlKey="";return}
+ if(!teacher){$("dev-overlay").style.display="none";$("player-dialog").close();$("count-dialog").close();managerInitialized=false;playerEditId=null;controlKey="";return}
  $("conn-status").textContent=engine.connected?"● Сервер подключён":"● Переподключение…";$("phase-pill").textContent=state.round?state.round.resolved?"Итоги":state.round.paused?"Пауза":"Игра идёт":"Лобби";
- for(const id of ["export-btn","reset-btn","dev-open-btn","logout-btn","team-save","team-expand","qb-add"])$(id).disabled=!engine.connected;
- renderRoster(state);renderControls(state);renderAnswers(state);renderBank(state);
+ for(const id of ["export-btn","reset-btn","dev-open-btn","logout-btn","team-save","team-expand","capacity-apply","qb-add"])$(id).disabled=!engine.connected;
+ renderManager(state);renderRoster(state);renderControls(state);renderAnswers(state);renderBank(state);
  $("log-list").innerHTML=state.log.map(l=>`<li>${new Date(l.t).toLocaleTimeString("ru-RU")} · ${h(l.msg)}</li>`).join("")||"<li>Пока пусто</li>";
  if(!scene&&!sceneFailed){try{scene=createScene($("scene-canvas"))}catch{sceneFailed=true;message("WebGL недоступен. Управление игрой продолжает работать.",true)}}{
   const key=state.regions.map(t=>t.id+":"+t.name).join("|");
