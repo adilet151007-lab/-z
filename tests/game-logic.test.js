@@ -99,3 +99,47 @@ test("сброс сохраняет добавленные вопросы и и�
   assert.equal(f.game.state.round, null);
   assert.equal(f.game.findPlayer(hashToken(f.a.playerToken)), null);
 });
+
+test("ресурс ограничен 1000 при начислениях, списании и повторных правильных ответах", () => {
+  const f = fixture();
+  f.game.adjustPoints("saryarka", 990);
+  f.game.castVote("saryarka", f.a.player.pid, 0, f.round);
+  f.game.resolveRound();
+  assert.equal(f.game.region("saryarka").points, 1000);
+  assert.equal(f.game.state.round.results.saryarka.awarded, 10);
+  assert.equal(f.game.state.round.results.saryarka.atCap, true);
+  f.game.adjustPoints("saryarka", 250);
+  assert.equal(f.game.region("saryarka").points, 1000);
+  f.game.endRound(); f.game.startRound("q1", 30);
+  f.game.castVote("saryarka", f.a.player.pid, 0, f.game.state.round.id); f.game.resolveRound();
+  assert.equal(f.game.state.round.results.saryarka.awarded, 0);
+  assert.equal(f.game.region("saryarka").points, 1000);
+  assert.equal(f.game.region("saryarka").economy, 100);
+  f.game.adjustPoints("saryarka", -25);
+  assert.equal(f.game.region("saryarka").points, 975);
+  f.game.adjustPoints("saryarka", -100000);
+  assert.equal(f.game.region("saryarka").points, 0);
+});
+test("JSON-патч не обходит предел, а старое сохранение мигрирует без потери команды", () => {
+  const f = fixture(), patch = f.game.editorSnapshot();
+  patch.regions[0].points = 1001;
+  assert.throws(() => f.game.applyRawState(patch), /0–1000/);
+  assert.equal(f.game.region("saryarka").points, 0);
+  const saved = structuredClone(f.game.state); saved.regions[0].points = 5000;
+  const restored = new GameLogic(saved, f.game.now);
+  assert.equal(restored.region("saryarka").points, 1000);
+  assert.equal(restored.region("saryarka").members.length, 2);
+  assert.equal(restored.state.questions.length, saved.questions.length);
+  assert.equal(restored.state.round.id, saved.round.id);
+  assert.equal(restored.findPlayer(hashToken(f.a.playerToken)).pid, f.a.player.pid);
+});
+test("на границах развития карта и интерфейс получают одинаковую стадию", async () => {
+  const { developmentFor, RESOURCE_CAP } = await import("../game-config.js");
+  assert.equal(RESOURCE_CAP, 1000);
+  for (const [points, buildings, complete] of [[0,0,false],[99,0,false],[100,4,false],[249,4,false],[250,12,false],[500,24,false],[750,42,false],[999,42,false],[1000,64,true],[1200,64,true]]) {
+    const stage = developmentFor(points);
+    assert.equal(stage.buildings, buildings);
+    assert.equal(stage.complete, complete);
+    assert.ok(stage.progress >= 0 && stage.progress <= 1);
+  }
+});

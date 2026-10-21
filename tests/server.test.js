@@ -105,7 +105,7 @@ test("ошибка сохранения отменяет изменение; у�
 });
 test("HTTP раздаёт обе страницы и локальные библиотеки, но не сервер и секреты", async t => {
   const f = await fixture(t);
-  for (const resource of ["/student.html", "/teacher.html", "/shared-engine.js", "/vendor/three/build/three.module.js", "/vendor/three/examples/jsm/controls/OrbitControls.js", "/socket.io/socket.io.esm.min.js", "/health"]) assert.equal((await fetch(f.base + resource)).status, 200, resource);
+  for (const resource of ["/student.html", "/teacher.html", "/shared-engine.js", "/region-geography.js", "/scene3d.js", "/vendor/three/examples/jsm/utils/BufferGeometryUtils.js", "/vendor/three/build/three.module.js", "/vendor/three/examples/jsm/controls/OrbitControls.js", "/socket.io/socket.io.esm.min.js", "/health"]) assert.equal((await fetch(f.base + resource)).status, 200, resource);
   for (const resource of ["/server.js", "/game-logic.js", "/question-bank.js", "/.env", "/data/game-state.json", "/storage.js"]) assert.equal((await fetch(f.base + resource)).status, 404, resource);
 });
 test("новое соединение получает только сохранённое состояние во время медленной записи", async t => {

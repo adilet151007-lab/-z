@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD } from "./game-config.js";
+import { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor } from "./game-config.js";
 import { QUESTION_BANK } from "./question-bank.js";
 export { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD } from "./game-config.js";
 
@@ -41,7 +41,7 @@ function validateRegions(regions, knownMembers = null) {
     const r = regions.find(item => item?.id === meta.id);
     ensure(r && !seenRegions.has(r.id) && regions.filter(x => x?.id === meta.id).length === 1, "ID регионов должны быть уникальными.");
     seenRegions.add(r.id);
-    ensure(integer(r.points, 0, 10000000) && integer(r.economy, 0, 100), "Ресурс: 0–10000000; экономика: 0–100.");
+    ensure(integer(r.points, 0, RESOURCE_CAP) && integer(r.economy, 0, 100), `Ресурс: 0–${RESOURCE_CAP}; экономика: 0–100.`);
     ensure(Array.isArray(r.members) && r.members.length <= SEAT_LIMIT, "В команде максимум четыре участника.");
     const members = r.members.map(m => {
       ensure(m && typeof m.pid === "string" && /^[\w-]{1,80}$/.test(m.pid) && !seenPlayers.has(m.pid), "Некорректный или повторный участник.");
@@ -57,6 +57,11 @@ function validateRegions(regions, knownMembers = null) {
 function restoreSnapshot(raw) {
   ensure(raw?.schemaVersion === 2 && integer(raw.revision, 0, Number.MAX_SAFE_INTEGER), "Неизвестная версия сохранения. Данные не были сброшены.");
   const state = structuredClone(raw);
+  // Сохранения предыдущей версии могли содержать больше 1000 ресурсов.
+  // Ограничиваем только это поле, сохраняя игроков, вопросы и текущий раунд.
+  for (const region of state.regions || []) {
+    if (integer(region.points, RESOURCE_CAP + 1, 10000000)) region.points = RESOURCE_CAP;
+  }
   state.regions = validateRegions(state.regions);
   state.questions = validateQuestions(state.questions);
   ensure(["lobby", "playing", "ended"].includes(state.phase) && Array.isArray(state.log), "Повреждена структура сохранения.");
@@ -189,8 +194,9 @@ export class GameLogic {
       const decision = round.submitted[region.id] !== undefined ? { chosen: round.submitted[region.id], reason: "submitted" } : this.majority(region.id);
       round.submitted[region.id] = decision.chosen;
       const correct = decision.chosen === question.correct;
-      round.results[region.id] = { ...decision, correct };
-      if (correct) region.points = Math.min(10000000, region.points + question.points);
+      const awarded = correct ? Math.min(question.points, RESOURCE_CAP - region.points) : 0;
+      round.results[region.id] = { ...decision, correct, awarded, atCap: region.points + awarded >= RESOURCE_CAP };
+      if (correct) region.points += awarded;
       else region.economy = Math.max(0, region.economy - ECONOMY_PENALTY);
     }
     round.resolved = true;
@@ -208,8 +214,10 @@ export class GameLogic {
   adjustPoints(regionId, delta) {
     ensure(integer(delta, -100000, 100000), "Некорректное изменение ресурса.");
     const region = this.region(regionId);
-    region.points = Math.min(10000000, Math.max(0, region.points + delta));
-    this.log(`Ресурс «${REGIONS.find(r => r.id === regionId).name}»: ${delta > 0 ? "+" : ""}${delta}.`);
+    const previous = region.points;
+    region.points = Math.min(RESOURCE_CAP, Math.max(0, region.points + delta));
+    const applied = region.points - previous;
+    this.log(`Ресурс «${REGIONS.find(r => r.id === regionId).name}»: ${applied > 0 ? "+" : ""}${applied}. ${region.points}/${RESOURCE_CAP}${region.points === RESOURCE_CAP ? " — город построен." : "."}`);
     this.touch();
   }
   adjustEconomy(regionId, delta) {
@@ -276,6 +284,6 @@ export class GameLogic {
     return view;
   }
   exportSummary() {
-    return this.state.regions.map(r => ({ region: REGIONS.find(m => m.id === r.id).name, members: r.members.map(m => m.name).join(", "), points: r.points, economy: r.economy, status: r.economy < CRISIS_THRESHOLD ? "кризис" : "норма" })).sort((a, b) => b.points - a.points || b.economy - a.economy);
+    return this.state.regions.map(r => ({ region: REGIONS.find(m => m.id === r.id).name, members: r.members.map(m => m.name).join(", "), points: r.points, economy: r.economy, development: developmentFor(r.points).name, status: r.economy < CRISIS_THRESHOLD ? "кризис" : "норма" })).sort((a, b) => b.points - a.points || b.economy - a.economy);
   }
 }

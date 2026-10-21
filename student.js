@@ -1,4 +1,4 @@
-import { GameEngine, REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, escapeHTML as h } from "./shared-engine.js";
+import { GameEngine, REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, escapeHTML as h } from "./shared-engine.js";
 import { createScene } from "./scene3d.js";
 
 const engine = new GameEngine("student");
@@ -39,11 +39,11 @@ $("leave-btn").addEventListener("click", () => {
 function renderTeam(state) {
   const player = state.viewer.player;
   const region = state.regions.find(r => r.id === player.regionId), meta = REGIONS.find(r => r.id === player.regionId);
-  const crisis = region.economy < CRISIS_THRESHOLD;
+  const crisis = region.economy < CRISIS_THRESHOLD, development = developmentFor(region.points);
   $("my-name").textContent = player.name;
   $("my-region-tag").textContent = meta.name;
   $("my-region-tag").style.color = meta.color;
-  $("team-panel").innerHTML = `<h2 style="color:${meta.color}">${meta.name}</h2><div class="stat-row"><div class="stat"><span class="mut">Культурный ресурс</span><b class="gold">${region.points}</b></div><div class="stat"><span class="mut">Экономика</span><b class="${crisis ? "red" : "cyan"}">${region.economy}%</b></div></div><div class="bar"><i style="width:${region.economy}%;background:var(--${crisis ? "red" : "cyan"})"></i></div>${crisis ? '<p class="red" style="margin-top:8px">Культурно-экономический кризис: регион теряет влияние.</p>' : ""}<h3 style="margin-top:16px">Команда (${region.members.length}/${SEAT_LIMIT})</h3><ul class="team-roster">${region.members.map(m => `<li><span class="presence ${m.online ? "online" : ""}"></span>${h(m.name)}${m.pid === player.pid ? ' <span class="mut">(вы)</span>' : ""}${!m.online ? ' <span class="mut">· вне сети</span>' : ""}</li>`).join("")}</ul>`;
+  $("team-panel").innerHTML = `<h2 style="color:${meta.color}">${meta.name}</h2><div class="stat-row"><div class="stat"><span class="mut">Культурный ресурс</span><b class="gold">${region.points}<small> / ${RESOURCE_CAP}</small></b></div><div class="stat"><span class="mut">Экономика</span><b class="${crisis ? "red" : "cyan"}">${region.economy}%</b></div></div><div class="bar"><i style="width:${region.economy}%;background:var(--${crisis ? "red" : "cyan"})"></i></div>${crisis ? '<p class="red" style="margin-top:8px">Культурно-экономический кризис: регион теряет влияние.</p>' : ""}<section class="development ${development.complete ? 'complete' : ''}" aria-label="Развитие региона"><div class="development-heading"><span>${development.complete ? '✦' : '⌂'} ${development.name}</span><span>${Math.round(development.progress * 100)}%</span></div><div class="development-track" role="progressbar" aria-valuenow="${region.points}" aria-valuemin="0" aria-valuemax="${RESOURCE_CAP}" aria-label="Строительство города"><i style="width:${development.progress * 100}%"></i>${DEVELOPMENT_STAGES.slice(1).map(step => `<span class="milestone ${region.points >= step.at ? 'reached' : ''}" style="left:${step.at / RESOURCE_CAP * 100}%" title="${step.name}: ${step.at}"></span>`).join('')}</div><p class="development-note">${development.complete ? 'Город построен. Предел ресурса — 1000. Вы можете продолжать отвечать вместе с группой.' : `${development.description}. Далее: ${development.next.name} · ${development.next.at} ресурсов.`}</p></section><h3 style="margin-top:16px">Команда (${region.members.length}/${SEAT_LIMIT})</h3><ul class="team-roster">${region.members.map(m => `<li><span class="presence ${m.online ? "online" : ""}"></span>${h(m.name)}${m.pid === player.pid ? ' <span class="mut">(вы)</span>' : ""}${!m.online ? ' <span class="mut">· вне сети</span>' : ""}</li>`).join("")}</ul>`;
 }
 
 function renderQuestion(state) {
@@ -58,7 +58,7 @@ function renderQuestion(state) {
   const result = round.results[regionId];
   let feedback = "";
   if (round.resolved && result) {
-    const text = result.skipped ? "Команда пропустила раунд." : result.correct ? `Верно! +${question.points} культурного ресурса.` : result.reason === "tie" ? "Голоса разделились поровну: ответ не определён. −20% экономики." : result.reason === "no_votes" ? "Команда не проголосовала. −20% экономики." : "Ответ неверный. −20% экономики.";
+    const text = result.skipped ? "Команда пропустила раунд." : result.correct ? `Верно! +${result.awarded ?? question.points} культурного ресурса.${result.atCap ? " Город построен — достигнут предел 1000!" : ""}` : result.reason === "tie" ? "Голоса разделились поровну: ответ не определён. −20% экономики." : result.reason === "no_votes" ? "Команда не проголосовала. −20% экономики." : "Ответ неверный. −20% экономики.";
     feedback = `<p class="${result.correct ? "cyan" : "red"}" style="margin-top:12px">${text}</p>`;
   }
   panel.innerHTML = `<div class="timer-row"><span id="round-timer"></span><div class="timer-bar"><i id="round-timer-bar"></i></div></div><div class="qtext">${h(question.text)}</div><div class="opts">${question.options.map((option, i) => {

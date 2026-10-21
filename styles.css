@@ -193,3 +193,23 @@ input[type="text"]::placeholder, textarea::placeholder{color:var(--mut)}
   .t-grid{padding:10px}
   .topbar .pill{font-size:10px}
 }
+
+/* City development and geographic atlas */
+.stat b small{font:500 13px "Manrope",sans-serif;color:var(--mut)}
+.development{padding:12px 0 4px;margin-top:8px;border-top:1px solid var(--panel-brd)}
+.development-heading{display:flex;justify-content:space-between;gap:8px;color:var(--gold);font-size:13px;font-weight:700}
+.development-track{position:relative;height:6px;margin:12px 5px 10px 0;background:#23363c;border-radius:5px}
+.development-track>i{display:block;height:100%;border-radius:5px;background:linear-gradient(90deg,var(--cyan),var(--gold));transition:width .7s ease}
+.milestone{position:absolute;top:50%;width:8px;height:8px;transform:translate(-50%,-50%);border-radius:50%;background:#25404a;border:1px solid #53747c}
+.milestone.reached{background:var(--gold);border-color:#ffe3a0;box-shadow:0 0 8px #eac46a44}
+.development-note{font-size:11px;color:var(--mut);line-height:1.6}
+.development.complete .development-heading,.development-mini.complete{color:#ffe0a0}
+.development-mini{margin-top:5px;font-size:10px;color:var(--mut);white-space:nowrap}
+.resource-mini{height:4px;margin-top:8px;min-width:95px}.resource-mini i{background:var(--gold)}
+.map-tools{position:absolute;top:16px;right:16px;z-index:2}.map-tools button{font-size:11px;padding:8px 12px;background:#081c26db;border-color:#5ba5ae55;backdrop-filter:blur(12px);color:#c2dede}
+.map-caption{position:absolute;top:18px;left:20px;pointer-events:none;display:flex;flex-direction:column;gap:5px;text-shadow:0 1px 5px #000;max-width:55%}
+.map-caption strong{font-family:"Rajdhani",sans-serif;font-size:18px;letter-spacing:.18em;color:#d0e8df;font-weight:600}
+.map-caption span{font-size:10px;letter-spacing:.02em;color:#82a6ad}
+.map-credit{position:absolute;bottom:9px;left:14px;max-width:52%;font-size:8px;color:#76979c;text-decoration:none;line-height:1.4}
+.map-credit:hover{color:#c9e6e4}
+@media(max-width:600px){.map-caption{top:12px;left:12px;gap:2px}.map-caption strong{font-size:14px}.map-caption span{display:none}.map-tools{top:9px;right:9px}.map-tools button{font-size:10px;padding:6px 8px}.map-credit{font-size:7px;left:8px;bottom:7px}.hint{font-size:8px;max-width:46%;text-align:right}.stat b{font-size:25px}}

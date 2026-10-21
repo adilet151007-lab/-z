@@ -1,4 +1,4 @@
-import { GameEngine, REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, escapeHTML as h } from "./shared-engine.js";
+import { GameEngine, REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, escapeHTML as h } from "./shared-engine.js";
 import { createScene } from "./scene3d.js";
 
 const $ = id => document.getElementById(id);
@@ -29,7 +29,7 @@ $("export-btn").addEventListener("click", () => act(async () => {
     const text = String(value), safe = /^[=+\-@\t\r]/.test(text) ? "'" + text : text;
     return `"${safe.replace(/"/g, '""')}"`;
   };
-  const lines = [["Место", "Регион", "Участники", "Культурный ресурс", "Экономика %", "Статус"], ...rows.map((r, i) => [i + 1, r.region, r.members, r.points, r.economy, r.status])];
+  const lines = [["Место", "Регион", "Участники", "Культурный ресурс", "Экономика %", "Развитие", "Статус"], ...rows.map((r, i) => [i + 1, r.region, r.members, r.points, r.economy, r.development, r.status])];
   download("vedomost.csv", "\uFEFF" + lines.map(row => row.map(cell).join(";")).join("\r\n"), "text/csv;charset=utf-8");
 }));
 
@@ -75,7 +75,7 @@ function updateTimer() {
 function renderRoster(state) {
   $("roster-table").innerHTML = `<thead><tr><th>Регион</th><th>Участники</th><th>Ресурс</th><th>Экономика</th><th>Корректировка</th></tr></thead><tbody>${state.regions.map(r => {
     const meta = REGIONS.find(x => x.id === r.id), disabled = engine.connected ? "" : "disabled";
-    return `<tr><td><span class="region-tag" style="color:${meta.color}">${meta.name}</span></td><td>${r.members.length}/${SEAT_LIMIT}<div>${r.members.map(m => `<div class="roster-member"><span class="presence ${m.online ? "online" : ""}"></span><span>${h(m.name)}${m.online ? "" : ' <span class="mut">· вне сети</span>'}</span><button class="ghost remove-player" data-region="${r.id}" data-remove="${m.pid}" aria-label="Удалить ${h(m.name)}" ${disabled}>×</button></div>`).join("") || '<span class="mut">Пока никого</span>'}</div></td><td>${r.points}</td><td class="${r.economy < CRISIS_THRESHOLD ? "crisis" : ""}">${r.economy}%</td><td><div class="row"><button data-region="${r.id}" data-points="25" ${disabled}>+25</button><button data-region="${r.id}" data-points="-25" ${disabled}>−25</button><button data-region="${r.id}" data-economy="10" ${disabled}>+10%</button><button data-region="${r.id}" data-economy="-10" ${disabled}>−10%</button></div></td></tr>`;
+    return `<tr><td><span class="region-tag" style="color:${meta.color}">${meta.name}</span></td><td>${r.members.length}/${SEAT_LIMIT}<div>${r.members.map(m => `<div class="roster-member"><span class="presence ${m.online ? "online" : ""}"></span><span>${h(m.name)}${m.online ? "" : ' <span class="mut">· вне сети</span>'}</span><button class="ghost remove-player" data-region="${r.id}" data-remove="${m.pid}" aria-label="Удалить ${h(m.name)}" ${disabled}>×</button></div>`).join("") || '<span class="mut">Пока никого</span>'}</div></td><td><b class="gold">${r.points} / ${RESOURCE_CAP}</b><div class="development-mini ${r.points >= RESOURCE_CAP ? "complete" : ""}">${developmentFor(r.points).name}</div><div class="bar resource-mini"><i style="width:${r.points / RESOURCE_CAP * 100}%"></i></div></td><td class="${r.economy < CRISIS_THRESHOLD ? "crisis" : ""}">${r.economy}%</td><td><div class="row"><button data-region="${r.id}" data-points="25" ${r.points >= RESOURCE_CAP ? 'disabled title="Город построен: достигнут предел 1000"' : disabled}>+25</button><button data-region="${r.id}" data-points="-25" ${disabled}>−25</button><button data-region="${r.id}" data-economy="10" ${disabled}>+10%</button><button data-region="${r.id}" data-economy="-10" ${disabled}>−10%</button></div></td></tr>`;
   }).join("")}</tbody>`;
 }
 $("roster-table").addEventListener("click", event => {
