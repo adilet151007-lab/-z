@@ -1,5 +1,6 @@
 // Только публичные настройки. Банк правильных ответов остаётся на сервере.
 export const SEAT_LIMIT = 4;
+export const MAX_TEAMS = 50;
 export const ECONOMY_PENALTY = 20;
 export const CRISIS_THRESHOLD = 30;
 export const RESOURCE_CAP = 1000;
@@ -22,3 +23,18 @@ export const REGIONS = [
   { id: "mangystau", name: "Маңғыстау", color: "#C1543A", glow: "#F08A6E" },
   { id: "turkistan", name: "Түркістан", color: "#6B5B95", glow: "#B3A4E0" }
 ];
+
+export function metadataFor(team) {
+  const base = REGIONS.find(r => r.id === (team.baseRegionId || team.id)) || REGIONS[0];
+  return { ...base, id: team.id, baseRegionId: base.id, name: team.name || base.name };
+}
+export function mapRegionsFor(teams, focusedTeamId = null) {
+  const focused = teams.find(t => t.id === focusedTeamId);
+  return REGIONS.map(base => {
+    const peers = teams.filter(t => metadataFor(t).baseRegionId === base.id);
+    const selected = focused && metadataFor(focused).baseRegionId === base.id ? [focused] : peers;
+    const occupied = selected.filter(t => t.members.length);
+    const source = occupied.length ? occupied : selected;
+    return { id: base.id, points: source.length ? Math.round(source.reduce((sum, t) => sum + t.points, 0) / source.length) : 0, economy: source.length ? Math.round(source.reduce((sum, t) => sum + t.economy, 0) / source.length) : 100 };
+  });
+}

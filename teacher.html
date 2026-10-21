@@ -33,10 +33,10 @@
     <div class="spacer"></div>
     <span id="phase-pill" class="pill"></span>
     <span id="conn-status" class="pill"></span>
-    <button class="ghost" id="export-btn">Выгрузить ведомость</button>
-    <button class="ghost" id="dev-open-btn">Инструменты разработчика</button>
-    <button class="danger" id="reset-btn">Сбросить игру</button>
-    <button class="ghost" id="logout-btn">Выйти</button>
+    <button class="ghost teacher-private" id="export-btn">Выгрузить ведомость</button>
+    <button class="ghost teacher-private" id="dev-open-btn">Инструменты разработчика</button>
+    <button class="danger teacher-private" id="reset-btn">Сбросить игру</button>
+    <button class="ghost" id="projector-btn">Скрыть ответы для проектора</button><button class="ghost" id="logout-btn">Выйти</button>
   </div>
   <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
 
@@ -48,7 +48,7 @@
       </div>
 
       <div id="dev-panel">
-        <p class="mut" style="margin-top:10px">Редактор ресурсов, экономики, участников и вопросов. Новых игроков добавляют через регистрацию. Для изменения текущего вопроса сначала завершите раунд.</p>
+        <p class="mut" style="margin-top:10px">Редактор состояния. Допустимо 1–50 команд, по 4 участника; ресурс 0–1000. Новые участники входят через регистрацию. Правки активного вопроса выполняйте через банк вопросов.</p>
         <div class="row" style="margin:10px 0">
           <button id="dev-refresh-btn">Обновить из текущего состояния</button>
           <button id="dev-free-all-btn">Освободить все слоты</button>
@@ -66,23 +66,30 @@
 
   <div class="t-grid">
     <div class="t-col">
-      <div class="glass" style="flex:1;min-height:440px;position:relative;overflow:hidden">
+      <div class="glass atlas-projector" style="min-height:440px;position:relative;overflow:hidden">
         <canvas id="scene-canvas"></canvas>
-        <div class="map-caption"><strong>ҚАЗАҚСТАН</strong><span>Культурный атлас · 4 региона · предел 1000</span></div><div class="hint">Нажмите на регион · тяните для вращения</div><a class="map-credit" href="https://simplemaps.com/gis/country/kz" target="_blank" rel="noopener">Границы: SimpleMaps · CC BY 4.0 · рельеф стилизован</a>
+        <div class="map-caption"><strong>ҚАЗАҚСТАН</strong><span>4 региона · до 50 команд · предел 1000</span></div>
+        <label class="map-team-picker">Город команды<select id="map-team-select" aria-label="Команда на карте"><option value="">Среднее по регионам</option></select></label><div class="hint">Выберите команду для просмотра её города</div>
+        <a class="map-credit" href="https://simplemaps.com/gis/country/kz" target="_blank" rel="noopener">Границы: SimpleMaps · CC BY 4.0 · рельеф стилизован</a>
       </div>
-      <div class="glass dock-panel">
-        <h2>Команды</h2>
-        <table class="roster-table" id="roster-table"></table>
-      </div>
+      <section class="glass dock-panel teacher-private" id="team-manager">
+        <h2>Команды аудитории</h2><p id="team-stats" class="mut small-note"></p>
+        <p class="small-note mut">4 участника в команде. Для 150 студентов нужно 38 команд (152 места). Максимум — 50 команд, 200 мест.</p>
+        <form id="team-count-form" class="row section-gap"><label for="team-count">Довести количество до</label><input id="team-count" type="number" min="1" max="50" value="38" required style="width:85px"><button class="pri" id="team-expand" type="submit">Создать недостающие</button></form>
+        <details class="section-gap"><summary>Создать или переименовать отдельную команду</summary><form id="team-form" class="qform section-gap"><label for="team-name" class="field-label">Название</label><input id="team-name" type="text" minlength="2" maxlength="60" placeholder="Например, Алаш" required><label for="team-base" class="field-label">Регион на карте</label><select id="team-base"></select><div class="row"><button id="team-save" class="pri" type="submit">Создать команду</button><button id="team-cancel" type="button" hidden>Отмена</button></div></form></details>
+      </section>
+      <section class="glass dock-panel">
+        <div class="row spaced"><h2>Команды и участники</h2><input id="roster-search" type="search" placeholder="Поиск команды или участника" aria-label="Поиск команды или участника"></div>
+        <div class="roster-scroll"><table class="roster-table" id="roster-table"></table></div>
+      </section>
+      <section class="glass dock-panel teacher-private"><h2>Журнал событий</h2><ul class="log-list" id="log-list"></ul></section>
     </div>
-
     <div class="t-col">
-      <div class="glass dock-panel" id="round-control"></div>
-      <div class="glass dock-panel" id="question-builder"></div>
-      <div class="glass dock-panel">
-        <h2>Журнал событий</h2>
-        <ul class="log-list" id="log-list"></ul>
-      </div>
+      <section class="glass dock-panel" id="round-control"></section>
+      <section class="glass dock-panel teacher-private private-answers"><h2>Ответы преподавателя</h2><div id="answer-key" class="answer-key"></div><div id="answer-preview"></div></section>
+      <details class="glass dock-panel teacher-private" open><summary class="panel-summary">Банк вопросов <span id="bank-count" class="mut"></span></summary><input id="bank-search" type="search" placeholder="Поиск вопроса или темы" aria-label="Поиск вопроса или темы" class="section-gap"><div id="question-bank" class="question-bank"></div><div class="row spaced section-gap"><button id="bank-prev">Назад</button><span id="bank-page" class="mut"></span><button id="bank-next">Далее</button></div></details>
+      <details class="glass dock-panel teacher-private" open><summary class="panel-summary">Силлабус → темы и вопросы</summary><div id="syllabus-panel"></div></details>
+      <section class="glass dock-panel teacher-private" id="question-builder"></section>
     </div>
   </div>
 </div>

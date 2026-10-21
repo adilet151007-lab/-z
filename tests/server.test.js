@@ -35,7 +35,7 @@ const login = socket => command(socket, "teacherLogin", { password: config.teach
 
 test("без входа нельзя выполнять ни одну административную команду", async t => {
   const f = await fixture(t), socket = await f.connect();
-  for (const event of ["startRound", "pauseRound", "resetTimer", "resolveRound", "endRound", "adjustPoints", "adjustEconomy", "freeSlot", "addCustomQuestion", "resetGame", "applyRawState", "getSnapshot", "exportSummary"]) {
+  for (const event of ["startRound", "pauseRound", "resetTimer", "resolveRound", "endRound", "adjustPoints", "adjustEconomy", "freeSlot", "addCustomQuestion", "resetGame", "applyRawState", "getSnapshot", "exportSummary", "createTeam", "expandTeams", "renameTeam", "removeTeam", "editQuestion", "deleteQuestion", "importQuestions", "analyzeSyllabus", "generateQuestions"]) {
     const result = await command(socket, event, {}); assert.equal(result.code, "FORBIDDEN", event);
   }
   assert.equal((await command(socket, "teacherLogin", { password: "incorrect" })).ok, false);
@@ -105,8 +105,8 @@ test("ошибка сохранения отменяет изменение; у�
 });
 test("HTTP раздаёт обе страницы и локальные библиотеки, но не сервер и секреты", async t => {
   const f = await fixture(t);
-  for (const resource of ["/student.html", "/teacher.html", "/shared-engine.js", "/region-geography.js", "/scene3d.js", "/vendor/three/examples/jsm/utils/BufferGeometryUtils.js", "/vendor/three/build/three.module.js", "/vendor/three/examples/jsm/controls/OrbitControls.js", "/socket.io/socket.io.esm.min.js", "/health"]) assert.equal((await fetch(f.base + resource)).status, 200, resource);
-  for (const resource of ["/server.js", "/game-logic.js", "/question-bank.js", "/.env", "/data/game-state.json", "/storage.js"]) assert.equal((await fetch(f.base + resource)).status, 404, resource);
+  for (const resource of ["/student.html", "/teacher.html", "/shared-engine.js", "/region-geography.js", "/scene3d.js", "/syllabus-ui.js", "/vendor/pdfjs/pdf.mjs", "/vendor/pdfjs/pdf.worker.mjs", "/vendor/mammoth/mammoth.browser.min.js", "/vendor/three/examples/jsm/utils/BufferGeometryUtils.js", "/vendor/three/build/three.module.js", "/vendor/three/examples/jsm/controls/OrbitControls.js", "/socket.io/socket.io.esm.min.js", "/health"]) assert.equal((await fetch(f.base + resource)).status, 200, resource);
+  for (const resource of ["/server.js", "/game-logic.js", "/question-bank.js", "/.env", "/data/game-state.json", "/storage.js", "/syllabus-engine.js", "/syllabus-bank.js"]) assert.equal((await fetch(f.base + resource)).status, 404, resource);
 });
 test("новое соединение получает только сохранённое состояние во время медленной записи", async t => {
   const f = await fixture(t), teacher = await f.connect(); await login(teacher);
@@ -138,4 +138,29 @@ test("перезапуск сервера восстанавливает сос�
   const teacherRestored = await second.connect({ teacherToken: teacherAuth.teacherToken });
   assert.equal(teacherRestored.latest.viewer.role, "teacher");
   assert.equal(teacherRestored.latest.questions.length, 11);
+});
+
+test("150 независимых клиентов в 38 командах: вход, голоса, закрытый обзор и итог", async t => {
+  const f=await fixture(t),teacher=await f.connect();await login(teacher);
+  assert.equal((await command(teacher,"expandTeams",{count:38})).ok,true);
+  const teams=f.server.game.state.regions.map(t=>t.id),clients=await Promise.all(Array.from({length:150},()=>f.connect()));
+  const joined=await Promise.all(clients.map((client,i)=>command(client,"joinTeam",{regionId:teams[Math.floor(i/4)],name:`Студент ${i+1}`})));
+  assert.equal(joined.filter(r=>r.ok).length,150);
+  await command(teacher,"startRound",{questionId:"q1",duration:120});const roundId=f.server.game.state.round.id;
+  const votes=await Promise.all(clients.map(client=>command(client,"castVote",{roundId,optionIdx:0})));assert.equal(votes.filter(v=>v.ok).length,150);
+  await waitFor(()=>teacher.latest.round?.preview?.every(p=>p.empty||p.correct===true));
+  assert.equal(teacher.latest.round.preview.filter(p=>!p.empty).length,38);
+  assert.equal("preview" in clients[0].latest.round,false);assert.equal(clients[0].latest.round.question.correct,undefined);
+  await command(teacher,"resolveRound");await waitFor(()=>clients[149].latest.round?.resolved);
+  assert.ok(f.server.game.state.regions.every(t=>t.points===25));
+});
+test("редактор и генератор доступны преподавателю и сохраняются без раскрытия ответов",async t=>{
+ const f=await fixture(t),teacher=await f.connect(),student=await f.connect();await login(teacher);
+ const text="Тема 1. Семиотика культуры\nСемиотика — наука о знаках и знаковых системах.";
+ const analysis=await command(teacher,"analyzeSyllabus",{text});assert.equal(analysis.topics.length,1);
+ const drafts=await command(teacher,"generateQuestions",{text,topics:analysis.topics,count:5});assert.ok(drafts.questions.length>0);
+ const saved=await command(teacher,"importQuestions",{questions:drafts.questions});assert.ok(saved.added>0);
+ const q=f.server.game.state.questions.at(-1),edit=await command(teacher,"editQuestion",{questionId:q.id,question:{...q,text:"Отредактированный вопрос?"},version:q.version});assert.equal(edit.ok,true);
+ await command(student,"joinTeam",{regionId:"saryarka",name:"Участник"});await command(teacher,"startRound",{questionId:q.id,duration:30});await waitFor(()=>student.latest.round?.question.id===q.id);
+ assert.equal(student.latest.round.question.text,"Отредактированный вопрос?");assert.equal(student.latest.round.question.correct,undefined);assert.equal(student.latest.round.question.explanation,undefined);assert.equal(student.latest.round.question.sourceExcerpt,undefined);
 });

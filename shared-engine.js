@@ -1,5 +1,5 @@
 import { io } from "/socket.io/socket.io.esm.min.js";
-export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor } from "./game-config.js";
+export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, metadataFor, mapRegionsFor } from "./game-config.js";
 
 export const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 const getToken = key => { try { return sessionStorage.getItem(key) || undefined; } catch { return undefined; } };
@@ -30,7 +30,7 @@ export class GameEngine {
   emit() { for (const fn of this.listeners) fn(this.state); }
   request(event, data = {}) {
     if (!this.connected) return Promise.reject(new Error("Нет связи с сервером. Дождитесь подключения."));
-    return new Promise((resolve, reject) => this.socket.timeout(12000).emit(event, data, (error, response) => {
+    return new Promise((resolve, reject) => this.socket.timeout(20000).emit(event, data, (error, response) => {
       if (error) { reject(new Error("Сервер не подтвердил действие. Проверьте состояние перед повтором.")); return; }
       if (!response?.ok) {
         if (response?.code === "FORBIDDEN" && this.mode === "teacher") { setToken("cq_teacher_token_v2", null); this.socket.disconnect().connect(); }
@@ -68,6 +68,15 @@ export class GameEngine {
   adjustPoints(regionId, delta) { return this.request("adjustPoints", { regionId, delta }); }
   adjustEconomy(regionId, delta) { return this.request("adjustEconomy", { regionId, delta }); }
   addCustomQuestion(text, options, correctIdx, points) { return this.request("addCustomQuestion", { text, options, correctIdx, points }); }
+  createTeam(name, baseRegionId) { return this.request("createTeam",{name,baseRegionId}); }
+  expandTeams(count) { return this.request("expandTeams",{count}); }
+  renameTeam(teamId,name,baseRegionId) { return this.request("renameTeam",{teamId,name,baseRegionId}); }
+  removeTeam(teamId) { return this.request("removeTeam",{teamId}); }
+  editQuestion(questionId,question,version) { return this.request("editQuestion",{questionId,question,version}); }
+  deleteQuestion(questionId) { return this.request("deleteQuestion",{questionId}); }
+  importQuestions(questions) { return this.request("importQuestions",{questions}); }
+  async analyzeSyllabus(text) { return this.request("analyzeSyllabus",{text}); }
+  async generateQuestions(text,topics,count) { return this.request("generateQuestions",{text,topics,count}); }
   resetGame() { return this.request("resetGame"); }
   applyRawState(snapshot) { return this.request("applyRawState", snapshot); }
   async getSnapshot() { return (await this.request("getSnapshot")).snapshot; }

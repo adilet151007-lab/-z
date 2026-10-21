@@ -143,3 +143,47 @@ test("на границах развития карта и интерфейс п
     assert.ok(stage.progress >= 0 && stage.progress <= 1);
   }
 });
+
+test("до 50 команд, 150 участников в 38 командах, сохранение и предел мест", () => {
+  const game=new GameLogic();game.expandTeams(38);assert.equal(game.state.regions.length,38);
+  let count=0;
+  for(const team of game.state.regions){for(let i=0;i<4&&count<150;i++){game.joinTeam(team.id,`Студент ${++count}`)}}
+  assert.equal(game.state.regions.reduce((sum,t)=>sum+t.members.length,0),150);
+  assert.throws(()=>game.joinTeam(game.state.regions[4].id,"Лишний"),/4\/4/);
+  const restored=new GameLogic(game.state);assert.equal(restored.state.regions.length,38);assert.equal(restored.state.regions.flatMap(t=>t.members).length,150);
+  restored.expandTeams(50);assert.equal(restored.state.regions.length,50);assert.throws(()=>restored.expandTeams(51));assert.throws(()=>restored.createTeam("Лишняя команда","jetisu"));
+});
+test("исключение команды очищает её игроков и ответы, остальные команды сохраняются",()=>{
+  const f=fixture(),team=f.game.createTeam("Алаш","jetisu"),member=f.game.joinTeam(team.teamId,"Участник");
+  f.game.castVote(team.teamId,member.player.pid,0,f.round);f.game.teamSubmit(team.teamId,member.player.pid,f.round);
+  f.game.removeTeam(team.teamId);
+  assert.equal(f.game.findPlayer(hashToken(member.playerToken)),null);assert.equal(f.game.state.round.ballots[member.player.pid],undefined);assert.equal(f.game.state.round.submitted[team.teamId],undefined);
+  assert.equal(f.game.region("saryarka").members.length,2);
+});
+test("редактирование вопроса сохраняет активный снимок и проверяет версию",()=>{
+  const f=fixture(),q=structuredClone(f.game.state.questions[0]);
+  f.game.editQuestion(q.id,{...q,text:"Изменённый вопрос?",correct:2},q.version);
+  assert.equal(f.game.state.questions[0].correct,2);assert.equal(f.game.state.round.questionSnapshot.correct,0);
+  assert.throws(()=>f.game.editQuestion(q.id,q,q.version),/уже изменён/);
+  f.game.castVote("saryarka",f.a.player.pid,0,f.round);f.game.resolveRound();assert.equal(f.game.region("saryarka").points,25);
+  f.game.startRound(q.id,30);assert.equal(f.game.state.round.questionSnapshot.correct,2);
+});
+test("предварительная правильность и объяснения до итогов видны только преподавателю",()=>{
+  const f=fixture();f.game.state.round.questionSnapshot.explanation="Секретное пояснение к ответу";f.game.state.round.questionSnapshot.sourceExcerpt="Фрагмент с правильным ответом";
+  f.game.castVote("saryarka",f.a.player.pid,0,f.round);
+  const teacher=f.game.view({role:"teacher"}),student=f.game.view({playerHash:hashToken(f.a.playerToken)});
+  assert.equal(teacher.round.preview.find(p=>p.teamId==="saryarka").correct,true);
+  assert.equal(teacher.round.preview.find(p=>p.teamId==="saryarka").submitted,false);
+  assert.equal("preview" in student.round,false);assert.equal("explanation" in student.round.question,false);assert.equal("sourceExcerpt" in student.round.question,false);
+  assert.equal(f.game.region("saryarka").points,0);
+});
+test("импорт вопросов атомарен, убирает дубликаты и сохраняет пояснения",()=>{
+  const game=new GameLogic(),q={text:"Новый учебный вопрос?",options:["Один","Два","Три","Четыре"],correct:2,points:25,topic:"Тема",explanation:"Пояснение"};
+  assert.deepEqual(game.importQuestions([q,q]),{added:1,skipped:1});assert.equal(game.state.questions.at(-1).explanation,"Пояснение");
+  const count=game.state.questions.length;assert.throws(()=>game.importQuestions([{...q,text:"Неправильный?",options:["Один","Один","Два","Три"]}]));assert.equal(game.state.questions.length,count);
+});
+test("новая версия загружает прежние четыре региона без удаления участников",()=>{
+ const f=fixture(),old=structuredClone(f.game.state);old.schemaVersion=2;
+ for(const r of old.regions){delete r.name;delete r.baseRegionId}
+ const restored=new GameLogic(old);assert.equal(restored.state.schemaVersion,3);assert.equal(restored.region("saryarka").name,"Сарыарқа");assert.equal(restored.region("saryarka").members.length,2);
+});

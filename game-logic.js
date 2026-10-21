@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor } from "./game-config.js";
+import { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, MAX_TEAMS, metadataFor } from "./game-config.js";
 import { QUESTION_BANK } from "./question-bank.js";
 export { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD } from "./game-config.js";
 
@@ -18,7 +18,7 @@ const cleanText = (value, min, max, label) => {
   return text;
 };
 
-function validateQuestions(questions) {
+export function validateQuestions(questions) {
   ensure(Array.isArray(questions) && questions.length >= 1 && questions.length <= 1000, "Нужно от 1 до 1000 вопросов.");
   const ids = new Set();
   return questions.map(q => {
@@ -26,36 +26,45 @@ function validateQuestions(questions) {
     ids.add(q.id);
     ensure(Array.isArray(q.options) && q.options.length === 4, "У вопроса должны быть четыре варианта.");
     ensure(integer(q.correct, 0, 3) && integer(q.points, 1, 1000), "Проверьте правильный вариант и баллы (1–1000).");
-    return { id: q.id, text: cleanText(q.text, 3, 2000, "Вопрос"), options: q.options.map(o => cleanText(o, 1, 500, "Вариант")), correct: q.correct, points: q.points };
+    ensure(integer(q.version ?? 1, 1, Number.MAX_SAFE_INTEGER), "Некорректная версия вопроса.");
+    const extra = {};
+    for (const [key, max] of [["topic",200],["explanation",1200],["source",200],["sourceExcerpt",1200]]) {
+      if (q[key]) extra[key] = cleanText(q[key], 1, max, key);
+    }
+    const options = q.options.map(o => cleanText(o, 1, 500, "Вариант"));
+    ensure(new Set(options.map(o => o.toLocaleLowerCase())).size === 4, "Варианты ответа не должны повторяться.");
+    return { id: q.id, text: cleanText(q.text, 3, 2000, "Вопрос"), options, correct: q.correct, points: q.points, version: q.version ?? 1, ...extra };
   });
 }
 
 export function freshState() {
-  return { schemaVersion: 2, revision: 0, phase: "lobby", regions: REGIONS.map(r => ({ id: r.id, points: 0, economy: 100, members: [] })), questions: structuredClone(QUESTION_BANK), round: null, log: [] };
+  return { schemaVersion: 3, revision: 0, phase: "lobby", regions: REGIONS.map(r => ({ id: r.id, name: r.name, baseRegionId: r.id, points: 0, economy: 100, members: [] })), questions: validateQuestions(QUESTION_BANK), round: null, log: [] };
 }
 
 function validateRegions(regions, knownMembers = null) {
-  ensure(Array.isArray(regions) && regions.length === 4, "Должно быть ровно четыре региона.");
-  const seenRegions = new Set(), seenPlayers = new Set();
-  return REGIONS.map(meta => {
-    const r = regions.find(item => item?.id === meta.id);
-    ensure(r && !seenRegions.has(r.id) && regions.filter(x => x?.id === meta.id).length === 1, "ID регионов должны быть уникальными.");
+  ensure(Array.isArray(regions) && regions.length >= 1 && regions.length <= MAX_TEAMS, `Нужно от 1 до ${MAX_TEAMS} команд.`);
+  const seenRegions = new Set(), seenPlayers = new Set(), seenNames = new Set();
+  return regions.map(r => {
+    ensure(r && typeof r.id === "string" && /^[\w-]{1,80}$/.test(r.id) && !seenRegions.has(r.id), "ID команд должны быть уникальными.");
     seenRegions.add(r.id);
+    const meta = metadataFor(r), baseRegionId = r.baseRegionId || r.id;
+    ensure(REGIONS.some(base => base.id === baseRegionId), "Выберите один из четырёх регионов карты.");
+    const name = cleanText(r.name || meta.name, 2, 60, "Команда"), nameKey = name.toLocaleLowerCase();
+    ensure(!seenNames.has(nameKey), "Названия команд должны быть уникальными."); seenNames.add(nameKey);
     ensure(integer(r.points, 0, RESOURCE_CAP) && integer(r.economy, 0, 100), `Ресурс: 0–${RESOURCE_CAP}; экономика: 0–100.`);
     ensure(Array.isArray(r.members) && r.members.length <= SEAT_LIMIT, "В команде максимум четыре участника.");
     const members = r.members.map(m => {
-      ensure(m && typeof m.pid === "string" && /^[\w-]{1,80}$/.test(m.pid) && !seenPlayers.has(m.pid), "Некорректный или повторный участник.");
-      seenPlayers.add(m.pid);
+      ensure(m && typeof m.pid === "string" && /^[\w-]{1,80}$/.test(m.pid) && !seenPlayers.has(m.pid), "Некорректный или повторный участник."); seenPlayers.add(m.pid);
       const original = knownMembers ? knownMembers.get(m.pid) : m;
       ensure(original && /^[a-f0-9]{64}$/.test(original.tokenHash), "Добавляйте новых участников через экран регистрации.");
       return { pid: m.pid, name: cleanText(m.name, 2, 40, "Имя"), tokenHash: original.tokenHash, joinedAt: original.joinedAt };
     });
-    return { id: r.id, points: r.points, economy: r.economy, members };
+    return { id: r.id, name, baseRegionId, points: r.points, economy: r.economy, members };
   });
 }
 
 function restoreSnapshot(raw) {
-  ensure(raw?.schemaVersion === 2 && integer(raw.revision, 0, Number.MAX_SAFE_INTEGER), "Неизвестная версия сохранения. Данные не были сброшены.");
+  ensure([2, 3].includes(raw?.schemaVersion) && integer(raw.revision, 0, Number.MAX_SAFE_INTEGER), "Неизвестная версия сохранения. Данные не были сброшены.");
   const state = structuredClone(raw);
   // Сохранения предыдущей версии могли содержать больше 1000 ресурсов.
   // Ограничиваем только это поле, сохраняя игроков, вопросы и текущий раунд.
@@ -63,6 +72,7 @@ function restoreSnapshot(raw) {
     if (integer(region.points, RESOURCE_CAP + 1, 10000000)) region.points = RESOURCE_CAP;
   }
   state.regions = validateRegions(state.regions);
+  state.schemaVersion = 3;
   state.questions = validateQuestions(state.questions);
   ensure(["lobby", "playing", "ended"].includes(state.phase) && Array.isArray(state.log), "Повреждена структура сохранения.");
   if (state.round) {
@@ -99,7 +109,7 @@ export class GameLogic {
     const token = randomBytes(32).toString("base64url");
     const player = { pid: randomUUID(), name: cleanName, tokenHash: hashToken(token), joinedAt: this.now() };
     region.members.push(player);
-    this.log(`${cleanName} присоединился к команде «${REGIONS.find(r => r.id === regionId).name}».`);
+    this.log(`${cleanName} присоединился к команде «${this.region(regionId).name}».`);
     this.touch();
     return { playerToken: token, player: { pid: player.pid, name: player.name, regionId } };
   }
@@ -217,28 +227,87 @@ export class GameLogic {
     const previous = region.points;
     region.points = Math.min(RESOURCE_CAP, Math.max(0, region.points + delta));
     const applied = region.points - previous;
-    this.log(`Ресурс «${REGIONS.find(r => r.id === regionId).name}»: ${applied > 0 ? "+" : ""}${applied}. ${region.points}/${RESOURCE_CAP}${region.points === RESOURCE_CAP ? " — город построен." : "."}`);
+    this.log(`Ресурс «${this.region(regionId).name}»: ${applied > 0 ? "+" : ""}${applied}. ${region.points}/${RESOURCE_CAP}${region.points === RESOURCE_CAP ? " — город построен." : "."}`);
     this.touch();
   }
   adjustEconomy(regionId, delta) {
     ensure(integer(delta, -100, 100), "Некорректное изменение экономики.");
     const region = this.region(regionId);
     region.economy = Math.min(100, Math.max(0, region.economy + delta));
-    this.log(`Экономика «${REGIONS.find(r => r.id === regionId).name}»: ${delta > 0 ? "+" : ""}${delta}%.`);
+    this.log(`Экономика «${this.region(regionId).name}»: ${delta > 0 ? "+" : ""}${delta}%.`);
     this.touch();
   }
   addCustomQuestion(text, options, correctIdx, points = 25) {
     const question = validateQuestions([{ id: `custom_${randomUUID()}`, text, options, correct: correctIdx, points }])[0];
+    ensure(this.state.questions.length < 1000, "В банке уже 1000 вопросов.");
     this.state.questions.push(question);
-    ensure(this.state.questions.length <= 1000, "В банке уже 1000 вопросов.");
     this.log("В банк добавлен вопрос.");
     this.touch();
     return { questionId: question.id };
   }
+  createTeam(name, baseRegionId) {
+    ensure(this.state.regions.length < MAX_TEAMS, `Максимум ${MAX_TEAMS} команд.`);
+    const cleanName = cleanText(name, 2, 60, "Команда");
+    ensure(!this.state.regions.some(t => t.name.toLocaleLowerCase() === cleanName.toLocaleLowerCase()), "Такая команда уже есть.");
+    ensure(REGIONS.some(r => r.id === baseRegionId), "Выберите регион карты.");
+    const id = `team_${randomUUID()}`;
+    this.state.regions.push({id,name:cleanName,baseRegionId,points:0,economy:100,members:[]});
+    this.log(`Создана команда «${cleanName}».`); this.touch(); return {teamId:id};
+  }
+  expandTeams(count) {
+    ensure(integer(count, 1, MAX_TEAMS), `Количество команд: 1–${MAX_TEAMS}.`);
+    ensure(count >= this.state.regions.length, "Удаляйте лишние команды кнопкой рядом с их названием.");
+    let number = 1;
+    while (this.state.regions.length < count) {
+      while (this.state.regions.some(t => t.name === `Команда ${number}`)) number++;
+      const base = [...REGIONS].sort((a,b) => this.state.regions.filter(t=>t.baseRegionId===a.id).length - this.state.regions.filter(t=>t.baseRegionId===b.id).length)[0];
+      this.createTeam(`Команда ${number++}`,base.id);
+    }
+  }
+  renameTeam(teamId, name, baseRegionId) {
+    const team = this.region(teamId), cleanName = cleanText(name,2,60,"Команда");
+    ensure(!this.state.regions.some(t=>t.id!==teamId && t.name.toLocaleLowerCase()===cleanName.toLocaleLowerCase()),"Такая команда уже есть.");
+    ensure(REGIONS.some(r=>r.id===baseRegionId),"Выберите регион карты.");
+    team.name=cleanName;team.baseRegionId=baseRegionId;this.log(`Команда переименована: «${cleanName}».`);this.touch();
+  }
+  removeTeam(teamId) {
+    ensure(this.state.regions.length>1,"Оставьте хотя бы одну команду.");
+    const team=this.region(teamId), pids=new Set(team.members.map(m=>m.pid));
+    this.state.regions=this.state.regions.filter(t=>t.id!==teamId);
+    if(this.state.round){
+      for(const pid of pids)delete this.state.round.ballots[pid];
+      delete this.state.round.submitted[teamId];delete this.state.round.results[teamId];
+    }
+    this.log(`Команда «${team.name}» удалена, её участники вышли из игры.`);this.touch();
+  }
+  editQuestion(id, changes, expectedVersion) {
+    const index=this.state.questions.findIndex(q=>q.id===id);ensure(index>=0,"Вопрос не найден.");
+    const current=this.state.questions[index];
+    ensure(expectedVersion===(current.version||1),"Вопрос уже изменён. Откройте его заново.","REVISION_CONFLICT");
+    const question=validateQuestions([{...changes,id,version:(current.version||1)+1}])[0];
+    this.state.questions[index]=question;this.log("Вопрос обновлён в банке. Активный раунд использует свою сохранённую версию.");this.touch();
+    return {questionId:id,activeRoundUnchanged:this.state.round?.questionId===id&&!this.state.round.resolved};
+  }
+  deleteQuestion(id) {
+    ensure(this.state.questions.length>1,"Оставьте хотя бы один вопрос.");
+    ensure(this.state.questions.some(q=>q.id===id),"Вопрос не найден.");
+    ensure(!this.state.round || this.state.round.resolved || this.state.round.questionId!==id,"Сначала завершите активный вопрос.");
+    this.state.questions=this.state.questions.filter(q=>q.id!==id);this.log("Вопрос удалён из банка.");this.touch();
+  }
+  importQuestions(drafts) {
+    ensure(Array.isArray(drafts)&&drafts.length>=1&&drafts.length<=60,"Можно добавить от 1 до 60 вопросов за раз.");
+    const seen=new Set(this.state.questions.map(q=>q.text.toLocaleLowerCase().trim()));
+    const questions=validateQuestions(drafts.map(q=>({...q,id:`import_${randomUUID()}`,version:1}))).filter(q=>{const key=q.text.toLocaleLowerCase().trim();if(seen.has(key))return false;seen.add(key);return true});
+    ensure(this.state.questions.length+questions.length<=1000,"В банке может быть максимум 1000 вопросов.");
+    if(questions.length){this.state.questions.push(...questions);this.log(`Добавлено вопросов из силлабуса: ${questions.length}.`);this.touch();}
+    return {added:questions.length,skipped:drafts.length-questions.length};
+  }
   resetGame() {
     const questions = this.state.questions, revision = this.state.revision;
+    const teams = this.state.regions.map(r => ({...r,points:0,economy:100,members:[]}));
     this.state = freshState();
     this.state.questions = questions;
+    this.state.regions = teams;
     this.state.revision = revision;
     this.log("Игра сброшена. Банк вопросов сохранён.");
     this.touch();
@@ -255,13 +324,16 @@ export class GameLogic {
     const round = this.state.round;
     if (round && !round.resolved) {
       const current = questions.find(q => q.id === round.questionId);
-      ensure(JSON.stringify(current) === JSON.stringify(round.questionSnapshot), "Завершите текущий раунд перед изменением его вопроса.");
+      ensure(JSON.stringify(current) === JSON.stringify(this.state.questions.find(q => q.id === round.questionId)), "Завершите текущий раунд перед изменением его вопроса.");
     }
     this.state.regions = regions;
     this.state.questions = questions;
     if (round && !round.resolved) {
       const existing = new Set(regions.flatMap(r => r.members).map(m => m.pid));
       for (const pid of Object.keys(round.ballots)) if (!existing.has(pid)) delete round.ballots[pid];
+      const teams = new Set(regions.map(r=>r.id));
+      for (const id of Object.keys(round.submitted)) if (!teams.has(id)) delete round.submitted[id];
+      for (const id of Object.keys(round.results)) if (!teams.has(id)) delete round.results[id];
     }
     this.log("Преподаватель применил проверенный JSON-патч.");
     this.touch();
@@ -278,12 +350,19 @@ export class GameLogic {
     };
     if (this.state.round) {
       const { ballots, questionSnapshot, ...round } = this.state.round;
-      const { correct, ...publicQuestion } = questionSnapshot;
-      view.round = { ...structuredClone(round), question: teacher || round.resolved ? structuredClone(questionSnapshot) : publicQuestion, remainingMs: this.remainingMs(), votes: Object.fromEntries(REGIONS.map(r => [r.id, this.votesFor(r.id)])), myVote: player ? ballots[player.pid] ?? null : null };
+      const { id, text, options, points, topic } = questionSnapshot;
+      const publicQuestion = { id, text, options, points, ...(topic ? {topic} : {}) };
+      view.round = { ...structuredClone(round), question: teacher || round.resolved ? structuredClone(questionSnapshot) : publicQuestion, remainingMs: this.remainingMs(), votes: Object.fromEntries(this.state.regions.map(r => [r.id, this.votesFor(r.id)])), myVote: player ? ballots[player.pid] ?? null : null };
+      if (teacher) view.round.preview = this.state.regions.map(team => {
+        const submitted = round.submitted[team.id] !== undefined;
+        const result = round.resolved ? round.results[team.id] : null;
+        const decision = result ? {chosen:result.chosen,reason:result.reason} : submitted ? {chosen: round.submitted[team.id], reason:"submitted"} : this.majority(team.id);
+        return { teamId: team.id, submitted, ...decision, correct: decision.chosen === null ? null : decision.chosen === questionSnapshot.correct, voters: Object.values(this.votesFor(team.id)).reduce((a,b)=>a+b,0), empty: !team.members.length };
+      });
     }
     return view;
   }
   exportSummary() {
-    return this.state.regions.map(r => ({ region: REGIONS.find(m => m.id === r.id).name, members: r.members.map(m => m.name).join(", "), points: r.points, economy: r.economy, development: developmentFor(r.points).name, status: r.economy < CRISIS_THRESHOLD ? "кризис" : "норма" })).sort((a, b) => b.points - a.points || b.economy - a.economy);
+    return this.state.regions.map(r => ({ region: r.name, members: r.members.map(m => m.name).join(", "), points: r.points, economy: r.economy, development: developmentFor(r.points).name, status: r.economy < CRISIS_THRESHOLD ? "кризис" : "норма" })).sort((a, b) => b.points - a.points || b.economy - a.economy);
   }
 }

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { REGIONS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor } from "./game-config.js";
+import { REGIONS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, mapRegionsFor, metadataFor } from "./game-config.js";
 import { GEOGRAPHY } from "./region-geography.js";
 
 const clamp = THREE.MathUtils.clamp;
@@ -110,6 +110,7 @@ export function createScene(canvas, opts = {}) {
   scene.add(new THREE.HemisphereLight(0xc7eaff, 0x3e3825, 2.1));
   const sun = new THREE.DirectionalLight(0xffedce, 3.2); sun.position.set(-24, 45, -12); sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -43, right: 43, top: 30, bottom: -30, near: 1, far: 110 });
+  sun.shadow.camera.updateProjectionMatrix();
   sun.shadow.bias = -.0004; sun.shadow.normalBias = .035; scene.add(sun);
   const rim = new THREE.DirectionalLight(0x79baff, 1.2); rim.position.set(25, 12, 28); scene.add(rim);
   const grid = new THREE.GridHelper(130, 65, 0x285765, 0x15333f); grid.position.y = -2.05;
@@ -317,7 +318,9 @@ export function createScene(canvas, opts = {}) {
   }
   const observer = new ResizeObserver(resize); observer.observe(canvas); resize();
   function update(state, selectedRegionId) {
-    for (const r of state.regions) {
+    const selectedTeam = state.regions.find(t=>t.id===selectedRegionId);
+    const selectedBase = selectedTeam ? metadataFor(selectedTeam).baseRegionId : null;
+    for (const r of mapRegionsFor(state.regions,selectedRegionId)) {
       const region = regions.find(item => item.meta.id === r.id); if (!region) continue;
       region.points = clamp(r.points, 0, RESOURCE_CAP); region.economy = r.economy;
       region.stage = developmentFor(region.points).index;
@@ -326,7 +329,7 @@ export function createScene(canvas, opts = {}) {
       region.targetColor.set(crisis ? 0x634048 : 0xffffff).multiplyScalar(crisis ? 1 : .6 + r.economy / 250);
       region.topMat.emissive.set(crisis ? 0xc33532 : region.points === RESOURCE_CAP ? 0xdcb864 : region.meta.color);
       region.topMat.emissiveIntensity = crisis ? .18 : .025 + region.points / RESOURCE_CAP * .085;
-      for (const border of region.borders) { border.material.color.set(crisis ? 0xff655b : region.points === RESOURCE_CAP ? 0xffdf94 : region.meta.glow); border.material.opacity = region.meta.id === selectedRegionId || crisis || region.points === RESOURCE_CAP ? .95 : .5; }
+      for (const border of region.borders) { border.material.color.set(crisis ? 0xff655b : region.points === RESOURCE_CAP ? 0xffdf94 : region.meta.glow); border.material.opacity = region.meta.id === selectedBase || crisis || region.points === RESOURCE_CAP ? .95 : .5; }
       region.victoryRing.visible = region.points === RESOURCE_CAP;
       paintLabel(region.label, region.meta, region.points, r.economy);
     }

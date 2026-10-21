@@ -7,6 +7,7 @@ import path from "node:path";
 import { Server } from "socket.io";
 import { GameLogic, GameError, hashToken } from "./game-logic.js";
 import { createStore } from "./storage.js";
+import { analyzeSyllabus, generateSyllabusQuestions } from "./syllabus-engine.js";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const digest = value => createHash("sha256").update(value).digest();
@@ -34,8 +35,11 @@ export async function createGameServer(options = {}) {
   });
   app.get("/", (_req, res) => res.redirect("/student.html"));
   app.get("/health", (_req, res) => res.status(closing ? 503 : 200).json({ ok: !closing, storage: store.kind }));
-  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/styles.css"]);
+  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/styles.css"]);
   app.use((req, res, next) => allowed.has(req.path) ? res.sendFile(path.join(directory, req.path.slice(1))) : next());
+  app.get("/vendor/pdfjs/pdf.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.mjs")));
+  app.get("/vendor/pdfjs/pdf.worker.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.worker.mjs")));
+  app.get("/vendor/mammoth/mammoth.browser.min.js", (_req,res) => res.sendFile(path.join(directory,"node_modules/mammoth/mammoth.browser.min.js")));
   app.use("/vendor/three", express.static(path.join(directory, "node_modules/three"), { dotfiles: "deny", index: false }));
   app.use((_req, res) => res.status(404).type("text").send("Страница не найдена."));
 
@@ -66,7 +70,17 @@ export async function createGameServer(options = {}) {
   const actor = socket => ({ role: validTeacherToken(socket.data.teacherToken) ? "teacher" : "guest", playerHash: socket.data.playerHash });
   const online = () => new Set([...io.sockets.sockets.values()].map(s => s.data.playerHash && publishedGame.findPlayer(s.data.playerHash)?.pid).filter(Boolean));
   const sendState = socket => socket.emit("state", publishedGame.view(actor(socket), online()));
-  const broadcast = () => { const players = online(); for (const socket of io.sockets.sockets.values()) socket.emit("state", publishedGame.view(actor(socket), players)); };
+  // Сотни одновременных голосов объединяются в одну рассылку раз в 40 мс.
+  let broadcastTimer = null;
+  const broadcast = () => {
+    if (closing || broadcastTimer) return;
+    broadcastTimer = setTimeout(() => {
+      broadcastTimer = null; if (closing) return;
+      const players = online();
+      for (const socket of io.sockets.sockets.values()) socket.emit("state", publishedGame.view(actor(socket), players));
+    }, 40);
+    broadcastTimer.unref();
+  };
   const attempts = new Map();
   const checkLoginLimit = socket => {
     const ip = socket.handshake.headers["x-forwarded-for"]?.split(",")[0]?.trim() || socket.handshake.address;
@@ -143,6 +157,15 @@ export async function createGameServer(options = {}) {
     handle("adjustPoints", "teacher", data => game.adjustPoints(data.regionId, data.delta));
     handle("adjustEconomy", "teacher", data => game.adjustEconomy(data.regionId, data.delta));
     handle("addCustomQuestion", "teacher", data => game.addCustomQuestion(data.text, data.options, data.correctIdx, data.points));
+    handle("createTeam", "teacher", data => game.createTeam(data.name,data.baseRegionId));
+    handle("expandTeams", "teacher", data => game.expandTeams(data.count));
+    handle("renameTeam", "teacher", data => game.renameTeam(data.teamId,data.name,data.baseRegionId));
+    handle("removeTeam", "teacher", data => game.removeTeam(data.teamId));
+    handle("editQuestion", "teacher", data => game.editQuestion(data.questionId,data.question,data.version));
+    handle("deleteQuestion", "teacher", data => game.deleteQuestion(data.questionId));
+    handle("importQuestions", "teacher", data => game.importQuestions(data.questions));
+    handle("analyzeSyllabus", "teacher", data => analyzeSyllabus(data.text));
+    handle("generateQuestions", "teacher", data => generateSyllabusQuestions(data.text,data.topics,data.count));
     handle("resetGame", "teacher", () => game.resetGame());
     handle("applyRawState", "teacher", data => game.applyRawState(data));
     handle("getSnapshot", "teacher", () => ({ snapshot: game.editorSnapshot() }));
@@ -175,7 +198,7 @@ export async function createGameServer(options = {}) {
     },
     async close() {
       closing = true;
-      clearInterval(timer); clearInterval(cleanup);
+      clearInterval(timer); clearInterval(cleanup); clearTimeout(broadcastTimer);
       await pending;
       await new Promise(resolve => io.close(resolve));
       if (httpServer.listening) await new Promise(resolve => httpServer.close(resolve));

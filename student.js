@@ -1,4 +1,4 @@
-import { GameEngine, REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, escapeHTML as h } from "./shared-engine.js";
+import { GameEngine, REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, metadataFor, escapeHTML as h } from "./shared-engine.js";
 import { createScene } from "./scene3d.js";
 
 const engine = new GameEngine("student");
@@ -17,11 +17,16 @@ async function act(fn) {
   finally { actionPending = false; if (engine.state?.viewer.player) renderQuestion(engine.state); }
 }
 function renderRegistration(state) {
-  $("region-grid").innerHTML = REGIONS.map(meta => {
-    const region = state.regions.find(r => r.id === meta.id), full = region.members.length >= SEAT_LIMIT;
-    return `<button class="region-card" data-region="${meta.id}" ${full || !engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${meta.name}</span><span class="seats">${region.members.length}/${SEAT_LIMIT} ${full ? "— команда заполнена" : "— свободно"}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") || "Пока никого"}</span></button>`;
-  }).join("");
+  $("team-search").hidden = state.regions.length <= 8;
+  const query = $("team-search").hidden ? "" : $("team-search").value.trim().toLocaleLowerCase();
+  $("registration-capacity").textContent = `${state.regions.length} команд · ${state.regions.reduce((sum,t)=>sum+t.members.length,0)} / ${state.regions.length*SEAT_LIMIT} участников`;
+  const teams = state.regions.filter(t=>!query || `${t.name} ${metadataFor(t).baseRegionId} ${REGIONS.find(r=>r.id===metadataFor(t).baseRegionId).name}`.toLocaleLowerCase().includes(query));
+  $("region-grid").innerHTML = teams.map(region => {
+    const meta = metadataFor(region), full = region.members.length >= SEAT_LIMIT;
+    return `<button class="region-card" data-region="${meta.id}" ${full || !engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${h(meta.name)}</span><span class="team-region-sub">${h(REGIONS.find(r=>r.id===meta.baseRegionId).name)}</span><span class="seats">${region.members.length}/${SEAT_LIMIT} ${full ? "— команда заполнена" : "— свободно"}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") || "Пока никого"}</span></button>`;
+  }).join("") || '<p class="mut">Команды не найдены</p>';
 }
+$("team-search").addEventListener("input",()=>{if(engine.state)renderRegistration(engine.state)});
 $("region-grid").addEventListener("click", async event => {
   const card = event.target.closest("[data-region]");
   if (!card || joining || !engine.connected) return;
@@ -38,12 +43,12 @@ $("leave-btn").addEventListener("click", () => {
 
 function renderTeam(state) {
   const player = state.viewer.player;
-  const region = state.regions.find(r => r.id === player.regionId), meta = REGIONS.find(r => r.id === player.regionId);
+  const region = state.regions.find(r => r.id === player.regionId), meta = metadataFor(region);
   const crisis = region.economy < CRISIS_THRESHOLD, development = developmentFor(region.points);
   $("my-name").textContent = player.name;
   $("my-region-tag").textContent = meta.name;
   $("my-region-tag").style.color = meta.color;
-  $("team-panel").innerHTML = `<h2 style="color:${meta.color}">${meta.name}</h2><div class="stat-row"><div class="stat"><span class="mut">Культурный ресурс</span><b class="gold">${region.points}<small> / ${RESOURCE_CAP}</small></b></div><div class="stat"><span class="mut">Экономика</span><b class="${crisis ? "red" : "cyan"}">${region.economy}%</b></div></div><div class="bar"><i style="width:${region.economy}%;background:var(--${crisis ? "red" : "cyan"})"></i></div>${crisis ? '<p class="red" style="margin-top:8px">Культурно-экономический кризис: регион теряет влияние.</p>' : ""}<section class="development ${development.complete ? 'complete' : ''}" aria-label="Развитие региона"><div class="development-heading"><span>${development.complete ? '✦' : '⌂'} ${development.name}</span><span>${Math.round(development.progress * 100)}%</span></div><div class="development-track" role="progressbar" aria-valuenow="${region.points}" aria-valuemin="0" aria-valuemax="${RESOURCE_CAP}" aria-label="Строительство города"><i style="width:${development.progress * 100}%"></i>${DEVELOPMENT_STAGES.slice(1).map(step => `<span class="milestone ${region.points >= step.at ? 'reached' : ''}" style="left:${step.at / RESOURCE_CAP * 100}%" title="${step.name}: ${step.at}"></span>`).join('')}</div><p class="development-note">${development.complete ? 'Город построен. Предел ресурса — 1000. Вы можете продолжать отвечать вместе с группой.' : `${development.description}. Далее: ${development.next.name} · ${development.next.at} ресурсов.`}</p></section><h3 style="margin-top:16px">Команда (${region.members.length}/${SEAT_LIMIT})</h3><ul class="team-roster">${region.members.map(m => `<li><span class="presence ${m.online ? "online" : ""}"></span>${h(m.name)}${m.pid === player.pid ? ' <span class="mut">(вы)</span>' : ""}${!m.online ? ' <span class="mut">· вне сети</span>' : ""}</li>`).join("")}</ul>`;
+  $("team-panel").innerHTML = `<h2 style="color:${meta.color}">${h(meta.name)}</h2><div class="stat-row"><div class="stat"><span class="mut">Культурный ресурс</span><b class="gold">${region.points}<small> / ${RESOURCE_CAP}</small></b></div><div class="stat"><span class="mut">Экономика</span><b class="${crisis ? "red" : "cyan"}">${region.economy}%</b></div></div><div class="bar"><i style="width:${region.economy}%;background:var(--${crisis ? "red" : "cyan"})"></i></div>${crisis ? '<p class="red" style="margin-top:8px">Культурно-экономический кризис: регион теряет влияние.</p>' : ""}<section class="development ${development.complete ? 'complete' : ''}" aria-label="Развитие региона"><div class="development-heading"><span>${development.complete ? '✦' : '⌂'} ${development.name}</span><span>${Math.round(development.progress * 100)}%</span></div><div class="development-track" role="progressbar" aria-valuenow="${region.points}" aria-valuemin="0" aria-valuemax="${RESOURCE_CAP}" aria-label="Строительство города"><i style="width:${development.progress * 100}%"></i>${DEVELOPMENT_STAGES.slice(1).map(step => `<span class="milestone ${region.points >= step.at ? 'reached' : ''}" style="left:${step.at / RESOURCE_CAP * 100}%" title="${step.name}: ${step.at}"></span>`).join('')}</div><p class="development-note">${development.complete ? 'Город построен. Предел ресурса — 1000. Вы можете продолжать отвечать вместе с группой.' : `${development.description}. Далее: ${development.next.name} · ${development.next.at} ресурсов.`}</p></section><h3 style="margin-top:16px">Команда (${region.members.length}/${SEAT_LIMIT})</h3><ul class="team-roster">${region.members.map(m => `<li><span class="presence ${m.online ? "online" : ""}"></span>${h(m.name)}${m.pid === player.pid ? ' <span class="mut">(вы)</span>' : ""}${!m.online ? ' <span class="mut">· вне сети</span>' : ""}</li>`).join("")}</ul>`;
 }
 
 function renderQuestion(state) {
@@ -99,7 +104,8 @@ engine.onChange(state => {
     catch { sceneError = "3D недоступно в этом браузере. Командная игра продолжает работать."; message(sceneError, true); }
   }
   if (scene) {
-    if (focusedRegion !== player.regionId) { scene.focusRegion(player.regionId); focusedRegion = player.regionId; }
+    const base = metadataFor(state.regions.find(t=>t.id===player.regionId)).baseRegionId;
+    if (focusedRegion !== base) { scene.focusRegion(base); focusedRegion = base; }
     scene.update(state, player.regionId);
   }
   if (previousRound !== state.round?.id) { previousRound = state.round?.id; message(sceneError); }
