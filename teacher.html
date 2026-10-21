@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Мәдениеттану — преподаватель</title>
+<link rel="stylesheet" href="styles.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="teacher-login" class="reg-screen">
+  <form id="teacher-login-form" class="reg-card glass">
+    <h1>Панель преподавателя</h1>
+    <p class="mut">Введите пароль управления этой игрой.</p>
+    <label for="teacher-password" class="mut">Пароль преподавателя</label>
+    <input id="teacher-password" type="password" required minlength="8" maxlength="256" autocomplete="current-password">
+    <button id="teacher-login-btn" class="pri" type="submit" style="margin-top:16px">Войти</button>
+    <p id="teacher-login-error" class="red" role="status" style="min-height:20px;margin-top:12px"></p>
+    <p id="teacher-login-connection" class="mut" style="margin-top:8px"></p>
+  </form>
+</div>
+<div id="teacher-app" class="app" style="display:none">
+  <div class="topbar">
+    <h1>Мәдениеттану — панель преподавателя</h1>
+    <div class="spacer"></div>
+    <span id="phase-pill" class="pill"></span>
+    <span id="conn-status" class="pill"></span>
+    <button class="ghost" id="export-btn">Выгрузить ведомость</button>
+    <button class="ghost" id="dev-open-btn">Инструменты разработчика</button>
+    <button class="danger" id="reset-btn">Сбросить игру</button>
+    <button class="ghost" id="logout-btn">Выйти</button>
+  </div>
+  <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
+
+  <div id="dev-overlay" style="display:none;position:fixed;inset:0;background:rgba(3,7,11,0.72);z-index:50;align-items:center;justify-content:center;padding:20px">
+    <div class="glass" style="width:min(640px,100%);max-height:86dvh;overflow:auto;padding:22px">
+      <div class="row" style="justify-content:space-between">
+        <h2>Инструменты разработчика</h2>
+        <button class="ghost" id="dev-close-btn">Закрыть</button>
+      </div>
+
+      <div id="dev-panel">
+        <p class="mut" style="margin-top:10px">Редактор ресурсов, экономики, участников и вопросов. Новых игроков добавляют через регистрацию. Для изменения текущего вопроса сначала завершите раунд.</p>
+        <div class="row" style="margin:10px 0">
+          <button id="dev-refresh-btn">Обновить из текущего состояния</button>
+          <button id="dev-free-all-btn">Освободить все слоты</button>
+          <button id="dev-force-resolve-btn">Принудительно завершить раунд</button>
+          <button id="dev-backup-btn">Скачать JSON</button>
+        </div>
+        <textarea id="dev-json" rows="16" style="font-family:monospace;font-size:12.5px"></textarea>
+        <p id="dev-msg" class="mut" style="min-height:18px;margin-top:6px"></p>
+        <div class="row">
+          <button class="pri" id="dev-apply-btn">Apply Hotfix</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="t-grid">
+    <div class="t-col">
+      <div class="glass" style="flex:1;min-height:380px;position:relative;overflow:hidden">
+        <canvas id="scene-canvas"></canvas>
+        <div class="hint">Проекторный вид · тяните для вращения</div>
+      </div>
+      <div class="glass dock-panel">
+        <h2>Команды</h2>
+        <table class="roster-table" id="roster-table"></table>
+      </div>
+    </div>
+
+    <div class="t-col">
+      <div class="glass dock-panel" id="round-control"></div>
+      <div class="glass dock-panel" id="question-builder"></div>
+      <div class="glass dock-panel">
+        <h2>Журнал событий</h2>
+        <ul class="log-list" id="log-list"></ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="teacher.js"></script>
+</body>
+</html>

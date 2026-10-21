@@ -1,0 +1,28 @@
+# Не загружайте .env. Render запросит пароль и сам создаст секрет сессий.
+databases:
+  - name: culture-quest-db
+    plan: free
+    region: frankfurt
+    databaseName: culturequest
+    user: culturequest
+
+services:
+  - type: web
+    name: culture-quest
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TEACHER_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: culture-quest-db
+          property: connectionString

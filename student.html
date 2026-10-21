@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Мәдениеттану — участник</title>
+<link rel="stylesheet" href="styles.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<div id="reg-screen" class="reg-screen">
+  <div class="reg-card glass">
+    <h1>Мәдениеттану: Великий путь</h1>
+    <span class="mut">Введите имя и выберите свободную команду региона.</span>
+    <input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="40" autocomplete="off">
+    <p id="reg-conn-status" class="mut" style="margin-top:10px"></p>
+    <div id="region-grid" class="region-grid"></div>
+    <p id="reg-error" class="mut" style="margin-top:12px;min-height:18px"></p>
+  </div>
+</div>
+
+<div id="app" class="app" style="display:none">
+  <div class="topbar">
+    <h1 style="font-size:20px">Мәдениеттану</h1>
+    <span id="my-region-tag" class="region-tag"></span>
+    <div class="spacer"></div>
+    <span id="conn-status" class="pill"></span>
+    <span id="my-name" class="mut"></span>
+    <button id="leave-btn" class="ghost">Выйти из команды</button>
+  </div>
+  <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
+  <div class="stage-wrap">
+    <canvas id="scene-canvas"></canvas>
+    <div class="hint">Тяните — вращение · колесо — масштаб</div>
+  </div>
+  <div class="dock">
+    <div class="glass dock-panel" id="question-panel"></div>
+    <div class="glass dock-panel" id="team-panel"></div>
+  </div>
+</div>
+
+<script type="module" src="student.js"></script>
+</body>
+</html>
