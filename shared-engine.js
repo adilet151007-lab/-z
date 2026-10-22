@@ -1,6 +1,6 @@
 import { io } from "/socket.io/socket.io.esm.min.js";
 import { PRIVACY_VERSION, DEFAULT_SUBJECT } from './game-config.js';
-export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity, CREATOR_TEAM_ID, isCreatorTeam, regularTeams, MODE_NAMES, soloMultiplier } from "./game-config.js";
+export { REGIONS, CITIES, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity, CREATOR_TEAM_ID, isCreatorTeam, regularTeams, MODE_NAMES, soloMultiplier } from "./game-config.js";
 
 export const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 
@@ -45,6 +45,19 @@ export function setupPresentationEffects(engine) {
   return ()=>{stop();off();engine.socket.off('ui:presentation-effect',receive)};
 }
 
+export function setupAmbientAudio(){
+  const bar=document.querySelector('.app .topbar');if(!bar)return;
+  const controls=document.createElement('div');controls.className='music-controls';controls.innerHTML='<button type="button" data-music-toggle aria-pressed="false">♫ Музыка</button><label class="sr-only" for="cq-music-volume">Громкость фоновой музыки</label><input id="cq-music-volume" type="range" min="0" max="30" value="8" aria-label="Громкость музыки">';bar.append(controls);
+  const button=controls.querySelector('button'),slider=controls.querySelector('input');try{slider.value=localStorage.getItem('cq_music_volume_v1')||'8'}catch{}
+  let context=null,master=null,enabled=false,timer=null,step=0;const voices=new Set(),chords=[[130.81,164.81,196],[110,130.81,164.81],[87.31,130.81,174.61],[98,146.83,196]];
+  function chord(){if(!enabled||document.hidden||!context)return;const start=context.currentTime+.05;for(const hz of chords[step++%chords.length]){const wave=context.createOscillator(),gain=context.createGain();wave.type='sine';wave.frequency.value=hz;gain.gain.setValueAtTime(0,start);gain.gain.linearRampToValueAtTime(.07,start+1.6);gain.gain.linearRampToValueAtTime(0,start+6.4);wave.connect(gain);gain.connect(master);voices.add(wave);wave.onended=()=>{voices.delete(wave);wave.disconnect();gain.disconnect()};wave.start(start);wave.stop(start+6.5)}}
+  function pause(){clearInterval(timer);timer=null;for(const voice of voices)try{voice.stop()}catch{}voices.clear();context?.suspend().catch(()=>{})}
+  async function play(){if(document.hidden)return;const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw new Error('Браузер не поддерживает звук');context??=new Audio();if(!master){master=context.createGain();master.connect(context.destination)}master.gain.value=Number(slider.value)/100;await context.resume();chord();clearInterval(timer);timer=setInterval(chord,6000)}
+  button.addEventListener('click',async()=>{enabled=!enabled;try{if(enabled)await play();else pause()}catch{enabled=false;pause();button.title='Разрешите воспроизведение звука в браузере.'}button.setAttribute('aria-pressed',String(enabled));button.textContent=enabled?'♫ Выключить':'♫ Музыка'});
+  slider.addEventListener('input',()=>{if(master)master.gain.setTargetAtTime(Number(slider.value)/100,context.currentTime,.1);try{localStorage.setItem('cq_music_volume_v1',slider.value)}catch{}});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();else if(enabled)play().catch(()=>{})});window.addEventListener('pagehide',pause);
+}
+
 export class GameEngine {
   constructor(mode = "student") {
     this.mode = mode;
@@ -54,18 +67,19 @@ export class GameEngine {
     this.offset = 0;
     this.listeners = new Set();
     this.chatListeners=new Set();this.chatMeta=null;this.chatView=null;
-    this.socket = io({ autoConnect: false,reconnection:true,reconnectionDelay:2000,reconnectionDelayMax:2000,randomizationFactor:0,timeout:30000, auth: callback => callback({ playerToken: mode === "student" ? creatorToken()||getToken("cq_player_token_v2") : undefined, teacherToken: mode === "teacher" ? getToken("cq_teacher_token_v2") : undefined }) });
-    this.socket.on("connect", () => { this.connected = true; this.error = ""; this.emit(); });
-    this.socket.on("disconnect", () => { this.connected = false; this.emit(); });
+    this.cookieSessions=typeof document!=='undefined';this.legacyToken=this.cookieSessions?(mode==='student'?creatorToken()||getToken('cq_player_token_v2'):getToken('cq_teacher_token_v2')):null;
+    this.socket = io({ autoConnect: false,reconnection:true,reconnectionDelay:2000,reconnectionDelayMax:2000,randomizationFactor:0,timeout:30000, auth: callback => callback({surface:mode,...(!this.cookieSessions?{playerToken:mode==='student'?creatorToken()||getToken('cq_player_token_v2'):undefined,teacherToken:mode==='teacher'?getToken('cq_teacher_token_v2'):undefined}:{})}) });
+    this.socket.on('connect',async()=>{this.httpProof=null;this.connected=!this.legacyToken;this.error=this.legacyToken?'Восстанавливаем вашу сессию…':'';this.emit();if(this.legacyToken&&!this.migrationTried){this.migrationTried=true;try{await this.bindSession(mode==='teacher'?'teacher':'player',this.legacyToken);this.legacyToken=null;this.clearLegacyTokens();this.socket.disconnect().connect()}catch(error){if(error.code==='SESSION_EXPIRED'){this.legacyToken=null;this.clearLegacyTokens();this.connected=true;this.error=''}else this.error='Не удалось восстановить прежний вход. Обновите страницу после подключения.';this.emit()}}});
+    this.socket.on('session:ready',data=>{this.httpProof=data.proof});
+    this.socket.on("disconnect", () => {this.httpProof=null;this.connected = false; this.emit(); });
     this.socket.on("connect_error", () => { this.connected = false; this.error = "Подключение к серверу... (пробуждение инстанса может занять до 30 сек)"; this.emit(); });
     this.socket.on("state", state => {
       const previous=this.state?.viewer,changed=previous?.role!==state.viewer.role||previous?.player?.pid!==state.viewer.player?.pid||previous?.player?.regionId!==state.viewer.player?.regionId;
       this.state = state;
-      if(mode==='student')try{if(state.viewer.player)localStorage.setItem('cq_session_v3',JSON.stringify({playerId:state.viewer.player.pid,teamId:state.viewer.player.regionId,mode:state.settings.mode||'team',name:state.viewer.player.name}));else localStorage.removeItem('cq_session_v3');if(state.viewer.isDevTelemetry)localStorage.setItem('isDevTelemetry','true');else localStorage.removeItem('isDevTelemetry')}catch{}
+      if(mode==='student')try{if(state.viewer.player)localStorage.setItem('cq_session_v3',JSON.stringify({playerId:state.viewer.player.pid,teamId:state.viewer.player.regionId,mode:state.settings.mode||'team',name:state.viewer.player.name}));else localStorage.removeItem('cq_session_v3');localStorage.removeItem('isDevTelemetry')}catch{}
       if(changed){this.chatMeta=null;this.chatView=null;this.emitChat()}
       this.offset = state.serverTime - Date.now();
-      if (mode === "student" && !state.viewer.player) {setToken("cq_player_token_v2", null);saveCreatorToken(null)}
-      if (mode === "teacher" && state.viewer.role !== "teacher") setToken("cq_teacher_token_v2", null);
+      if(!this.legacyToken){if(mode==='student'&&!state.viewer.player){setToken('cq_player_token_v2',null);saveCreatorToken(null)}if(mode==='teacher'&&state.viewer.role!=='teacher')setToken('cq_teacher_token_v2',null)}
       this.emit();
     });
     this.socket.on('chat:meta',meta=>{this.chatMeta=meta;this.emitChat()});
@@ -86,16 +100,20 @@ export class GameEngine {
   sendChat(room,text,clientId){return this.request('chatSend',{room,text,clientId})}
   deleteChatMessage(messageId){return this.request('chatDelete',{messageId})}
   request(event, data = {}) {
-    if (!this.connected) return Promise.reject(new Error("Нет связи с сервером. Дождитесь подключения."));
+    if (!this.connected||this.legacyToken) return Promise.reject(new Error(this.legacyToken?'Идёт восстановление прежнего входа. Дождитесь подключения.':'Нет связи с сервером. Дождитесь подключения.'));
+    if(this.cookieSessions&&['applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions'].includes(event))return this.httpRequest('/api/bulk/'+event,data);
     return new Promise((resolve, reject) => this.socket.timeout(20000).emit(event, data, (error, response) => {
       if (error) { reject(new Error("Сервер не подтвердил действие. Проверьте состояние перед повтором.")); return; }
       if (!response?.ok) {
         if (response?.code === "FORBIDDEN" && this.mode === "teacher") { setToken("cq_teacher_token_v2", null); this.socket.disconnect().connect(); }
-        reject(new Error(response?.error || "Действие не выполнено.")); return;
+        reject(Object.assign(new Error(response?.error || 'Действие не выполнено.'),{code:response?.code})); return;
       }
       resolve(response);
     }));
   }
+  async httpRequest(path,data){if(!this.httpProof)await new Promise((resolve,reject)=>{const ready=()=>{clearTimeout(wait);resolve()},wait=setTimeout(()=>{this.socket.off('session:ready',ready);reject(new Error('Подключение ещё не готово. Повторите действие.'))},5000);this.socket.once('session:ready',ready)});if(!this.socket.connected)throw new Error('Нет связи с сервером.');const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const response=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CQ-Client':'1','X-CQ-Socket':this.socket.id,'X-CQ-Proof':this.httpProof,'X-CQ-Surface':this.mode},body:JSON.stringify(data),signal:controller.signal});const result=await response.json();if(!result.ok)throw Object.assign(new Error(result.error||'Запрос не выполнен.'),{code:result.code});return result}finally{clearTimeout(timer)}}
+  bindSession(role,token){return this.httpRequest('/api/session',{role,token})}
+  clearLegacyTokens(){for(const key of ['cq_player_token_v2','cq_creator_session_v1','cq_teacher_token_v2','isDevTelemetry'])setToken(key,null)}
   allQuestions() { return (this.state?.questions || []).filter(q=>(q.subject||DEFAULT_SUBJECT)===(this.state?.branding?.subject||DEFAULT_SUBJECT)); }
   remainingSeconds() {
     const round = this.state?.round;
@@ -104,17 +122,24 @@ export class GameEngine {
   }
   async joinTeam(regionId, name, accepted = false) {
     const result = await this.request("joinTeam", { regionId, name, privacyConsent:{accepted,version:PRIVACY_VERSION} });
-    setToken("cq_player_token_v2", result.playerToken);
-    saveCreatorToken(result.isCreator?result.playerToken:null);
+    if(result.sessionMethod==='cookie'){await this.bindSession('player',result.playerToken);this.clearLegacyTokens();this.socket.disconnect().connect()}else{setToken('cq_player_token_v2',result.playerToken);saveCreatorToken(result.isCreator?result.playerToken:null)}
     return result;
   }
   async teacherLogin(password) {
     const result = await this.request("teacherLogin", { password });
-    setToken("cq_teacher_token_v2", result.teacherToken);
+    if(result.sessionMethod==='cookie'){await this.bindSession('teacher',result.teacherToken);this.clearLegacyTokens();this.socket.disconnect().connect()}else setToken('cq_teacher_token_v2',result.teacherToken);
     return result;
   }
-  async teacherLogout() { await this.request("teacherLogout"); setToken("cq_teacher_token_v2", null); }
-  async leaveTeam() { await this.request("leaveTeam"); setToken("cq_player_token_v2", null);saveCreatorToken(null); }
+  async teacherLogout() {if(this.state?.viewer.isCreator){window.location.href='./student.html';return}if(this.cookieSessions)await this.httpRequest('/api/session',{role:'teacher',action:'clear'});await this.request('teacherLogout');setToken('cq_teacher_token_v2',null)}
+  async leaveTeam() {await this.request('leaveTeam');if(this.cookieSessions)await this.httpRequest('/api/session',{role:'player',action:'clear'});setToken('cq_player_token_v2',null);saveCreatorToken(null)}
+  voteLeader(accept){return this.request('voteLeader',{accept,roundId:this.state?.round?.id})}
+  setTeamRules(decision,tradeEnabled){return this.request('setTeamRules',{decision,tradeEnabled})}
+  setLeader(teamId,pid){return this.request('setLeader',{teamId,pid})}
+  offerTrade(toTeamId,resources,economy){return this.request('offerTrade',{toTeamId,resources,economy})}
+  settleTrade(id,accept){return this.request('settleTrade',{id,accept})}
+  createAdminInvite(permissions,minutes,effectDuration){return this.request('createAdminInvite',{permissions,minutes,effectDuration})}
+  revokeAdminInvite(id){return this.request('revokeAdminInvite',{id})}
+  rotateAccessKey(){return this.request('rotateAccessKey')}
   castVote(optionIdx) { return this.request("castVote", { optionIdx, roundId: this.state?.round?.id }); }
   confirmVote(pid){return this.request('confirmVote',{pid,roundId:this.state?.round?.id})}
   cancelVote(){return this.request('cancelVote',{roundId:this.state?.round?.id})}
@@ -143,7 +168,7 @@ export class GameEngine {
   adjustPoints(regionId, delta) { return this.request("adjustPoints", { regionId, delta }); }
   adjustEconomy(regionId, delta) { return this.request("adjustEconomy", { regionId, delta }); }
   addCustomQuestion(text, options, correctIdx, points) { return this.request("addCustomQuestion", { text, options, correctIdx, points }); }
-  createTeam(name, baseRegionId, capacity, points, economy) { return this.request("createTeam",{name,baseRegionId,capacity,points,economy}); }
+  createTeam(name, baseRegionId, capacity, points, economy,cityId) { return this.request("createTeam",{name,baseRegionId,capacity,points,economy,cityId}); }
   expandTeams(count) { return this.request("expandTeams",{count}); }
   async planTeamCount(count) { return (await this.request("planTeamCount",{count})).plan; }
   setTeamCount(count,layoutToken) { return this.request("setTeamCount",{count,layoutToken}); }

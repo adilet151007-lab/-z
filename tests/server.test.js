@@ -22,7 +22,7 @@ const waitFor = async condition => {
   while (!condition()) { if (Date.now() > deadline) throw new Error("Timed out waiting for state"); await new Promise(r => setTimeout(r, 10)); }
 };
 async function fixture(t, extra = {}) {
-  const server = await createGameServer({ ...config, legacyRules:true, store: new MemoryStore(), ...extra });
+  const server = await createGameServer({ ...config, cookieSessions:false,flexibleTeams:false,legacyRules:true, store: new MemoryStore(), ...extra });
   const port = await server.listen(0, "127.0.0.1"), clients = [];
   t.after(async () => { clients.forEach(socket => socket.disconnect()); await server.close(); });
   const connect = async (auth = {}) => {

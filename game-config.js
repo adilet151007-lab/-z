@@ -5,6 +5,7 @@ export const DEFAULT_SUBJECT = 'Мәдениеттану';
 export const DEFAULT_BRANDING = {university:'Учебный проект',title:'Мәдениеттану 3D',subject:DEFAULT_SUBJECT,subjects:[DEFAULT_SUBJECT],accent:'#3FE0D0',gold:'#F3C25D',logo:'',operator:'',privacyContact:''};
 export const MAX_TEAMS = 50;
 export const MAX_TEAM_CAPACITY = 50;
+export const MAX_PLAYERS = 500;
 export const CREATOR_TEAM_ID = "creators";
 export const CREATOR_NAMES = { ernur: "Ернур", adilet: "Адилет" };
 export const MODE_NAMES = {team:'Аймақтық одақ',solo:'Жеке сайыс'};
@@ -51,19 +52,33 @@ export const REGIONS = [
   { id: "shymkent", name: "Шымкент", geoId: "KZ79", biome: "city", color: "#BF8EAF", glow: "#ECC0DD" }
 ];
 
+export const CITIES = [
+  ['mangystau','zhanaozen','Жаңаөзен'],['karaganda','temirtau','Теміртау'],['jetisu','tekeli','Текелі'],
+  ['turkistan','arys','Арыс'],['abai','ayagoz','Аягөз'],['akmola','stepnogorsk','Степногорск'],
+  ['aktobe','khromtau','Хромтау'],['almaty-region','talgar','Талғар'],['atyrau','kulsary','Құлсары'],
+  ['west-kazakhstan','aksay','Ақсай'],['zhambyl','shu','Шу'],['kostanay','rudny','Рудный'],
+  ['kyzylorda','aral','Арал'],['pavlodar','ekibastuz','Екібастұз'],['north-kazakhstan','taiynsha','Тайынша'],
+  ['ulytau','satpayev','Сәтбаев'],['east-kazakhstan','ridder','Риддер'],
+  ['mangystau','aktau','Ақтау'],['karaganda','karaganda-city','Қарағанды'],['jetisu','taldykorgan','Талдықорған'],
+  ['turkistan','turkistan-city','Түркістан'],['abai','semey','Семей'],['akmola','kokshetau','Көкшетау'],
+  ['aktobe','aktobe-city','Ақтөбе'],['almaty-region','konaev','Қонаев'],['atyrau','atyrau-city','Атырау'],
+  ['west-kazakhstan','oral','Орал'],['zhambyl','taraz','Тараз'],['kostanay','kostanay-city','Қостанай'],
+  ['kyzylorda','kyzylorda-city','Қызылорда'],['pavlodar','pavlodar-city','Павлодар'],
+  ['north-kazakhstan','petropavl','Петропавл'],['ulytau','zhezkazgan','Жезқазған'],['east-kazakhstan','oskemen','Өскемен']
+].map(([baseRegionId,id,name])=>({baseRegionId,id,name}));
 export const capacityFor = team => team.capacity ?? SEAT_LIMIT;
 export const totalCapacity = teams => teams.reduce((sum, team) => sum + capacityFor(team), 0);
 export const normalizeRegionId = id => id === "saryarka" ? "karaganda" : id;
 export function metadataFor(team) {
   const base = REGIONS.find(r => r.id === normalizeRegionId(team.baseRegionId || team.id)) || REGIONS[0];
-  return { ...base, id: team.id, baseRegionId: base.id, name: team.name || base.name };
+  return { ...base, id: team.id, baseRegionId: base.id, name: team.name || base.name,cityId:team.cityId||null };
 }
 export function mapRegionsFor(teams, focusedTeamId = null) {
   const focused = teams.find(t => t.id === focusedTeamId);
   return REGIONS.map(base => {
     const peers = teams.filter(t => metadataFor(t).baseRegionId === base.id);
     const selected = focused && metadataFor(focused).baseRegionId === base.id ? [focused] : peers;
-    const occupied = selected.filter(t => t.members.length);
+    const occupied = selected.filter(t => (t.occupied??t.members.length)>0||t.members.length>0);
     const source = occupied.length ? occupied : selected;
     return { id: base.id, points: source.length ? Math.round(source.reduce((sum, t) => sum + t.points, 0) / source.length) : 0, economy: source.length ? Math.round(source.reduce((sum, t) => sum + t.economy, 0) / source.length) : 100 };
   });

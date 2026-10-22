@@ -302,7 +302,7 @@ export function createScene(canvas, opts = {}) {
   function setLowPower(value){lowPower=!!value;renderer.setPixelRatio(Math.min(lowPower?1:1.5,window.devicePixelRatio||1));renderer.shadowMap.enabled=!lowPower;try{localStorage.setItem('cq_graphics_v1',lowPower?'low':'standard')}catch{}paintQuality();wake()}
   qualityButton.addEventListener('click',()=>setLowPower(!lowPower));paintQuality();
   hud.append(homeButton,regionSelect,qualityButton); canvas.parentElement.append(hud);
-  let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true,sceneVisible=true,requestedVisible=true,renderingReady=false,activeUntil=0;
+  let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true,sceneVisible=true,requestedVisible=true,renderingReady=false,activeUntil=0,latestState=null,mapPreview=null,lastFocusId;
   function wake(ms=180){activeUntil=performance.now()+ms;if(renderingReady&&!frame&&!disposed&&sceneVisible&&requestedVisible&&!document.hidden)frame=requestAnimationFrame(animate)}
   function setVisible(value){if(requestedVisible===value)return;requestedVisible=value;if(value)wake();else{cancelAnimationFrame(frame);frame=0}}
   function moveCamera(target, distance) {
@@ -310,14 +310,15 @@ export function createScene(canvas, opts = {}) {
     wake();
   }
   function overview() {
-    selected = null; regionSelect.value="";
+    selected = null;mapPreview=null;regionSelect.value="";if(latestState)update(latestState,lastFocusId);
     const halfFov = THREE.MathUtils.degToRad(camera.fov / 2), distance = Math.max(44, 44 / (Math.tan(halfFov) * camera.aspect));
     moveCamera(new THREE.Vector3(0, 0, 0), Math.min(138, distance));
   }
   homeButton.addEventListener("click", overview);
   function focusRegion(id) {
-    const region = regions.find(r => r.meta.id === id); if (!region) return;
-    selected = id; regionSelect.value=id;
+    const team=latestState?.regions.find(t=>t.id===id),baseId=team?metadataFor(team).baseRegionId:id;
+    const region = regions.find(r => r.meta.id === baseId); if (!region) return;
+    selected = baseId;regionSelect.value=id;mapPreview=team?.id||null;if(latestState)update(latestState,lastFocusId);
     const width = region.data.bounds[2] - region.data.bounds[0], depth = region.data.bounds[3] - region.data.bounds[1];
     const target = new THREE.Vector3(region.data.city[0], region.group.position.y + .71, region.data.city[1]);
     const distance = Math.max(4, Math.max(width / Math.max(.8, camera.aspect), depth * .9) * 1.65);
@@ -338,17 +339,18 @@ export function createScene(canvas, opts = {}) {
   function resize() {
     const w = canvas.clientWidth, h = canvas.clientHeight; if (!w || !h) return;
     renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
-    if (selected) focusRegion(selected); else overview();
+    if (selected) focusRegion(mapPreview||selected); else overview();
     if (initial && cameraTween) { camera.position.copy(cameraTween.position); controls.target.copy(cameraTween.target); cameraTween = null; initial = false; }
     wake();
   }
   const observer = new ResizeObserver(resize); observer.observe(canvas); resize();
   let stateKey='';
   function update(state, selectedRegionId) {
-    const key=JSON.stringify([selectedRegionId,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.points,r.economy,r.members.length])]);if(key===stateKey)return;stateKey=key;
-    const selectedTeam = state.regions.find(t=>t.id===selectedRegionId);
+    latestState=state;if(selectedRegionId!==lastFocusId){mapPreview=selectedRegionId||null;lastFocusId=selectedRegionId}const previewId=mapPreview,key=JSON.stringify([previewId,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.cityId,r.points,r.economy,r.occupied??r.members.length])]);if(key===stateKey)return;stateKey=key;
+    const cityOptions=state.regions.filter(t=>t.cityId).map(t=>`<option value="${t.id}">${String(t.name).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</option>`).join('');if(regionSelect.dataset?.cities!==cityOptions){const value=regionSelect.value;regionSelect.innerHTML='<option value="">Найти регион…</option>'+REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')+(cityOptions?'<optgroup label="Команды городов · территория области">'+cityOptions+'</optgroup>':'');if(regionSelect.dataset)regionSelect.dataset.cities=cityOptions;regionSelect.value=value;regionSelect.title='Города команд показываются на территории своей области.';}
+    const selectedTeam = state.regions.find(t=>t.id===previewId);
     const selectedBase = selectedTeam ? metadataFor(selectedTeam).baseRegionId : null;
-    for (const r of mapRegionsFor(state.regions,selectedRegionId)) {
+    for (const r of mapRegionsFor(state.regions,previewId)) {
       const region = regions.find(item => item.meta.id === r.id); if (!region) continue;
       region.points = clamp(r.points, 0, RESOURCE_CAP); region.economy = r.economy;
       region.stage = developmentFor(region.points).index;

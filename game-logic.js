@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, capacityFor, totalCapacity, normalizeRegionId, CREATOR_TEAM_ID, CREATOR_NAMES, isCreatorTeam, regularTeams } from "./game-config.js";
+import { REGIONS, CITIES, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, MAX_PLAYERS, metadataFor, capacityFor, totalCapacity, normalizeRegionId, CREATOR_TEAM_ID, CREATOR_NAMES, isCreatorTeam, regularTeams } from "./game-config.js";
 import { QUESTION_BANK } from "./question-bank.js";
 import {MODE_NAMES,ECONOMY_FLOOR,soloMultiplier,DEFAULT_BRANDING,DEFAULT_SUBJECT} from './game-config.js';
 export { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD } from "./game-config.js";
@@ -12,10 +12,11 @@ function ensure(condition, message, code) {
 }
 export const hashToken = token => createHash("sha256").update(String(token)).digest("hex");
 const integer = (value, min, max) => Number.isSafeInteger(value) && value >= min && value <= max;
-const cleanText = (value, min, max, label) => {
+const cleanText = (value, min, max, label,stored=false) => {
   ensure(typeof value === "string", `${label}: ожидается текст.`);
   const text = value.normalize("NFC").trim();
   ensure(text.length >= min && text.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text), `${label}: длина от ${min} до ${max} символов.`);
+  if(label==='Имя'&&!stored)ensure(!/(?:ROOT_ACCESS|DEV_CONSOLE)|^CQ.{0,2}-/iu.test(text)&&!/^[A-Za-z0-9_#$!.-]{26,128}$/.test(text),'Это похоже на код доступа. Укажите имя без кода.');
   return text;
 };
 
@@ -56,7 +57,7 @@ export function freshState() {
   return { schemaVersion: 5, revision: 0, phase: "lobby", settings: { teamCapacity: SEAT_LIMIT }, regions: initial.map(r => ({ ...r, baseRegionId: normalizeRegionId(r.id), capacity: SEAT_LIMIT, points: 0, economy: 100, members: [] })), questions: validateQuestions(QUESTION_BANK), round: null, delegatedAdmins: [], log: [] };
 }
 
-function validateRegions(regions, knownMembers = null, universal = false, mode = 'team') {
+function validateRegions(regions, knownMembers = null, universal = false, mode = 'team', flexible = false) {
   ensure(Array.isArray(regions) && regularTeams(regions).length >= 1 && regularTeams(regions).length <= MAX_TEAMS && regions.length <= MAX_TEAMS + 1, `Нужно от 1 до ${MAX_TEAMS} обычных команд.`);
   const seenRegions = new Set(), seenPlayers = new Set(), seenNames = new Set(), seenCreators = new Set();
   return regions.map(r => {
@@ -70,7 +71,7 @@ function validateRegions(regions, knownMembers = null, universal = false, mode =
     const capacity = capacityFor(r);
     ensure(!isCreatorTeam(r) || capacity === 2, "В команде создателей ровно два места.");
     ensure(integer(capacity, 1, MAX_TEAM_CAPACITY), `Вместимость команды: 1–${MAX_TEAM_CAPACITY}.`);
-    ensure(Array.isArray(r.members) && (universal ? mode==='solo'||r.members.filter(m=>!(knownMembers?.get(m.pid)||m).creatorId).length<=4 : r.members.length <= capacity), "Количество участников превышает вместимость команды.");
+    ensure(Array.isArray(r.members) && (universal ? mode==='solo'||r.members.filter(m=>!(knownMembers?.get(m.pid)||m).creatorId).length<=(flexible?capacity:4) : r.members.length <= capacity), "Количество участников превышает вместимость команды.");
     const members = r.members.map(m => {
       ensure(m && typeof m.pid === "string" && /^[\w-]{1,80}$/.test(m.pid) && !seenPlayers.has(m.pid), "Некорректный или повторный участник."); seenPlayers.add(m.pid);
       const original = knownMembers ? knownMembers.get(m.pid) : m;
@@ -82,9 +83,10 @@ function validateRegions(regions, knownMembers = null, universal = false, mode =
       } else ensure(!isCreatorTeam(r), "Команда создателей доступна только по персональному коду.");
       const capital=m.capital??original.capital??0,streak=m.streak??original.streak??0;
       if(universal)ensure(integer(capital,0,RESOURCE_CAP)&&integer(streak,0,100000),'Проверьте личный рейтинг и серию.');
-      return { pid: m.pid, name: creatorId&&!universal ? CREATOR_NAMES[creatorId] : cleanText(m.name, 2, 40, "Имя"), tokenHash: original.tokenHash, joinedAt: original.joinedAt, ...(universal?{capital,streak}:{}), ...(creatorId?{creatorId}:{}),...(original.privacyConsent?{privacyConsent:structuredClone(original.privacyConsent)}:{}) };
+      return { pid: m.pid, name: creatorId&&!universal ? CREATOR_NAMES[creatorId] : cleanText(m.name,2,40,'Имя',!knownMembers), tokenHash: original.tokenHash, joinedAt: original.joinedAt, ...(universal?{capital,streak}:{}), ...(creatorId?{creatorId}:{}),...(original.privacyConsent?{privacyConsent:structuredClone(original.privacyConsent)}:{}) };
     });
-    return { id: r.id, name, baseRegionId, capacity, points: r.points, economy: r.economy, members };
+    const cityId=r.cityId||null;ensure(!cityId||CITIES.some(c=>c.id===cityId&&c.baseRegionId===baseRegionId),'Город не относится к выбранной области.');
+    return { id: r.id, name, baseRegionId, capacity, points: r.points, economy: r.economy, members,...(cityId?{cityId}:{}),...(r.leaderPid&&members.some(m=>m.pid===r.leaderPid)?{leaderPid:r.leaderPid}:{}) };
   });
 }
 
@@ -96,17 +98,19 @@ function restoreSnapshot(raw) {
   for (const region of state.regions || []) {
     if (integer(region.points, RESOURCE_CAP + 1, 10000000)) region.points = RESOURCE_CAP;
   }
-  state.regions = validateRegions(state.regions,null,!!state.settings?.universal,state.settings?.mode);
-  state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT,...(state.settings?.universal?{universal:true,mode:state.settings.mode}:{}) };
+  state.regions = validateRegions(state.regions,null,!!state.settings?.universal,state.settings?.mode,!!state.settings?.flexibleTeams);
+  state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT,...(state.settings?.universal?{universal:true,mode:state.settings.mode}:{}),...(state.settings?.flexibleTeams?{flexibleTeams:true,teamDecision:state.settings.teamDecision||'consensus',tradeEnabled:state.settings.tradeEnabled===true}:{}) };
   if(state.settings.universal){
-    ensure(['team','solo'].includes(state.settings.mode)&&state.regions.length===10&&!state.regions.some(isCreatorTeam)&&state.regions.every(t=>t.capacity===4&&t.economy>=15),'Повреждены настройки формата игры.');
+    ensure(['team','solo'].includes(state.settings.mode)&&(state.settings.flexibleTeams||state.regions.length===10)&&!state.regions.some(isCreatorTeam)&&state.regions.every(t=>(state.settings.flexibleTeams||t.capacity===4)&&t.economy>=15),'Повреждены настройки формата игры.');
+    if(state.settings.flexibleTeams)ensure(['consensus','leader'].includes(state.settings.teamDecision),'Неизвестный способ ответа команды.');
     for(const m of state.regions.flatMap(t=>t.members))ensure(integer(m.capital,0,RESOURCE_CAP)&&integer(m.streak,0,100000),'Повреждён личный рейтинг.');
   }
   ensure(integer(state.settings.teamCapacity, 1, MAX_TEAM_CAPACITY), "Повреждена настройка вместимости.");
   state.schemaVersion = 5;
   if(state.exitRequests!==undefined)ensure(Array.isArray(state.exitRequests)&&state.exitRequests.length<=40&&state.exitRequests.every(r=>typeof r.id==='string'&&typeof r.pid==='string'&&typeof r.name==='string'&&Number.isFinite(r.at)&&['pending','accepted','declined'].includes(r.status)), 'Повреждены запросы выхода.');
   if(state.presentationEffectsEnabled!==undefined)ensure(typeof state.presentationEffectsEnabled==='boolean','Повреждена настройка эффектов.');
-  if(state.delegatedAdmins!==undefined)ensure(Array.isArray(state.delegatedAdmins)&&state.delegatedAdmins.length<=200&&state.delegatedAdmins.every(a=>a&&typeof a.pid==='string'&&/^[\w-]{1,80}$/.test(a.pid)&&a.permissions&&typeof a.permissions==='object'&&Number.isInteger(a.effectDuration)&&a.effectDuration>=100&&a.effectDuration<=60000&&typeof a.unlimitedEffects==='boolean'),'Повреждены делегированные права.');
+  if(state.delegatedAdmins!==undefined)ensure(Array.isArray(state.delegatedAdmins)&&state.delegatedAdmins.length<=MAX_PLAYERS&&state.delegatedAdmins.every(a=>a&&typeof a.pid==='string'&&/^[\w-]{1,80}$/.test(a.pid)&&a.permissions&&typeof a.permissions==='object'&&Object.keys(a.permissions).every(k=>['players','questions','game','effects'].includes(k)&&typeof a.permissions[k]==='boolean')&&Number.isInteger(a.effectDuration)&&a.effectDuration>=100&&a.effectDuration<=60000&&typeof a.unlimitedEffects==='boolean'&&(!a.expiresAt||Number.isSafeInteger(a.expiresAt))),'Повреждены делегированные права.');
+  if(state.accessControl!==undefined)ensure(state.accessControl&&typeof state.accessControl==='object'&&state.accessControl.keyOverrides&&Object.keys(state.accessControl.keyOverrides).every(k=>Object.hasOwn(CREATOR_NAMES,k)&&/^[a-f0-9]{64}$/.test(state.accessControl.keyOverrides[k]))&&Array.isArray(state.accessControl.invitations)&&state.accessControl.invitations.length<=MAX_PLAYERS,'Повреждены настройки доступа.');
   state.questions = validateQuestions(state.questions);
   state.branding = validateBranding(state.branding);
   ensure(["lobby", "playing", "ended"].includes(state.phase) && Array.isArray(state.log), "Повреждена структура сохранения.");
@@ -126,11 +130,12 @@ export class GameLogic {
     this.now = clock;
     this.state = snapshot ? restoreSnapshot(snapshot) : freshState();
     this.state.branding ??= structuredClone(DEFAULT_BRANDING);
+    this.state.accessControl ??= {keyOverrides:{},invitations:[]};
   }
   touch() { this.state.revision++; }
   updateBranding(raw){ensure(raw&&typeof raw==='object'&&!Array.isArray(raw),'Проверьте настройки организации.');const next=validateBranding({...this.state.branding,...raw});ensure(!this.state.round||this.state.round.resolved||next.subject===this.state.branding.subject,'Завершите вопрос перед сменой предмета.');this.state.branding=next;this.log('Обновлены оформление и настройки организации.');this.touch()}
   publicBranding(){const {logo,...publicSettings}=this.state.branding;return {...publicSettings,subjects:[...publicSettings.subjects],logoUrl:logo?'/api/logo?v='+hashToken(logo).slice(0,16):''}}
-  backupSnapshot(){const snapshot=structuredClone(this.state);for(const key of ['restorePoints','hotfixBackup','migrationBackup'])delete snapshot[key];if(snapshot.round&&!snapshot.round.resolved){snapshot.round.remainingMs=this.remainingMs();snapshot.round.paused=true;snapshot.round.deadline=null}return snapshot}
+  backupSnapshot(){const snapshot=structuredClone(this.state);for(const key of ['restorePoints','hotfixBackup','migrationBackup','accessControl'])delete snapshot[key];if(snapshot.round&&!snapshot.round.resolved){snapshot.round.remainingMs=this.remainingMs();snapshot.round.paused=true;snapshot.round.deadline=null}return snapshot}
   createRestorePoint(label='Ручная копия',advance=true){
     const point={id:randomUUID(),at:this.now(),label:cleanText(label,2,100,'Название копии'),snapshot:this.backupSnapshot()};
     this.state.restorePoints=[point,...(this.state.restorePoints||[])].slice(0,3);if(advance)this.touch();return point;
@@ -143,7 +148,7 @@ export class GameLogic {
     restored.regions.forEach(t=>{t.members=t.members.filter(m=>!m.creatorId)});
     for(const saved of personal){const team=restored.regions.find(t=>t.id===saved.teamId)||restored.regions[0];team.members.push(saved.member)}
     if(restored.round&&!restored.round.resolved){restored.round.paused=true;restored.round.deadline=null;const ids=new Set(restored.regions.flatMap(t=>t.members.map(m=>m.pid)));for(const key of ['ballots','proposals'])for(const pid of Object.keys(restored.round[key]||{}))if(!ids.has(pid))delete restored.round[key][pid]}
-    restored.revision=this.state.revision;restored.restorePoints=this.state.restorePoints;restored.delegatedAdmins=[];restored.presentationEffectsEnabled=this.state.presentationEffectsEnabled;restored.exitRequests=this.state.exitRequests||[];
+    restored.revision=this.state.revision;restored.restorePoints=this.state.restorePoints;restored.delegatedAdmins=[];restored.accessControl=this.state.accessControl;restored.presentationEffectsEnabled=this.state.presentationEffectsEnabled;restored.exitRequests=this.state.exitRequests||[];if(this.state.settings.flexibleTeams)Object.assign(restored.settings,{flexibleTeams:true,teamDecision:restored.settings.teamDecision||'consensus',tradeEnabled:false});restored.trades=[];
     this.state=restored;this.log('Игра восстановлена из резервной копии. Активный вопрос поставлен на паузу.');this.touch();
   }
   enableUniversal(){
@@ -165,13 +170,20 @@ export class GameLogic {
     ensure(!this.state.round,'Завершите вопрос и вернитесь в лобби перед сменой формата.');
     if(mode===this.state.settings.mode)return;
     const members=this.state.regions.flatMap(t=>t.members);
-    ensure(mode==='solo'||members.filter(m=>!m.creatorId).length<=40,'В командном формате 40 мест. Сначала освободите лишние места или оставайтесь в Solo.');
+    ensure(mode==='solo'||members.filter(m=>!m.creatorId).length<=totalCapacity(this.state.regions),`В командном формате ${totalCapacity(this.state.regions)} мест. Сначала увеличьте вместимость команд.`);
     if(mode==='team'){
-      const excess=[];for(const t of this.state.regions){const normal=t.members.filter(m=>!m.creatorId);excess.push(...normal.slice(4));t.members=t.members.filter(m=>m.creatorId||normal.indexOf(m)<4)}
-      for(const m of excess)this.state.regions.find(t=>t.members.filter(p=>!p.creatorId).length<4).members.push(m);
+      const excess=[];for(const t of this.state.regions){const normal=t.members.filter(m=>!m.creatorId),capacity=capacityFor(t);excess.push(...normal.slice(capacity));t.members=t.members.filter(m=>m.creatorId||normal.indexOf(m)<capacity)}
+      for(const m of excess)this.state.regions.find(t=>t.members.filter(p=>!p.creatorId).length<capacityFor(t)).members.push(m);
     }
     this.state.settings.mode=mode;this.state.phase='lobby';this.log('Формат: '+MODE_NAMES[mode]);this.touch();
   }
+  enableFlexibleTeams(){if(this.state.settings.flexibleTeams)return;this.state.settings.flexibleTeams=true;this.state.settings.teamDecision='consensus';this.state.settings.tradeEnabled=false;this.state.accessControl.legacyHandshakeUntil=this.now()+86400000;this.log('Включены настраиваемые команды областей и городов.');this.touch()}
+  setTeamRules(decision,tradeEnabled){ensure(this.state.settings.flexibleTeams,'Обновите формат сессии.');ensure(!this.state.round||this.state.round.resolved,'Завершите текущий вопрос перед изменением правил.');ensure(['consensus','leader'].includes(decision)&&typeof tradeEnabled==='boolean','Проверьте правила команды.');this.state.settings.teamDecision=decision;this.state.settings.tradeEnabled=tradeEnabled;this.state.trades=[];this.touch()}
+  leaderFor(team){return team.members.find(m=>m.pid===team.leaderPid)?.pid||team.members.find(m=>!m.creatorId)?.pid||team.members[0]?.pid||null}
+  setLeader(teamId,pid){const team=this.region(teamId);this.member(teamId,pid);team.leaderPid=pid;if(this.state.round?.leaderChoices)delete this.state.round.leaderChoices[teamId];this.log('Назначен лидер команды «'+team.name+'».');this.touch()}
+  requireTrading(regionId,pid){const team=this.region(regionId);ensure(this.state.settings.tradeEnabled&&this.state.settings.mode==='team','Обмен ресурсами отключён.');ensure(!this.state.round||this.state.round.resolved,'Обмен доступен между вопросами.');ensure(this.leaderFor(team)===pid,'Предложения обмена подтверждает лидер команды.','LEADER_ONLY');return team}
+  offerTrade(regionId,pid,toTeamId,resources,economy){const from=this.requireTrading(regionId,pid),to=this.region(toTeamId);ensure(from.id!==to.id&&integer(resources,1,RESOURCE_CAP)&&integer(economy,1,85),'Проверьте команды и условия обмена.');ensure(from.points>=resources&&to.economy-economy>=15,'У команды недостаточно ресурса или экономики.');const active=(this.state.trades||[]).filter(t=>t.status==='pending'&&t.expiresAt>this.now());ensure(active.filter(t=>t.from===regionId).length<3,'Не больше трёх активных предложений.');const trade={id:randomUUID(),from:regionId,to:toTeamId,resources,economy,status:'pending',at:this.now(),expiresAt:this.now()+120000};this.state.trades=[...active,trade];this.touch();return {tradeId:trade.id}}
+  settleTrade(regionId,pid,id,accept){this.requireTrading(regionId,pid);ensure(typeof accept==='boolean','Укажите решение.');const trade=this.state.trades?.find(t=>t.id===id);ensure(trade&&trade.status==='pending'&&trade.expiresAt>this.now(),'Предложение уже закрыто или истекло.');ensure(accept?trade.to===regionId:trade.to===regionId||trade.from===regionId,'Это предложение другой команды.','FORBIDDEN');if(accept){const from=this.region(trade.from),to=this.region(trade.to);ensure(from.points>=trade.resources&&to.points+trade.resources<=RESOURCE_CAP&&to.economy-trade.economy>=15&&from.economy+trade.economy<=100,'Баланс изменился или обмен превысит предел. Создайте новое предложение.');from.points-=trade.resources;to.points+=trade.resources;from.economy+=trade.economy;to.economy-=trade.economy;trade.status='accepted';this.log('Команды «'+from.name+'» и «'+to.name+'» подтвердили обмен.')}else trade.status='declined';this.touch()}
   ranking(){return this.state.regions.flatMap(t=>t.members.map(m=>({pid:m.pid,name:m.name,teamId:t.id,capital:m.capital??0,streak:m.streak??0,multiplier:soloMultiplier(m.streak)}))).sort((a,b)=>b.capital-a.capital||b.streak-a.streak||a.name.localeCompare(b.name,'ru'))}
   teamRanking(){return regularTeams(this.state.regions).map(t=>({teamId:t.id,name:t.name,points:t.points,economy:t.economy,members:t.members.filter(m=>!m.creatorId).length,capacity:t.capacity,rating:t.points+t.economy*5,development:developmentFor(t.points).name})).sort((a,b)=>b.rating-a.rating||b.points-a.points||b.economy-a.economy||a.name.localeCompare(b.name,'ru'))}
   log(msg) { this.state.log.unshift({ t: this.now(), msg }); this.state.log = this.state.log.slice(0, 100); }
@@ -188,36 +200,49 @@ export class GameLogic {
     const p = tokenHash && this.findPlayer(tokenHash);
     return p && Object.hasOwn(CREATOR_NAMES,p.creatorId) && (this.state.settings.universal||p.regionId===CREATOR_TEAM_ID) ? p : null;
   }
-  adminGrantFor(pid) { return (this.state.delegatedAdmins || []).find(a => a.pid === pid) || null; }
+  adminGrantFor(pid) { return (this.state.delegatedAdmins || []).find(a => a.pid === pid&&(!a.expiresAt||a.expiresAt>this.now())) || null; }
   adminCan(pid, action) {
     const grant = this.adminGrantFor(pid);
     if (!grant || !this.state.regions.some(t => t.members.some(m => m.pid === pid))) return false;
     if (action === 'renameSelf' || action === 'exportSummary') return Object.values(grant.permissions).some(value => value === true);
+    if(action==='resetGame')return grant.permissions.game===true&&grant.permissions.players===true;
     const scope = action === 'presentationEffect' ? 'effects'
-      : /^(freeSlot|movePlayer|renamePlayer|updatePlayer|renameTeam|removeTeam|removeAllPlayers)$/.test(action) ? 'players'
+      : /^(freeSlot|movePlayer|renamePlayer|updatePlayer|renameTeam|removeTeam|removeAllPlayers|createTeam|expandTeams|planTeamCount|setTeamCount|setTeamCapacity|setAllCapacities|updateTeam|setLeader)$/.test(action) ? 'players'
       : /^(addCustomQuestion|editQuestion|deleteQuestion|importQuestions|analyzeSyllabus|generateQuestions)$/.test(action) ? 'questions'
-      : /^(startRound|switchQuestion|pauseRound|resetTimer|resolveRound|endRound|adjustPoints|adjustEconomy|adjustCapital|setGameMode|setSessionMode|resetGame)$/.test(action) ? 'game' : null;
+      : /^(startRound|switchQuestion|pauseRound|resetTimer|resolveRound|endRound|adjustPoints|adjustEconomy|adjustCapital|setGameMode|setSessionMode|setTeamRules)$/.test(action) ? 'game' : null;
     return !!(scope && grant.permissions[scope] === true);
   }
-  grantAdmin(pid, permissions = {}, effectDuration = 3000, unlimitedEffects = false) {
+  grantAdmin(pid, permissions = {}, effectDuration = 3000, unlimitedEffects = false, expiresAt = null) {
     const member = this.state.regions.flatMap(t => t.members).find(m => m.pid === pid);
     ensure(member && !member.creatorId, 'Нельзя делегировать доступ создателю или отсутствующему игроку.');
     ensure(permissions && typeof permissions === 'object' && !Array.isArray(permissions), 'Выберите разрешения администратора.');
+    ensure(Object.keys(permissions).every(key=>['players','questions','game','effects'].includes(key)&&typeof permissions[key]==='boolean')&&typeof unlimitedEffects==='boolean','Разрешения должны содержать только известные логические поля.');
+    ensure(expiresAt===null||integer(expiresAt,this.now()+1,this.now()+30*86400000),'Некорректный срок доступа.');
     ensure(Number.isInteger(effectDuration) && effectDuration >= 100 && effectDuration <= 60000, 'Длительность помехи: 100–60000 мс.');
     const safe = { players: !!permissions.players, questions: !!permissions.questions, game: !!permissions.game, effects: !!permissions.effects };
     ensure(Object.values(safe).some(Boolean), 'Выберите хотя бы одно разрешение или отзовите доступ.');
     const current = this.state.delegatedAdmins || [], previous = current.find(a => a.pid === pid);
-    const grant = { pid, permissions: safe, effectDuration, unlimitedEffects: !!unlimitedEffects, grantedAt: previous?.grantedAt || this.now() };
+    const grant = { pid, permissions: safe, effectDuration, unlimitedEffects, grantedAt: previous?.grantedAt || this.now(),...(expiresAt?{expiresAt}:{}) };
     this.state.delegatedAdmins = [...current.filter(a => a.pid !== pid), grant]; this.log(`Административный доступ делегирован игроку ${member.name}.`); this.touch(); return grant;
   }
   revokeAdmin(pid) { const before = this.state.delegatedAdmins || []; this.state.delegatedAdmins = before.filter(a => a.pid !== pid); ensure(before.length !== this.state.delegatedAdmins.length, 'Делегированный доступ не найден.'); this.log('Делегированный административный доступ отозван.'); this.touch(); }
+  expireAdminGrants(){const grants=this.state.delegatedAdmins||[],active=grants.filter(a=>!a.expiresAt||a.expiresAt>this.now());if(active.length===grants.length)return false;this.state.delegatedAdmins=active;this.touch();return true}
+  createAdminInvite(permissions,minutes=120,effectDuration=3000){
+    ensure(permissions&&typeof permissions==='object'&&!Array.isArray(permissions)&&Object.keys(permissions).length>0&&Object.keys(permissions).every(k=>['players','questions','game','effects'].includes(k)&&typeof permissions[k]==='boolean')&&Object.values(permissions).some(v=>v===true),'Выберите точные разрешения приглашения.');
+    ensure(integer(minutes,0,43200)&&integer(effectDuration,100,60000),'Срок доступа: 0–43200 минут; эффект: 100–60000 мс.');
+    const code='CQI-'+randomBytes(24).toString('base64url'),invite={id:randomUUID(),hash:hashToken(code),permissions:{players:false,questions:false,game:false,effects:false,...permissions},minutes,effectDuration,createdAt:this.now(),expiresAt:this.now()+3600000};
+    this.state.accessControl.invitations=this.state.accessControl.invitations.filter(i=>i.expiresAt>this.now()&&!i.usedAt&&!i.revokedAt);ensure(this.state.accessControl.invitations.length<MAX_PLAYERS,'Сначала отзовите неиспользованные приглашения.');this.state.accessControl.invitations.push(invite);this.touch();return {code,inviteId:invite.id,expiresAt:invite.expiresAt};
+  }
+  revokeAdminInvite(id){const invite=this.state.accessControl.invitations.find(i=>i.id===id);ensure(invite&&!invite.usedAt,'Неиспользованное приглашение не найдено.');invite.revokedAt=this.now();this.touch()}
+  redeemAdminInvite(code,regionId,name){const invite=this.state.accessControl.invitations.find(i=>i.hash===hashToken(code));ensure(invite&&!invite.usedAt&&!invite.revokedAt&&invite.expiresAt>this.now(),'Приглашение недействительно, использовано или истекло.','BAD_INVITE');ensure(typeof name==='string'&&name.trim().length>=2,'Введите своё имя и выберите команду.','NAME_REQUIRED');const result=this.joinTeam(regionId,name);this.grantAdmin(result.player.pid,invite.permissions,invite.effectDuration,false,invite.minutes?this.now()+invite.minutes*60000:null);invite.usedAt=this.now();invite.pid=result.player.pid;return result}
+  rotateAccessKey(creatorId){ensure(Object.hasOwn(CREATOR_NAMES,creatorId),'Персональный доступ не найден.');const code='CQO-'+randomBytes(24).toString('base64url');this.state.accessControl.keyOverrides[creatorId]=hashToken(code);this.touch();return {code}}
   joinCreator(creatorId,regionId,name) {
     ensure(Object.hasOwn(CREATOR_NAMES,creatorId), "Некорректный доступ создателя.");
     if(this.state.settings.universal){
       ensure(!this.state.regions.some(t=>t.members.some(m=>m.creatorId===creatorId)),"Доступ администратора уже занят. Продолжите в своём браузере или освободите доступ через преподавателя.",'CREATOR_OCCUPIED');
       const team=this.region(this.state.settings.mode==='solo'?this.state.regions[0].id:regionId);
       const token=randomBytes(32).toString('base64url'),member={pid:randomUUID(),name:cleanText(name||(creatorId==='adilet'?'Адлет':'Ернур'),2,40,'Имя'),creatorId,tokenHash:hashToken(token),joinedAt:this.now(),capital:0,streak:0};
-      team.members.push(member);this.touch();return {playerToken:token,isCreator:true,player:{pid:member.pid,name:member.name,regionId:team.id}};
+      team.members.push(member);if(this.state.settings.teamDecision==='leader'&&this.state.round&&!this.state.round.resolved&&this.state.round.submitted[team.id]===undefined)delete this.state.round.leaderChoices?.[team.id];this.touch();return {playerToken:token,isCreator:true,player:{pid:member.pid,name:member.name,regionId:team.id}};
     }
     let team=this.state.regions.find(isCreatorTeam);
     ensure(!team?.members.some(m=>m.creatorId===creatorId), "Доступ администратора уже занят. Продолжите в своём браузере или освободите доступ через преподавателя.", "CREATOR_OCCUPIED");
@@ -231,6 +256,7 @@ export class GameLogic {
     return {playerToken:token,isCreator:true,player:{pid:member.pid,name:member.name,regionId:team.id}};
   }
   joinTeam(regionId, name) {
+    ensure(this.state.regions.reduce((sum,t)=>sum+t.members.length,0)<MAX_PLAYERS,`Сессия заполнена (${MAX_PLAYERS} участников).`);
     if(this.state.settings.universal&&this.state.settings.mode==='solo')regionId=this.state.regions[0].id;
     ensure(regionId!==CREATOR_TEAM_ID,"Команда создателей доступна только по персональному коду.","FORBIDDEN");
     const region = this.region(regionId);
@@ -239,6 +265,7 @@ export class GameLogic {
     const token = randomBytes(32).toString("base64url");
     const player = { pid: randomUUID(), name: cleanName, tokenHash: hashToken(token), joinedAt: this.now(),...(this.state.settings.universal?{capital:0,streak:0}:{}) };
     region.members.push(player);
+    if(this.state.settings.teamDecision==='leader'&&this.state.round&&!this.state.round.resolved&&this.state.round.submitted[regionId]===undefined)delete this.state.round.leaderChoices?.[regionId];
     this.log(`${cleanName} присоединился к команде «${this.region(regionId).name}».`);
     this.touch();
     return { playerToken: token, player: { pid: player.pid, name: player.name, regionId } };
@@ -281,7 +308,7 @@ export class GameLogic {
     if (!round || round.resolved) return;
     for (const pid of pids) delete round.ballots[pid];
     for (const pid of pids){if(round.proposals)delete round.proposals[pid];if(this.state.settings.mode==='solo'){delete round.submitted[pid];delete round.results[pid]}}
-    for (const id of teamIds) delete round.submitted[id];
+    for (const id of teamIds){delete round.submitted[id];if(round.leaderChoices)delete round.leaderChoices[id]}
   }
   movePlayer(pid, toTeamId) {
     const source = this.state.regions.find(t => t.members.some(m => m.pid === pid));
@@ -312,17 +339,17 @@ export class GameLogic {
     if (this.member(toTeamId,pid).name!==cleanName) this.renamePlayer(pid,cleanName);
   }
   setTeamCapacity(teamId, capacity) {
-    ensure(!this.state.settings.universal||capacity===4,'В этом формате ровно четыре места в области.');
+    ensure(!this.state.settings.universal||this.state.settings.flexibleTeams||capacity===4,'В этом формате ровно четыре места в области.');
     ensure(integer(capacity, 1, MAX_TEAM_CAPACITY), `Вместимость: 1–${MAX_TEAM_CAPACITY} участников.`);
     const team = this.region(teamId);
     ensure(!isCreatorTeam(team) || capacity===2,"В команде создателей ровно два места.");
-    ensure(team.members.length <= capacity, `В команде ${team.members.length} участников. Сначала перенесите лишних игроков.`);
+    ensure((this.state.settings.universal?team.members.filter(m=>!m.creatorId).length:team.members.length) <= capacity, `В команде ${team.members.length} участников. Сначала перенесите лишних игроков.`);
     team.capacity = capacity; this.log(`Вместимость «${team.name}»: ${capacity}.`); this.touch();
   }
   setAllCapacities(capacity) {
-    ensure(!this.state.settings.universal||capacity===4,'В этом формате ровно четыре места в области.');
+    ensure(!this.state.settings.universal||this.state.settings.flexibleTeams||capacity===4,'В этом формате ровно четыре места в области.');
     ensure(integer(capacity, 1, MAX_TEAM_CAPACITY), `Вместимость: 1–${MAX_TEAM_CAPACITY} участников.`);
-    const teams=regularTeams(this.state.regions),crowded = teams.filter(t => t.members.length > capacity);
+    const teams=regularTeams(this.state.regions),crowded = teams.filter(t => t.members.filter(m=>!this.state.settings.universal||!m.creatorId).length > capacity);
     ensure(!crowded.length, `Сначала перенесите игроков из переполненных команд: ${crowded.map(t => t.name).join(", ")}.`);
     teams.forEach(t => t.capacity = capacity); this.state.settings.teamCapacity = capacity;
     this.log(`Вместимость всех команд и новых команд: ${capacity}.`); this.touch();
@@ -334,7 +361,7 @@ export class GameLogic {
     ensure(question, "Вопрос не найден.");
     ensure((question.subject||DEFAULT_SUBJECT)===this.state.branding.subject,'Выберите вопрос текущего предмета.');
     this.state.phase = "playing";
-    this.state.round = { id: randomUUID(), questionId, questionSnapshot: structuredClone(question), startedAt: this.now(), duration, deadline: this.now() + duration * 1000, remainingMs: duration * 1000, paused: false, resolved: false, ballots: {}, submitted: {}, results: {},...(this.state.settings.universal?{proposals:{}}:{}) };
+    this.state.round = { id: randomUUID(), questionId, questionSnapshot: structuredClone(question), startedAt: this.now(), duration, deadline: this.now() + duration * 1000, remainingMs: duration * 1000, paused: false, resolved: false, ballots: {}, submitted: {}, results: {},...(this.state.settings.universal?{proposals:{},leaderChoices:{}}:{}) };
     this.log(`Начат вопрос: ${question.text}`);
     this.touch();
   }
@@ -356,6 +383,7 @@ export class GameLogic {
   }
   votesFor(regionId) {
     const votes = {};
+    const choice=this.state.round?.leaderChoices?.[regionId];if(this.state.settings.teamDecision==='leader'&&choice){votes[choice.option]=Object.entries(choice.votes).filter(([pid,yes])=>yes&&this.region(regionId).members.some(m=>m.pid===pid)).length;return votes}
     for (const member of this.region(regionId).members) {
       const option = this.state.round?.ballots[member.pid];
       if (option !== undefined) votes[option] = (votes[option] || 0) + 1;
@@ -367,6 +395,7 @@ export class GameLogic {
     const round = this.requireRound(roundId, true);
     ensure(integer(optionIdx, 0, 3), "Вариант ответа должен быть от 0 до 3.");
     ensure(round.submitted[this.state.settings.mode==='solo'?pid:regionId] === undefined, "Ответ уже отправлен.");
+    if(this.state.settings.mode==='team'&&this.state.settings.teamDecision==='leader'){ensure(this.leaderFor(this.region(regionId))===pid,'В этом режиме вариант выбирает лидер команды.','LEADER_ONLY');round.leaderChoices??={};if(round.leaderChoices[regionId]?.option===optionIdx&&round.leaderChoices[regionId].by===pid)return;round.leaderChoices[regionId]={option:optionIdx,by:pid,votes:{[pid]:true}};this.touch();return}
     if(this.state.settings.universal&&this.state.settings.mode==='team'){
       if(round.proposals[pid]?.option===optionIdx)return;
       round.proposals[pid]={option:optionIdx,remainingAt:this.remainingMs()};this.touch();return;
@@ -375,6 +404,7 @@ export class GameLogic {
     round.ballots[pid] = optionIdx;
     this.touch();
   }
+  voteLeader(regionId,pid,accept,roundId){this.member(regionId,pid);const round=this.requireRound(roundId,true),choice=round.leaderChoices?.[regionId];ensure(this.state.settings.mode==='team'&&this.state.settings.teamDecision==='leader'&&choice&&round.submitted[regionId]===undefined,'Сейчас нет предложения лидера.');ensure(typeof accept==='boolean','Выберите согласие или отказ.');ensure(choice.by!==pid,'Лидер уже поддерживает выбранный им вариант.');choice.votes[pid]=accept;this.touch()}
   confirmVote(regionId,pid,targetPid,roundId){
     this.member(regionId,pid);this.member(regionId,targetPid);const r=this.requireRound(roundId,true);
     ensure(this.state.settings.mode==='team'&&r.submitted[regionId]===undefined,'Подтверждение недоступно.');
@@ -397,6 +427,7 @@ export class GameLogic {
     const round = this.requireRound(roundId, true);
     if(this.state.settings.mode==='solo'){ensure(round.ballots[pid]!==undefined,'Сначала выберите ответ.');ensure(round.submitted[pid]===undefined,'Ответ уже отправлен.');round.submitted[pid]=round.ballots[pid];this.touch();return}
     ensure(round.submitted[regionId] === undefined, "Ответ команды уже отправлен.");
+    if(this.state.settings.teamDecision==='leader'){const team=this.region(regionId),choice=round.leaderChoices?.[regionId];ensure(this.leaderFor(team)===pid,'Общий ответ отправляет только лидер.','LEADER_ONLY');ensure(choice&&choice.by===pid,'Сначала выберите вариант.');ensure(Object.entries(choice.votes).filter(([id,yes])=>yes&&team.members.some(m=>m.pid===id)).length>team.members.length/2,'Дождитесь согласия большинства команды.');round.submitted[regionId]=choice.option;this.touch();return}
     const { chosen, reason } = this.majority(regionId);
     ensure(chosen !== null, reason === "tie" ? "Голоса разделились поровну. Обсудите ответ и измените голоса." : "Сначала проголосуйте.");
     round.submitted[regionId] = chosen;
@@ -440,7 +471,7 @@ export class GameLogic {
     this.flushProposals();
     for (const region of this.state.regions) {
       if (!region.members.length) { round.results[region.id] = { chosen: null, correct: false, skipped: true, reason: "empty_team" }; continue; }
-      const decision = round.submitted[region.id] !== undefined ? { chosen: round.submitted[region.id], reason: "submitted" } : this.majority(region.id);
+      const decision = round.submitted[region.id] !== undefined ? { chosen: round.submitted[region.id], reason: "submitted" } : this.state.settings.teamDecision==='leader'?{chosen:null,reason:'leader_not_submitted'}:this.majority(region.id);
       round.submitted[region.id] = decision.chosen;
       const correct = decision.chosen === question.correct;
       const awarded = correct ? Math.min(this.state.settings.universal?25:question.points, RESOURCE_CAP - region.points) : 0;
@@ -484,8 +515,8 @@ export class GameLogic {
     this.touch();
     return { questionId: question.id };
   }
-  createTeam(name, baseRegionId, capacity = this.state.settings.teamCapacity, points = 0, economy = 100) {
-    ensure(!this.state.settings.universal,'В региональном формате закреплены 10 областей.');
+  createTeam(name, baseRegionId, capacity = this.state.settings.teamCapacity, points = 0, economy = 100,cityId=null) {
+    ensure(!this.state.settings.universal||this.state.settings.flexibleTeams,'В региональном формате закреплены 10 областей.');
     ensure(regularTeams(this.state.regions).length < MAX_TEAMS, `Максимум ${MAX_TEAMS} команд.`);
     const cleanName = cleanText(name, 2, 60, "Команда");
     ensure(!this.state.regions.some(t => t.name.toLocaleLowerCase() === cleanName.toLocaleLowerCase()), "Такая команда уже есть.");
@@ -493,16 +524,18 @@ export class GameLogic {
     ensure(REGIONS.some(r => r.id === baseRegionId), "Выберите регион карты.");
     ensure(integer(capacity, 1, MAX_TEAM_CAPACITY), `Вместимость: 1–${MAX_TEAM_CAPACITY}.`);
     ensure(integer(points, 0, RESOURCE_CAP) && integer(economy, 0, 100), `Ресурс: 0–${RESOURCE_CAP}; экономика: 0–100.`);
+    ensure(!this.state.settings.universal||economy>=15,'Экономика не ниже 15%.');ensure(!cityId||CITIES.some(c=>c.id===cityId&&c.baseRegionId===baseRegionId),'Город не относится к области.');
     const id = `team_${randomUUID()}`;
-    this.state.regions.push({id,name:cleanName,baseRegionId,capacity,points,economy,members:[]});
+    this.state.regions.push({id,name:cleanName,baseRegionId,capacity,points,economy,members:[],...(cityId?{cityId}:{})});
     this.log(`Создана команда «${cleanName}».`); this.touch(); return {teamId:id};
   }
   expandTeams(count) {
-    if(this.state.settings.universal){ensure(count===10,'В региональном формате ровно 10 областей.');return}
+    if(this.state.settings.universal&&!this.state.settings.flexibleTeams){ensure(count===10,'В региональном формате ровно 10 областей.');return}
     ensure(integer(count, 1, MAX_TEAMS), `Количество команд: 1–${MAX_TEAMS}.`);
     ensure(count >= regularTeams(this.state.regions).length, "Для уменьшения используйте точное количество команд.");
     let number = 1;
     while (regularTeams(this.state.regions).length < count) {
+      if(this.state.settings.flexibleTeams){const base=REGIONS.find(r=>!this.state.regions.some(t=>t.baseRegionId===r.id&&!t.cityId));if(base){this.createTeam(base.name,base.id);continue}const city=CITIES.find(c=>!this.state.regions.some(t=>t.cityId===c.id||t.name.toLocaleLowerCase()===c.name.toLocaleLowerCase()));if(city){this.createTeam(city.name,city.baseRegionId,undefined,0,100,city.id);continue}}
       while (this.state.regions.some(t => t.name === `Команда ${number}`)) number++;
       const base = [...REGIONS].sort((a,b) => this.state.regions.filter(t=>t.baseRegionId===a.id).length - this.state.regions.filter(t=>t.baseRegionId===b.id).length)[0];
       const baseName = base.name.replace(/ облысы$/, "");
@@ -514,17 +547,17 @@ export class GameLogic {
     return hashToken(JSON.stringify([this.state.settings.teamCapacity,this.state.regions.map(t => [t.id,t.name,t.capacity,t.baseRegionId,t.points,t.economy,t.members.map(m=>[m.pid,m.name])])]));
   }
   planTeamCount(count) {
-    ensure(!this.state.settings.universal||count===10,'В региональном формате ровно 10 областей.');
+    ensure(!this.state.settings.universal||this.state.settings.flexibleTeams||count===10,'В региональном формате ровно 10 областей.');
     ensure(integer(count, 1, MAX_TEAMS), `Количество команд: 1–${MAX_TEAMS}.`);
     const teams = regularTeams(this.state.regions);
     const keepIds = new Set(teams.map((team,index)=>({team,index})).sort((a,b)=>b.team.members.length-a.team.members.length || b.team.points-a.team.points || a.index-b.index).slice(0,count).map(({team})=>team.id));
     const kept = teams.filter(t=>keepIds.has(t.id)), removed = teams.filter(t=>!keepIds.has(t.id));
-    const occupancy = new Map(kept.map(t=>[t.id,t.members.length])), moves = [];
+    const occupancy = new Map(kept.map(t=>[t.id,t.members.filter(m=>!this.state.settings.universal||!m.creatorId).length])), moves = [];
     let overflow = 0;
     for (const source of removed) for (const member of source.members) {
-      const target = kept.filter(t=>occupancy.get(t.id)<capacityFor(t)).sort((a,b)=>occupancy.get(a.id)-occupancy.get(b.id))[0];
+      const target = kept.filter(t=>member.creatorId&&this.state.settings.universal||occupancy.get(t.id)<capacityFor(t)).sort((a,b)=>occupancy.get(a.id)-occupancy.get(b.id))[0];
       if (!target) { overflow++; continue; }
-      occupancy.set(target.id,occupancy.get(target.id)+1);
+      if(!member.creatorId||!this.state.settings.universal)occupancy.set(target.id,occupancy.get(target.id)+1);
       moves.push({pid:member.pid,name:member.name,fromTeamId:source.id,toTeamId:target.id,toTeamName:target.name});
     }
     return {count,currentCount:teams.length,added:Math.max(0,count-teams.length),removed:removed.map(t=>({id:t.id,name:t.name,points:t.points,players:t.members.length})),moves,overflow,capacity:count>teams.length?totalCapacity(teams)+(count-teams.length)*this.state.settings.teamCapacity:totalCapacity(kept),totalPlayers:teams.reduce((s,t)=>s+t.members.length,0),layoutToken:this.teamLayoutToken()};
@@ -541,10 +574,10 @@ export class GameLogic {
   }
   updateTeam(teamId, changes) {
     ensure(changes && typeof changes === "object", "Проверьте поля команды.");
-    if(this.state.settings.universal){const team=this.region(teamId);ensure(changes.capacity===4,'В области четыре обычных места.');ensure(changes.name===team.name,'Название области закреплено.');ensure(changes.baseRegionId===team.baseRegionId,'География области закреплена.');ensure(integer(changes.economy,15,100),'Экономика: от 15% до 100%.')}
+    if(this.state.settings.universal){const team=this.region(teamId);if(!this.state.settings.flexibleTeams){ensure(changes.capacity===4,'В области четыре обычных места.');ensure(changes.name===team.name,'Название области закреплено.');ensure(changes.baseRegionId===team.baseRegionId,'География области закреплена.')}ensure(integer(changes.economy,15,100),'Экономика: от 15% до 100%.')}
     const team = this.region(teamId), known = new Map(this.state.regions.flatMap(t=>t.members).map(m=>[m.pid,m]));
-    const candidate = {...team,name:changes.name,baseRegionId:changes.baseRegionId,capacity:changes.capacity,points:changes.points,economy:changes.economy};
-    const validated = validateRegions(this.state.regions.map(t=>t.id===teamId?candidate:t),known,!!this.state.settings.universal,this.state.settings.mode);
+    const candidate = {...team,name:changes.name,baseRegionId:changes.baseRegionId,capacity:changes.capacity,points:changes.points,economy:changes.economy,cityId:Object.hasOwn(changes,'cityId')?changes.cityId:team.cityId??null};
+    const validated = validateRegions(this.state.regions.map(t=>t.id===teamId?candidate:t),known,!!this.state.settings.universal,this.state.settings.mode,!!this.state.settings.flexibleTeams);
     this.state.regions = validated;
     this.log(`Настройки команды «${candidate.name}» сохранены.`); this.touch();
   }
@@ -552,11 +585,12 @@ export class GameLogic {
     this.updateTeam(teamId,{...this.region(teamId),name,baseRegionId});
   }
   removeTeam(teamId) {
-    ensure(!this.state.settings.universal,'В региональном формате закреплены 10 областей.');
+    ensure(!this.state.settings.universal||this.state.settings.flexibleTeams,'В региональном формате закреплены 10 областей.');
     ensure(teamId!==CREATOR_TEAM_ID,"Команда создателей зарезервирована. Освободите доступ участника вместо удаления команды.");
     ensure(regularTeams(this.state.regions).length>1,"Оставьте хотя бы одну команду.");
     const team=this.region(teamId), pids=new Set(team.members.map(m=>m.pid));
-    this.state.regions=this.state.regions.filter(t=>t.id!==teamId);
+    ensure(!team.members.some(m=>m.creatorId),'Сначала перенесите персонального администратора в другую команду.');
+    this.state.regions=this.state.regions.filter(t=>t.id!==teamId);this.state.delegatedAdmins=(this.state.delegatedAdmins||[]).filter(g=>!pids.has(g.pid));this.state.trades=(this.state.trades||[]).filter(t=>t.from!==teamId&&t.to!==teamId);
     if(this.state.round){
       for(const pid of pids)delete this.state.round.ballots[pid];
       delete this.state.round.submitted[teamId];delete this.state.round.results[teamId];
@@ -588,13 +622,13 @@ export class GameLogic {
   }
   resetGame() {
     const questions = this.state.questions, revision = this.state.revision, settings = this.state.settings;
-    const exitRequests=this.state.exitRequests,presentationEffectsEnabled=this.state.presentationEffectsEnabled,branding=this.state.branding,restorePoints=this.state.restorePoints;
+    const exitRequests=this.state.exitRequests,presentationEffectsEnabled=this.state.presentationEffectsEnabled,branding=this.state.branding,restorePoints=this.state.restorePoints,accessControl=this.state.accessControl;
     const teams = this.state.regions.map(r => ({...r,points:0,economy:100,members:r.members.filter(m=>m.creatorId).map(m=>({...m,...(settings.universal?{capital:0,streak:0}:{})}))}));
     this.state = freshState();
     this.state.questions = questions;
     this.state.settings = settings;
     this.state.regions = teams;
-    this.state.branding=branding;this.state.restorePoints=restorePoints;
+    this.state.branding=branding;this.state.restorePoints=restorePoints;this.state.accessControl={...accessControl,invitations:[]};
     this.state.revision = revision;
     if(exitRequests)this.state.exitRequests=exitRequests;
     if(presentationEffectsEnabled!==undefined)this.state.presentationEffectsEnabled=presentationEffectsEnabled;
@@ -608,12 +642,12 @@ export class GameLogic {
     ensure(raw && typeof raw === "object" && Object.keys(raw).every(k => ["revision", "settings", "regions", "questions"].includes(k)), "Редактор принимает revision, settings, regions и questions.");
     ensure(raw.revision === this.state.revision, "Состояние уже изменилось. Обновите JSON и повторите правку.", "REVISION_CONFLICT");
     const known = new Map(this.state.regions.flatMap(r => r.members).map(m => [m.pid, m]));
-    const regions = validateRegions(raw.regions, known,!!this.state.settings.universal,this.state.settings.mode);
+    const regions = validateRegions(raw.regions, known,!!this.state.settings.universal,this.state.settings.mode,!!this.state.settings.flexibleTeams);
     const settings = raw.settings ?? this.state.settings;
     ensure(integer(settings?.teamCapacity, 1, MAX_TEAM_CAPACITY), `Вместимость новых команд: 1–${MAX_TEAM_CAPACITY}.`);
     if(this.state.settings.universal){
-      ensure(settings.universal===true&&settings.mode===this.state.settings.mode&&settings.teamCapacity===4,'Формат переключается отдельной командой в лобби.');
-      ensure(regions.length===10&&regions.every(t=>{const old=this.state.regions.find(r=>r.id===t.id);return old&&old.baseRegionId===t.baseRegionId&&old.name===t.name&&t.capacity===4&&t.economy>=15}),'Сохраните 10 областей, четыре обычных места и экономику не ниже 15%.');
+      ensure(settings.universal===true&&settings.mode===this.state.settings.mode&&(this.state.settings.flexibleTeams||settings.teamCapacity===4),'Формат переключается отдельной командой в лобби.');
+      ensure(regions.every(t=>t.economy>=15)&&(this.state.settings.flexibleTeams||regions.length===10&&regions.every(t=>{const old=this.state.regions.find(r=>r.id===t.id);return old&&old.baseRegionId===t.baseRegionId&&old.name===t.name&&t.capacity===4})),'Сохраните структуру режима и экономику не ниже 15%.');
     }
     const questions = validateQuestions(raw.questions);
     const round = this.state.round;
@@ -645,7 +679,7 @@ export class GameLogic {
   publicFrame(onlinePlayers = new Set()) {
     return {
       branding:this.publicBranding(),
-      regions:this.state.regions.map(r=>({...r,members:r.members.map(({pid,name,capital,streak})=>({pid,name,online:onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak}:{})})),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length}:{})})),
+      regions:this.state.regions.map(r=>({...r,leaderPid:this.leaderFor(r),members:r.members.map(({pid,name,capital,streak})=>({pid,name,online:onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak}:{})})),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length}:{})})),
       leaderboard:this.state.settings.mode==='solo'?this.ranking():[],
       teamLeaderboard:this.state.settings.mode==='team'?this.teamRanking():[],
       votes:this.state.round?Object.fromEntries(this.state.regions.map(r=>[r.id,this.votesFor(r.id)])):{}
@@ -657,6 +691,7 @@ export class GameLogic {
     const delegated = !creator && actor.role !== 'teacher' && player ? this.adminGrantFor(player.pid) : null;
     const adminView = actor.role === "teacher" || creator || !!delegated;
     const teacher = actor.role === "teacher" || creator;
+    const compact=!!this.state.settings.flexibleTeams&&!!player&&!adminView;
     const view = {
       revision: this.state.revision, phase: this.state.phase, serverTime: this.now(),
       settings: {...this.state.settings},
@@ -669,18 +704,23 @@ export class GameLogic {
     };
     if(adminView)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>m.pid)),effectTargetIds:this.state.regions.flatMap(t=>t.members.filter(m=>!m.creatorId&&!this.adminGrantFor(m.pid)&&onlinePlayers.has(m.pid)).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,delegatedAdmins:creator&&player?.creatorId==='adilet'?structuredClone(this.state.delegatedAdmins||[]):[],...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
     if(creator)view.viewer.exitRequest=structuredClone(this.state.exitRequests?.find(r=>r.pid===player.pid&&r.status==='pending')||null);
+    if(creator&&player.creatorId==='adilet')view.sessionControl.invitations=this.state.accessControl.invitations.map(({id,permissions,minutes,createdAt,expiresAt,usedAt,revokedAt})=>({id,permissions,minutes,createdAt,expiresAt,usedAt,revokedAt}));
+    view.trades=(this.state.trades||[]).filter(t=>(teacher||t.from===player?.regionId||t.to===player?.regionId)&&t.status==='pending'&&t.expiresAt>this.now()).map(t=>({...t}));
     if(teacher)view.restorePoints=(this.state.restorePoints||[]).map(({id,at,label})=>({id,at,label}));
+    if(compact){view.regions=frame.regions.map(r=>r.id===player.regionId&&this.state.settings.mode!=='solo'?r:{...r,members:[]});if(this.state.settings.mode==='solo'){const rank=frame.leaderboard.findIndex(m=>m.pid===player.pid),own=frame.leaderboard[rank];view.viewer.player.rank=rank+1;view.viewer.player.rankingTotal=frame.leaderboard.length;view.leaderboard=frame.leaderboard.slice(0,10);if(rank>=10&&own)view.leaderboard.push(own)}}
     if(!player&&!teacher&&!delegated){view.regions=frame.regions.map(r=>({...r,members:[]}));view.leaderboard=[];return view}
     if (this.state.round) {
-      const { ballots, proposals, questionSnapshot, ...round } = this.state.round;
+      const { ballots, proposals, leaderChoices, questionSnapshot, ...round } = this.state.round;
       const { id, text, options, points, topic } = questionSnapshot;
       const publicQuestion = { id, text, options, points, ...(topic ? {topic} : {}) };
       const roundBase = {...round};
-      if(this.state.settings.universal&&this.state.settings.mode==='solo'&&!teacher){roundBase.submitted=player&&Object.hasOwn(round.submitted,player.pid)?{[player.pid]:round.submitted[player.pid]}:{};roundBase.results=round.resolved?round.results:{}}
+      const ownResults=round.resolved&&player&&Object.hasOwn(round.results,player.pid)?{[player.pid]:round.results[player.pid]}:{};
+      if(this.state.settings.universal&&this.state.settings.mode==='solo'&&!teacher){roundBase.submitted=player&&Object.hasOwn(round.submitted,player.pid)?{[player.pid]:round.submitted[player.pid]}:{};roundBase.results=round.resolved?(compact?ownResults:round.results):{}}
       view.round = { ...structuredClone(roundBase), question: teacher || delegated?.permissions.questions || round.resolved ? structuredClone(questionSnapshot) : publicQuestion, remainingMs: this.remainingMs(), votes: frame.votes, myVote: player ? ballots[player.pid] ?? null : null };
+      if(player&&this.state.settings.teamDecision==='leader'){const team=this.region(player.regionId),choice=leaderChoices?.[team.id],votes=choice?Object.entries(choice.votes).filter(([pid])=>team.members.some(m=>m.pid===pid)):[];view.round.leaderDecision=choice?{option:choice.option,leaderPid:choice.by,yes:votes.filter(([,v])=>v).length,no:votes.filter(([,v])=>!v).length,required:Math.floor(team.members.length/2)+1,myApproval:choice.votes[player.pid]??null}:null}
       if(this.state.settings.universal){
         view.round.proposals=Object.entries(proposals||{}).flatMap(([pid,p])=>{const team=this.state.regions.find(t=>t.members.some(m=>m.pid===pid));return team&&(teacher||team.id===player?.regionId)?[{pid,name:team.members.find(m=>m.pid===pid).name,option:p.option,remainingMs:Math.max(0,7000-(p.remainingAt-this.remainingMs()))}]:[]});
-        if(this.state.settings.mode==='solo'&&!teacher){view.round.submitted=player&&Object.hasOwn(round.submitted,player.pid)?{[player.pid]:round.submitted[player.pid]}:{};view.round.results=round.resolved?round.results:{};view.round.votes={}}
+        if(this.state.settings.mode==='solo'&&!teacher){view.round.submitted=player&&Object.hasOwn(round.submitted,player.pid)?{[player.pid]:round.submitted[player.pid]}:{};view.round.results=round.resolved?(compact?ownResults:round.results):{};view.round.votes={}}
       }
       if (teacher || delegated?.permissions.questions) view.round.preview = this.state.regions.map(team => {
         const submitted = round.submitted[team.id] !== undefined;

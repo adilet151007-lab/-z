@@ -1,4 +1,4 @@
-import { GameEngine, REGIONS, capacityFor, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, metadataFor, setupPresentationEffects, setupBranding, escapeHTML as h } from "./shared-engine.js";
+import { GameEngine, REGIONS, capacityFor,totalCapacity, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, metadataFor, setupPresentationEffects, setupBranding, escapeHTML as h } from "./shared-engine.js";
 import { setupTelemetry } from "./creator-overlay.js";
 import { setupCommunication } from "./chat-ui.js";
 
@@ -10,6 +10,7 @@ setupBranding(engine);
 const $ = id => document.getElementById(id);
 let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null, sceneLoading=false, mapCollapsed=false, teamKey='', questionKey='', registrationKey='';
 let sceneError = "";
+let selectedArea=null,pendingInvite='',marketKey='';
 async function ensureScene(){
   if(scene||sceneLoading||sceneError||mapCollapsed)return;
   sceneLoading=true;$('map-status').textContent='Загружаем 3D-карту…';
@@ -18,7 +19,7 @@ async function ensureScene(){
     if(!engine.state?.viewer.player)return;
     scene=createScene($('scene-canvas'));$('map-status').textContent='';
     const state=engine.state,team=state.regions.find(t=>t.id===state.viewer.player.regionId);
-    scene.update(state,state.viewer.player.regionId);focusedRegion=metadataFor(team).baseRegionId;scene.focusRegion(focusedRegion);scene.setVisible(!mapCollapsed);
+    scene.update(state,state.viewer.player.regionId);focusedRegion=metadataFor(team).baseRegionId;scene.focusRegion(state.viewer.player.regionId);scene.setVisible(!mapCollapsed);
   }catch{sceneError='3D недоступно. Вопросы и ответы продолжают работать.';$('map-status').textContent=sceneError;}
   finally{sceneLoading=false}
 }
@@ -35,35 +36,44 @@ async function act(fn) {
   finally { actionPending = false; if (engine.state?.viewer.player) renderQuestion(engine.state); }
 }
 function renderRegistration(state) {
-  const key=JSON.stringify([state.settings.mode,state.regions,engine.connected,joining,$('name-input').value,$('team-search').value]);
+  if(selectedArea&&!state.regions.some(t=>metadataFor(t).baseRegionId===selectedArea))selectedArea=null;
+  const key=JSON.stringify([state.settings.mode,state.regions,engine.connected,joining,selectedArea,$('name-input').value,$('team-search').value]);
   if(key===registrationKey)return;registrationKey=key;
   const solo=state.settings.mode==='solo';
-  const tokenCandidate=$('name-input').value.trim().split(/\s/,1)[0].length===26;
-  $('join-session').hidden=!solo;$('region-grid').hidden=solo;
-  $('registration-instruction').textContent=solo?'Жеке сайыс · введите имя и присоединитесь.':'Аймақтық одақ · выберите свободную область.';
-  if(solo){$('team-search').hidden=true;$('registration-capacity').textContent=`${state.regions.reduce((n,t)=>n+t.members.length,0)} участников · личный рейтинг`;$('join-session').disabled=!engine.connected||joining;return}
+  const code=$('name-input').value.trim().split(/\s/,1)[0],tokenCandidate=code.length===26||code.startsWith('CQO-'),invite=code.startsWith('CQI-');
+  $('join-session').hidden=!solo&&!invite;$('join-session').textContent=invite?'Продолжить вход по приглашению':'Присоединиться';$('join-session').disabled=!engine.connected||joining;$('region-grid').hidden=solo;$('area-back').hidden=solo||!selectedArea;
+  $('registration-instruction').textContent=solo?'Жеке сайыс · введите имя и присоединитесь.':selectedArea?'Выберите команду области или её города.':'Шаг 1 · выберите область. Города находятся внутри неё.';
+  if(solo){$('team-search').hidden=true;$('registration-capacity').textContent=`${state.regions.reduce((n,t)=>n+(t.occupied??t.members.length),0)} участников · личный рейтинг`;$('join-session').disabled=!engine.connected||joining;return}
   $("team-search").hidden = state.regions.length <= 8;
   const query = $("team-search").hidden ? "" : $("team-search").value.trim().toLocaleLowerCase();
-  $("registration-capacity").textContent = `10 команд · ${state.regions.reduce((sum,t)=>sum+(t.occupied??t.members.length),0)} / 40 участников`;
-  const teams = state.regions.filter(t=>!query || `${t.name} ${metadataFor(t).baseRegionId} ${REGIONS.find(r=>r.id===metadataFor(t).baseRegionId).name}`.toLocaleLowerCase().includes(query));
+  $("registration-capacity").textContent = `${state.regions.length} команд · ${state.regions.reduce((sum,t)=>sum+(t.occupied??t.members.length),0)} / ${totalCapacity(state.regions)} участников`;
+  const matches=t=>!query||`${t.name} ${REGIONS.find(r=>r.id===metadataFor(t).baseRegionId).name}`.toLocaleLowerCase().includes(query);
+  if(!selectedArea){$('region-grid').innerHTML=REGIONS.flatMap(base=>{const teams=state.regions.filter(t=>metadataFor(t).baseRegionId===base.id);if(!teams.length||!teams.some(matches))return [];const occupied=teams.reduce((n,t)=>n+(t.occupied??t.members.length),0),capacity=totalCapacity(teams);return [`<button class="region-card" data-area="${base.id}" ${!engine.connected||joining?'disabled':''} style="border-color:${base.color}66"><span class="rname" style="color:${base.color}">${h(base.name)}</span><span class="seats">${occupied} / ${capacity} мест</span><span class="members">${teams.length} команд · ${teams.filter(t=>t.cityId).length} городов</span><span class="region-open">Выбрать →</span></button>`]}).join('')||'<p class="mut">Области не найдены</p>';return}
+  const teams=state.regions.filter(t=>metadataFor(t).baseRegionId===selectedArea&&matches(t));
   $("region-grid").innerHTML = teams.map(region => {
-    const meta = metadataFor(region), capacity = 4,count=region.occupied??region.members.length, full = count>=capacity;
+    const meta = metadataFor(region), capacity = capacityFor(region),count=region.occupied??region.members.length, full = count>=capacity;
     return `<button class="region-card" data-region="${meta.id}" ${full&&!tokenCandidate||!engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${h(meta.name)}</span><span class="seats">${count}/${capacity} ${full ? "— команда заполнена" : "— свободно"}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") || "Пока никого"}</span></button>`;
   }).join("") || '<p class="mut">Команды не найдены</p>';
 }
 $("team-search").addEventListener("input",()=>{if(engine.state)renderRegistration(engine.state)});
-async function join(regionId) {
+$('area-back').addEventListener('click',()=>{selectedArea=null;renderRegistration(engine.state)});
+function openAccessDetails(regionId){pendingInvite=$('name-input').value.trim().split(/\s/,1)[0];$('access-name').value=$('name-input').value.trim().slice(pendingInvite.length).trim();$('access-team').innerHTML=engine.state.regions.map(t=>`<option value="${t.id}" ${(t.occupied??t.members.length)>=capacityFor(t)?'disabled':''}>${h(metadataFor(t).name)} · ${t.occupied??t.members.length}/${capacityFor(t)}</option>`).join('');if(regionId)$('access-team').value=regionId;const solo=engine.state.settings.mode==='solo';$('access-team').disabled=solo;$('access-team').required=!solo;$('access-error').textContent='';$('access-details').showModal();$('access-name').focus()}
+$('access-cancel').addEventListener('click',()=>{$('access-details').close();pendingInvite=''});
+$('access-details-form').addEventListener('submit',async e=>{e.preventDefault();$('name-input').value=pendingInvite+' '+$('access-name').value.trim();await join($('access-team').value,true)});
+async function join(regionId,detailsConfirmed=false) {
   if(joining||!engine.connected)return;
   if(!$('privacy-consent').checked){$('reg-error').textContent='Подтвердите согласие на обработку данных перед входом.';$('privacy-consent').focus();return;}
+  const value=$('name-input').value.trim(),code=value.split(/\s/,1)[0];if(code.startsWith('CQI-')&&!detailsConfirmed&&(!value.slice(code.length).trim()||engine.state.settings.mode!=='solo'&&!regionId)){openAccessDetails(regionId);return}
   joining=true;$("reg-error").textContent="Подключение…";renderRegistration(engine.state);
-  try{await engine.joinTeam(regionId,$("name-input").value.trim(),true);$("name-input").value="";$("reg-error").textContent=""}
-  catch(error){$("reg-error").textContent=error.message}
+  try{await engine.joinTeam(regionId,$("name-input").value.trim(),true);$("name-input").value="";$("reg-error").textContent="";$('access-details').close();pendingInvite=''}
+  catch(error){$("reg-error").textContent=error.message;if($('access-details').open)$('access-error').textContent=error.message}
   finally{joining=false;if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state)}
 }
 $('name-input').addEventListener('keydown',e=>{if(e.key==='Enter'&&engine.state?.settings.mode==='solo'){e.preventDefault();join(null)}});
 $('name-input').addEventListener('input',()=>{if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state)});
 $('join-session').addEventListener('click',()=>join(null));
 $("region-grid").addEventListener("click", event => {
+  const area=event.target.closest('[data-area]');if(area&&!joining&&engine.connected){selectedArea=area.dataset.area;renderRegistration(engine.state);return}
   const card = event.target.closest("[data-region]");
   if (!card || joining || !engine.connected) return;
   join(card.dataset.region);
@@ -80,8 +90,8 @@ function renderTeam(state) {
   const crisis = region.economy < CRISIS_THRESHOLD, development = developmentFor(region.points), teamRank = (state.teamLeaderboard||[]).findIndex(t=>t.teamId===region.id)+1, topTeams = (state.teamLeaderboard||[]).slice(0,5);
   $("my-name").textContent = player.name;
   if(state.settings.mode==='solo'){
-    const rank=state.leaderboard.findIndex(m=>m.pid===player.pid)+1,me=state.leaderboard.find(m=>m.pid===player.pid);
-    $('my-region-tag').textContent='Жеке сайыс';$('team-panel').innerHTML=`<h2>${h(player.name)}</h2><div class="stat-row"><div class="stat"><span>Культурный капитал</span><b class="gold">${me?.capital||0}</b></div><div class="stat"><span>Серия / множитель</span><b class="cyan">${me?.streak||0} · ×${me?.multiplier||1}</b></div></div><p class="small-note">Место: ${rank} из ${state.leaderboard.length}. Ошибки обнуляют серию и не влияют на экономику.</p><ol class="solo-mini">${state.leaderboard.slice(0,5).map(m=>`<li>${h(m.name)} <b>${m.capital}</b></li>`).join('')}</ol>`;return;
+    const rank=player.rank??state.leaderboard.findIndex(m=>m.pid===player.pid)+1,me=state.leaderboard.find(m=>m.pid===player.pid),total=player.rankingTotal??state.leaderboard.length;
+    $('my-region-tag').textContent='Жеке сайыс';$('team-panel').innerHTML=`<h2>${h(player.name)}</h2><div class="stat-row"><div class="stat"><span>Культурный капитал</span><b class="gold">${me?.capital||0}</b></div><div class="stat"><span>Серия / множитель</span><b class="cyan">${me?.streak||0} · ×${me?.multiplier||1}</b></div></div><p class="small-note">Место: ${rank} из ${total}. Ошибки обнуляют серию и не влияют на экономику.</p><ol class="solo-mini">${state.leaderboard.slice(0,5).map(m=>`<li>${h(m.name)} <b>${m.capital}</b></li>`).join('')}</ol>`;return;
   }
   $("my-region-tag").textContent = meta.name;
   $("my-region-tag").style.color = meta.color;
@@ -94,11 +104,12 @@ function renderQuestion(state) {
   const player = state.viewer.player;
   if (!player) return;
   const solo=state.settings.mode==='solo',regionId = solo?player.pid:player.regionId, question = round.question;
+  const leaderMode=!solo&&state.settings.teamDecision==='leader',team=state.regions.find(t=>t.id===player.regionId),isLeader=team?.leaderPid===player.pid,decision=round.leaderDecision;
   const tally = round.votes[regionId] || {}, submitted = round.submitted[regionId];
   const totalVotes = solo?Number(round.myVote!==null):Object.values(tally).reduce((sum, n) => sum + n, 0);
   const locked = round.resolved || round.paused || submitted !== undefined || !engine.connected || engine.remainingSeconds() <= 0 || actionPending;
   const result = round.results[regionId];
-  const key=JSON.stringify([round.id,question,round.paused,round.resolved,round.myVote,round.deadline,round.duration,tally,submitted,result,round.proposals,locked,state.viewer.isDevTelemetry,engine.connected]);
+  const key=JSON.stringify([round.id,question,round.paused,round.resolved,round.myVote,round.deadline,round.duration,tally,submitted,result,round.proposals,locked,state.viewer.isDevTelemetry,engine.connected,leaderMode,isLeader,decision]);
   if(questionKey===key){updateTimer();return}questionKey=key;
   let feedback = "";
   if (round.resolved && result) {
@@ -113,12 +124,14 @@ function renderQuestion(state) {
     if(!round.resolved&&state.viewer.isDevTelemetry&&i===question.correct)cls+=' telemetry-correct';
     return `<button class="${cls}" data-option="${i}" ${locked ? "disabled" : ""} aria-pressed="${i === round.myVote}"><span>${h(option)}</span><span class="votecount">${tally[i] ? `${tally[i]} гол.` : ""}${i === round.myVote && !round.resolved ? " · ваш" : ""}</span></button>`;
   }).join("")}</div>${!round.resolved && submitted === undefined ? `<div class="row" style="margin-top:12px"><button class="pri" data-submit ${locked || !totalVotes ? "disabled" : ""}>${solo?'Подтвердить мой ответ':`Отправить ответ команды (${totalVotes} гол.)`}</button></div><p class="mut small-note">${solo?'Каждый отвечает самостоятельно. Серия верных ответов увеличивает множитель.':'Новый выбор принимается через 7 секунд: его можно отменить или подтвердить сразу. При равенстве голосов ответ не засчитывается.'}</p>` : !round.resolved ? '<p class="cyan small-note">Ответ принят. Ожидайте результатов.</p>' : ""}${!solo&&!round.resolved?(round.proposals||[]).map(p=>`<div class="vote-proposal"><p>${h(p.name)} выбрал: «${h(question.options[p.option])}». <span data-proposal-ms="${p.remainingMs}" data-proposal-at="${Date.now()}"></span></p><div class="row"><button data-confirm-vote="${p.pid}" ${locked?'disabled':''}>Подтвердить</button>${p.pid===player.pid?`<button data-cancel-vote ${locked?'disabled':''}>Отменить</button>`:''}</div></div>`).join(''):''}${feedback}`;
+  if(leaderMode&&!round.resolved){for(const button of panel.querySelectorAll('[data-option]')){button.disabled=locked||!isLeader;button.classList.toggle('chosen',Number(button.dataset.option)===decision?.option)}const submit=panel.querySelector('[data-submit]');if(submit){submit.parentElement.hidden=!isLeader;submit.disabled=locked||!decision||decision.yes<decision.required;submit.textContent='Отправить согласованный ответ';const note=submit.parentElement.nextElementSibling;if(note)note.textContent=isLeader?'Выберите вариант. После согласия большинства отправьте ответ команды.':'Лидер выбирает вариант; участники голосуют за согласие или отказ.'}if(submitted===undefined)panel.insertAdjacentHTML('beforeend',`<section class="leader-ballot"><span class="eyebrow">${isLeader?'ВЫ — ЛИДЕР':'ГОЛОС КОМАНДЫ'}</span><h3>${decision?'Предложение: '+h(question.options[decision.option]):'Лидер ещё выбирает вариант'}</h3>${decision?`<p>Согласны: ${decision.yes} · против: ${decision.no} · нужно согласий: ${decision.required}</p>${!isLeader?`<div class="row"><button class="${decision.myApproval===true?'pri':''}" data-leader-agree="true" ${locked?'disabled':''}>✓ Согласен</button><button class="${decision.myApproval===false?'danger':''}" data-leader-agree="false" ${locked?'disabled':''}>✕ Не согласен</button></div>`:''}`:''}</section>`)}
   updateTimer();
 }
 $("question-panel").addEventListener("click", event => {
   const option = event.target.closest("[data-option]"), submit = event.target.closest("[data-submit]");
   if (option && !option.disabled) act(() => engine.castVote(Number(option.dataset.option)));
   if (submit && !submit.disabled) act(() => engine.teamSubmit());
+  const approval=event.target.closest('[data-leader-agree]');if(approval&&!approval.disabled)act(()=>engine.voteLeader(approval.dataset.leaderAgree==='true'));
   const confirm=event.target.closest('[data-confirm-vote]'),cancel=event.target.closest('[data-cancel-vote]');
   if(confirm&&!confirm.disabled)act(()=>engine.confirmVote(confirm.dataset.confirmVote));if(cancel&&!cancel.disabled)act(()=>engine.cancelVote());
 });
@@ -132,6 +145,15 @@ function updateTimer() {
   if (!round.resolved && !round.paused && !left) $("question-panel").querySelectorAll("button").forEach(button => { button.disabled = true; });
 }
 
+function renderMarket(state){
+ const box=$('trade-panel'),me=state.regions.find(t=>t.id===state.viewer.player?.regionId);box.hidden=!state.settings.tradeEnabled||state.settings.mode!=='team'||!me;if(box.hidden){marketKey='';return}
+ const leader=me.leaderPid===state.viewer.player.pid,active=!!state.round&&!state.round.resolved,disabled=!engine.connected||active||!leader,key=JSON.stringify([me,leader,active,engine.connected,state.trades,state.regions.map(t=>[t.id,t.name,t.members.length])]);if(key===marketKey)return;marketKey=key;
+ const old={team:$('trade-to')?.value,resources:$('trade-resources')?.value,economy:$('trade-economy')?.value};
+ $('trade-content').innerHTML=`<p class="small-note mut">Лидер предлагает культурные ресурсы в обмен на экономику. Обе команды подтверждают обмен; пределы 1000 ресурсов и 15–100% сохраняются. Предложение действует 2 минуты.</p>${active?'<p class="small-note gold">Обмен откроется после завершения вопроса.</p>':''}<form id="trade-form" class="qform section-gap"><label for="trade-to">Другая команда</label><select id="trade-to">${state.regions.filter(t=>t.id!==me.id&&t.members.length).map(t=>`<option value="${t.id}">${h(t.name)}</option>`).join('')}</select><div class="team-edit-fields"><label>Отдать ресурсы<input id="trade-resources" type="number" min="1" max="1000" value="25" required></label><label>Получить экономику, %<input id="trade-economy" type="number" min="1" max="85" value="5" required></label></div><button class="pri" ${disabled?'disabled':''}>Предложить обмен</button></form><div class="trade-offers section-gap">${(state.trades||[]).map(t=>`<article class="bank-question"><strong>${h(state.regions.find(r=>r.id===t.from)?.name||'Команда')} → ${h(state.regions.find(r=>r.id===t.to)?.name||'Команда')}</strong><p>${t.resources} ресурсов ↔ ${t.economy}% экономики</p><div class="row">${t.to===me.id?`<button data-trade-id="${t.id}" data-trade-accept="true" ${disabled?'disabled':''}>Принять</button>`:''}<button data-trade-id="${t.id}" data-trade-accept="false" ${disabled?'disabled':''}>${t.from===me.id?'Отменить':'Отклонить'}</button></div></article>`).join('')||'<p class="small-note mut">Активных предложений нет.</p>'}</div>`;
+ if(old.team&&[...$('trade-to').options].some(o=>o.value===old.team))$('trade-to').value=old.team;if(old.resources)$('trade-resources').value=old.resources;if(old.economy)$('trade-economy').value=old.economy;
+ $('trade-form').addEventListener('submit',e=>{e.preventDefault();act(()=>engine.offerTrade($('trade-to').value,Number($('trade-resources').value),Number($('trade-economy').value)))});
+}
+$('trade-content').addEventListener('click',e=>{const button=e.target.closest('[data-trade-id]');if(button&&!button.disabled)act(()=>engine.settleTrade(button.dataset.tradeId,button.dataset.tradeAccept==='true'))});
 engine.onChange(state => {
   const status = engine.connected ? "● На связи с сервером" : engine.error || "Подключение к серверу... (пробуждение инстанса может занять до 30 сек)";
   $("reg-conn-status").textContent = status;
@@ -146,13 +168,14 @@ engine.onChange(state => {
   if (scene) {
     scene.setVisible(!mapCollapsed);
     const base = metadataFor(state.regions.find(t=>t.id===player.regionId)).baseRegionId;
-    if (focusedRegion !== base) { scene.focusRegion(base); focusedRegion = base; }
+    if (focusedRegion !== base) { scene.focusRegion(player.regionId); focusedRegion = base; }
     scene.update(state, player.regionId);
   }
   const roundChanged = previousRound !== state.round?.id;
   if (roundChanged) { previousRound = state.round?.id; message(sceneError); }
   renderTeam(state);
-  renderQuestion(state);
+  renderQuestion(state);renderMarket(state);
+  if(state.settings.mode==='team'){const team=state.regions.find(t=>t.id===player.regionId);let badge=$('team-panel').querySelector('[data-role-badge]');if(!badge){badge=document.createElement('p');badge.dataset.roleBadge='';badge.className='team-role-badge';$('team-panel').querySelector('h2').after(badge)}badge.textContent=team.leaderPid===player.pid?'♛ Лидер команды':'◈ Участник команды';const heading=$('team-panel').querySelector('.team-roster')?.previousElementSibling;if(heading)heading.textContent=`Команда (${team.occupied??team.members.length}/${capacityFor(team)})`;}
 });
 setInterval(()=>{if(!document.hidden)updateTimer()},250);
 $('map-visibility').addEventListener('click',()=>{mapCollapsed=!mapCollapsed;document.querySelector('.stage-wrap').hidden=mapCollapsed;$('map-visibility').textContent=mapCollapsed?'Развернуть карту':'Свернуть карту';$('map-visibility').setAttribute('aria-expanded',String(!mapCollapsed));scene?.setVisible(!mapCollapsed);if(!mapCollapsed){if(scene)scene.resize();else ensureScene()}});

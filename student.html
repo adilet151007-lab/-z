@@ -21,11 +21,11 @@
   <div class="reg-card glass">
     <img class="brand-logo" data-brand-logo hidden alt="Логотип организации"><span class="brand-university" data-brand-university>Учебный проект</span><h1 data-brand-title>Мәдениеттану 3D</h1><p class="mut small-note" data-brand-subject>Мәдениеттану</p>
     <span id="registration-instruction" class="mut">Введите имя и выберите свободную область.</span>
-    <label class="sr-only" for="name-input">Ваше имя</label><input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="80" autocomplete="off" enterkeyhint="go">
+    <label class="sr-only" for="name-input">Ваше имя</label><input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="120" autocomplete="off" enterkeyhint="go">
     <label class="privacy-consent"><input id="privacy-consent" type="checkbox"><span>Я прочитал <a href="privacy.html" target="_blank" rel="noopener">политику конфиденциальности</a> и согласен на обработку имени, ответов и сообщений для проведения занятия. Можно использовать согласованный с преподавателем псевдоним.</span></label>
     <button id="join-session" class="pri" type="button" hidden>Присоединиться</button>
     <p id="reg-conn-status" class="mut" style="margin-top:10px"></p>
-    <p id="registration-capacity" class="mut small-note"></p><input id="team-search" type="search" placeholder="Найти команду или регион" aria-label="Поиск команды" autocomplete="off"><div id="region-grid" class="region-grid"></div>
+    <p id="registration-capacity" class="mut small-note"></p><input id="team-search" type="search" placeholder="Найти область, город или команду" aria-label="Поиск команды" autocomplete="off"><button id="area-back" class="ghost section-gap" type="button" hidden>← Все области</button><div id="region-grid" class="region-grid"></div>
     <p id="reg-error" class="mut" style="margin-top:12px;min-height:18px"></p>
   </div>
 </div>
@@ -49,9 +49,11 @@
   <div class="dock">
     <div class="glass dock-panel" id="question-panel"></div>
     <div class="glass dock-panel" id="team-panel"></div>
+    <details class="glass dock-panel" id="trade-panel" hidden><summary class="panel-summary">Обмен ресурсами</summary><div id="trade-content" class="section-gap"></div></details>
   </div>
 </div>
 
+<dialog id="access-details" class="admin-dialog"><h2>Вход по приглашению</h2><p class="small-note mut">После проверки кода сервер выдаст предусмотренные им разрешения. Укажите своё имя и команду.</p><form id="access-details-form" class="qform section-gap"><label for="access-name">Ваше имя</label><input id="access-name" minlength="2" maxlength="40" required autocomplete="name"><label for="access-team">Команда</label><select id="access-team"></select><p id="access-error" class="small-note red" role="status"></p><div class="row"><button class="pri" id="access-submit">Войти</button><button id="access-cancel" type="button">Отмена</button></div></form></dialog>
 <script type="module" src="student.js"></script>
 </body>
 </html>

@@ -11,7 +11,7 @@ class Store{kind='memory';snapshot=null;fail=false;async load(){return structure
 const cmd=(socket,name,data={})=>new Promise((resolve,reject)=>socket.timeout(4000).emit(name,data,(error,result)=>error?reject(error):resolve(result)));
 async function waitFor(check){const end=Date.now()+5000;while(!check()){if(Date.now()>end)throw new Error('State timeout');await new Promise(r=>setTimeout(r,10))}}
 async function fixture(t,extra={}){
- const store=new Store(),server=await createGameServer({...config,requireConsent:false,store,...extra}),port=await server.listen(0,'127.0.0.1'),clients=[];
+ const store=new Store(),server=await createGameServer({...config,cookieSessions:false,flexibleTeams:false,requireConsent:false,store,...extra}),port=await server.listen(0,'127.0.0.1'),clients=[];
  t.after(async()=>{clients.forEach(s=>s.disconnect());await server.close()});
  async function connect(auth={}){const socket=io(`http://127.0.0.1:${port}`,{autoConnect:false,reconnection:false,transports:['websocket'],auth});clients.push(socket);socket.on('state',s=>socket.latest=s);const ready=once(socket,'state');socket.connect();await ready;return socket}
  async function teacher(){const s=await connect();assert.equal((await cmd(s,'teacherLogin',{password:config.teacherPassword})).ok,true);return s}
