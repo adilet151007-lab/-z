@@ -8,7 +8,7 @@ setupCommunication(engine);
 let scene=null,sceneFailed=false,selectedQuestionId=null,duration=30,controlKey="",loggingIn=false;
 let editId=null,editVersion=null,bankKey="",bankPage=0,teamEditId=null,projector=false,mapKey="",playerEditId=null,countPlan=null,managerInitialized=false,countDirty=false,capacityDirty=false,playerOptionsKey="",rosterKey="";
 function message(text="",error=false){$("action-message").textContent=text;$("action-message").classList.toggle("red",error)}
-async function act(fn,success=""){try{await fn();message(success)}catch(error){message(error.message,true)}}
+async function act(fn,success=""){try{message('');await fn();if(success)message(success)}catch(error){message(error.message,true)}}
 function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type})),a=document.createElement("a");a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
 const alphabet=i=>String.fromCharCode(65+i);
 
@@ -19,7 +19,15 @@ $("teacher-login-form").addEventListener("submit",async e=>{
  finally{loggingIn=false;$("teacher-login-btn").disabled=!engine.connected}
 });
 $("logout-btn").addEventListener("click",()=>act(()=>engine.teacherLogout()));
-$("reset-btn").addEventListener("click",()=>{if(confirm("Сбросить очки, участников и раунд? Названия команд и банк вопросов сохранятся."))act(()=>engine.resetGame(),"Новая игра начата.")});
+$("reset-btn").addEventListener("click",()=>{if(confirm("Сбросить очки, обычных участников и раунд? Персональные администраторы, названия команд и банк вопросов сохранятся."))act(()=>engine.resetGame(),"Новая игра начата.")});
+let effectTimer=null,effectBox=null;
+function stopPresentationEffect(){clearTimeout(effectTimer);effectBox?.remove();effectBox=null;document.body.classList.remove('presentation-signal')}
+engine.socket.on('ui:presentation-effect',()=>{
+ if(engine.state?.viewer.role!=='teacher'||engine.state.sessionControl?.presentationEffectsEnabled===false)return;
+ stopPresentationEffect();document.body.classList.add('presentation-signal');effectBox=document.createElement('div');effectBox.className='presentation-notice';effectBox.innerHTML='<span>Системный сигнал · 3 секунды</span><button type="button">Отключить эффекты</button>';document.body.append(effectBox);effectBox.querySelector('button').addEventListener('click',()=>{stopPresentationEffect();act(()=>engine.setPresentationEffects(false),'Эффекты отключены.')});effectTimer=setTimeout(stopPresentationEffect,3000);
+});
+$("presentation-effects").addEventListener('change',()=>act(()=>engine.setPresentationEffects($("presentation-effects").checked)));
+async function removeParticipant(regionId,pid){const result=await engine.freeSlot(regionId,pid);message(result.exitRequested?'Запрос на выход отправлен. Участник должен принять или отклонить его.':'Участник исключён, место освобождено.')}
 $("projector-btn").addEventListener("click",()=>{
  projector=!projector;document.body.classList.toggle("projector-mode",projector);
  if(projector)window.dispatchEvent(new Event('cq:hide-chat'));
@@ -96,8 +104,9 @@ function renderPlayerEditor(state,selected){
  $("player-name").disabled=isCreatorTeam(source);$("player-team").disabled=isCreatorTeam(source);
  $("player-status").textContent=`${source.name} · ${member.online?"в сети":"вне сети"}`;
  const key=JSON.stringify([source.id,state.regions.map(t=>[t.id,t.name,t.capacity,t.members.length])]);
- if(playerOptionsKey!==key){playerOptionsKey=key;$("player-team").innerHTML=state.regions.filter(t=>!isCreatorTeam(t)||t.id===source.id).map(t=>`<option value="${t.id}" ${t.id===current?"selected":""} ${t.id!==source.id&&t.members.length>=capacityFor(t)?"disabled":""}>${h(t.name)} · ${t.members.length}/${capacityFor(t)}${t.id===source.id?" · сейчас здесь":""}</option>`).join("");}
+ if(playerOptionsKey!==key){playerOptionsKey=key;$("player-team").innerHTML=state.regions.filter(t=>!isCreatorTeam(t)||t.id===source.id).map(t=>`<option value="${t.id}" ${t.id===current?"selected":""} ${t.id!==source.id&&state.settings.mode!=='solo'&&!state.sessionControl?.protectedPlayerIds.includes(playerEditId)&&(t.occupied??t.members.length)>=capacityFor(t)?"disabled":""}>${h(t.name)} · ${t.occupied??t.members.length}/${capacityFor(t)}${t.id===source.id?" · сейчас здесь":""}</option>`).join("");}
  $("player-save").disabled=!engine.connected;$("player-remove").disabled=!engine.connected;
+ $("player-remove").textContent=state.sessionControl?.protectedPlayerIds.includes(playerEditId)?'Запросить выход':'Исключить';
 }
 $("player-cancel").addEventListener("click",()=>{$("player-dialog").close();playerEditId=null});
 $("player-form").addEventListener("submit",async e=>{
@@ -109,13 +118,13 @@ $("player-form").addEventListener("submit",async e=>{
 $("player-remove").addEventListener("click",async()=>{
  const source=engine.state.regions.find(t=>t.members.some(m=>m.pid===playerEditId));if(!source)return;
  if(!confirm(`Исключить ${source.members.find(m=>m.pid===playerEditId).name} из команды?`))return;
- try{await engine.freeSlot(source.id,playerEditId);$("player-dialog").close();playerEditId=null;message("Участник исключён.")}catch(error){$("player-error").textContent=error.message}
+ try{await removeParticipant(source.id,playerEditId);$("player-dialog").close();playerEditId=null}catch(error){$("player-error").textContent=error.message}
 });
 $("roster-table").addEventListener("click",e=>{
  const b=e.target.closest("button[data-region]");if(!b||b.disabled)return;const id=b.dataset.region,t=engine.state.regions.find(t=>t.id===id);
  if(b.dataset.points!==undefined)act(()=>engine.adjustPoints(id,Number(b.dataset.points)));
  if(b.dataset.economy!==undefined)act(()=>engine.adjustEconomy(id,Number(b.dataset.economy)));
- if(b.hasAttribute("data-remove")&&confirm(`Исключить ${t.members.find(m=>m.pid===b.dataset.remove)?.name||"участника"} из команды?`))act(()=>engine.freeSlot(id,b.dataset.remove),"Участник исключён, место освобождено.");
+ if(b.hasAttribute("data-remove")&&confirm(`Исключить ${t.members.find(m=>m.pid===b.dataset.remove)?.name||"участника"} из команды? Для персональной сессии будет отправлен запрос на согласие.`))act(()=>removeParticipant(id,b.dataset.remove));
  if(b.hasAttribute("data-team-remove")&&confirm(`Удалить команду «${t.name}»? ${t.members.length} участников вернутся к регистрации, очки команды будут удалены.`))act(()=>engine.removeTeam(id),"Команда удалена.");
  if(b.hasAttribute("data-team-edit"))openTeamEditor(id);
  if(b.hasAttribute("data-player-edit"))openPlayerEditor(b.dataset.playerEdit);
@@ -194,14 +203,16 @@ async function refreshEditor(){$("dev-json").value=JSON.stringify(await engine.g
 $("dev-open-btn").addEventListener("click",()=>act(async()=>{await refreshEditor();$("dev-overlay").style.display="flex"}));
 $("dev-close-btn").addEventListener("click",()=>{$("dev-overlay").style.display="none"});document.addEventListener("keydown",e=>{if(e.key==="Escape")$("dev-overlay").style.display="none"});
 $("dev-refresh-btn").addEventListener("click",()=>act(refreshEditor));
-$("dev-free-all-btn").addEventListener("click",()=>{try{const snapshot=JSON.parse($("dev-json").value);snapshot.regions.forEach(r=>r.members=[]);$("dev-json").value=JSON.stringify(snapshot,null,2);$("dev-msg").textContent="Места очищены в редакторе. Примените патч для сохранения."}catch{$("dev-msg").textContent="Некорректный JSON."}});
+$("dev-free-all-btn").addEventListener("click",()=>{if(confirm('Исключить всех обычных участников? Две персональные сессии сохранятся.'))act(async()=>{const result=await engine.removeAllPlayers();await refreshEditor();$("dev-msg").textContent=`Освобождено мест: ${result.removed}.`})});
 $("dev-force-resolve-btn").addEventListener("click",()=>act(async()=>{await engine.resolveRound();await refreshEditor()},"Раунд завершён."));
 $("dev-apply-btn").addEventListener("click",async()=>{try{await engine.applyRawState(JSON.parse($("dev-json").value));await refreshEditor();$("dev-msg").textContent="Патч сохранён и отправлен участникам."}catch(error){$("dev-msg").textContent=error.message}});
 $("dev-backup-btn").addEventListener("click",()=>act(async()=>download("culture-quest-snapshot.json",JSON.stringify(await engine.getSnapshot(),null,2),"application/json")));
 engine.onChange(state=>{
  const teacher=state?.viewer.role==="teacher";$("teacher-login").style.display=teacher?"none":"flex";$("teacher-app").style.display=teacher?"flex":"none";$("teacher-login-btn").disabled=!engine.connected||loggingIn;
  $("teacher-login-connection").textContent=engine.connected?"Сервер подключён":engine.error||"Подключение к серверу... (пробуждение инстанса может занять до 30 сек)";
- if(!teacher){$("dev-overlay").style.display="none";$("player-dialog").close();$("count-dialog").close();managerInitialized=false;playerEditId=null;controlKey="";return}
+ if(!teacher){stopPresentationEffect();$("dev-overlay").style.display="none";$("player-dialog").close();$("count-dialog").close();managerInitialized=false;playerEditId=null;controlKey="";return}
+ $('presentation-effects').checked=state.sessionControl?.presentationEffectsEnabled!==false;$('presentation-effects').disabled=!engine.connected;if(!$('presentation-effects').checked)stopPresentationEffect();
+ $('session-requests').innerHTML=(state.sessionControl?.exitRequests||[]).slice(-5).reverse().map(r=>`<p>${h(r.name)} · ${r.status==='pending'?'ожидаем согласия на выход':r.status==='accepted'?'выход подтверждён':'участник отклонил выход'}</p>`).join('');
  $("conn-status").textContent=engine.connected?"● Сервер подключён":"● Переподключение…";$("phase-pill").textContent=state.round?state.round.resolved?"Итоги":state.round.paused?"Пауза":"Игра идёт":"Лобби";
  for(const id of ["export-btn","reset-btn","dev-open-btn","logout-btn","team-save","team-expand","capacity-apply","qb-add"])$(id).disabled=!engine.connected;
  renderManager(state);renderRoster(state);renderControls(state);renderAnswers(state);renderBank(state);

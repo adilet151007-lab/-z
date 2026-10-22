@@ -91,6 +91,8 @@ function restoreSnapshot(raw) {
   }
   ensure(integer(state.settings.teamCapacity, 1, MAX_TEAM_CAPACITY), "Повреждена настройка вместимости.");
   state.schemaVersion = 5;
+  if(state.exitRequests!==undefined)ensure(Array.isArray(state.exitRequests)&&state.exitRequests.length<=40&&state.exitRequests.every(r=>typeof r.id==='string'&&typeof r.pid==='string'&&typeof r.name==='string'&&Number.isFinite(r.at)&&['pending','accepted','declined'].includes(r.status)), 'Повреждены запросы выхода.');
+  if(state.presentationEffectsEnabled!==undefined)ensure(typeof state.presentationEffectsEnabled==='boolean','Повреждена настройка эффектов.');
   state.questions = validateQuestions(state.questions);
   ensure(["lobby", "playing", "ended"].includes(state.phase) && Array.isArray(state.log), "Повреждена структура сохранения.");
   if (state.round) {
@@ -189,6 +191,31 @@ export class GameLogic {
     this.clearMembershipVotes([pid], [regionId]);
     this.log(`${member.name}: место в команде освобождено.`);
     this.touch();
+  }
+  requestSessionExit(pid) {
+    const member=this.state.regions.flatMap(t=>t.members).find(m=>m.pid===pid);
+    ensure(member?.creatorId,'Персональный доступ не найден.');
+    const requests=this.state.exitRequests??=[];
+    const pending=requests.find(r=>r.pid===pid&&r.status==='pending');
+    if(pending)return {exitRequested:true,requestId:pending.id};
+    const last=requests.findLast(r=>r.pid===pid);
+    ensure(!last||this.now()-last.at>=30000,'Запрос уже отправлен. Повторить можно через 30 секунд.','RATE_LIMIT');
+    const request={id:randomUUID(),pid,name:member.name,at:this.now(),status:'pending'};
+    requests.push(request);this.state.exitRequests=requests.slice(-40);this.touch();
+    return {exitRequested:true,requestId:request.id};
+  }
+  respondSessionExit(pid, requestId, accept) {
+    const request=this.state.exitRequests?.find(r=>r.id===requestId&&r.pid===pid&&r.status==='pending');
+    ensure(request&&typeof accept==='boolean','Запрос уже закрыт или не принадлежит этой сессии.','REQUEST_CLOSED');
+    request.status=accept?'accepted':'declined';request.respondedAt=this.now();
+    if(accept){const team=this.state.regions.find(t=>t.members.some(m=>m.pid===pid));ensure(team,'Сессия уже завершена.');this.leaveTeam(team.id,pid)}else this.touch();
+    return {accepted:accept};
+  }
+  removeOrdinaryPlayers() {
+    let removed=0;
+    for(const team of this.state.regions){const pids=team.members.filter(m=>!m.creatorId).map(m=>m.pid);if(!pids.length)continue;team.members=team.members.filter(m=>m.creatorId);this.clearMembershipVotes(pids,[team.id]);removed+=pids.length}
+    if(removed){this.log(`Освобождены обычные места: ${removed}. Персональные сессии сохранены.`);this.touch()}
+    return {removed};
   }
   clearMembershipVotes(pids, teamIds) {
     const round = this.state.round;
@@ -500,12 +527,15 @@ export class GameLogic {
   }
   resetGame() {
     const questions = this.state.questions, revision = this.state.revision, settings = this.state.settings;
-    const teams = this.state.regions.map(r => ({...r,points:0,economy:100,members:[]}));
+    const exitRequests=this.state.exitRequests,presentationEffectsEnabled=this.state.presentationEffectsEnabled;
+    const teams = this.state.regions.map(r => ({...r,points:0,economy:100,members:r.members.filter(m=>m.creatorId).map(m=>({...m,...(settings.universal?{capital:0,streak:0}:{})}))}));
     this.state = freshState();
     this.state.questions = questions;
     this.state.settings = settings;
     this.state.regions = teams;
     this.state.revision = revision;
+    if(exitRequests)this.state.exitRequests=exitRequests;
+    if(presentationEffectsEnabled!==undefined)this.state.presentationEffectsEnabled=presentationEffectsEnabled;
     this.log("Игра сброшена. Банк вопросов сохранён.");
     this.touch();
   }
@@ -560,6 +590,8 @@ export class GameLogic {
       questions: teacher ? structuredClone(this.state.questions) : [],
       round: null, log: teacher ? structuredClone(this.state.log) : []
     };
+    if(teacher)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
+    if(creator)view.viewer.exitRequest=structuredClone(this.state.exitRequests?.find(r=>r.pid===player.pid&&r.status==='pending')||null);
     if (this.state.round) {
       const { ballots, proposals, questionSnapshot, ...round } = this.state.round;
       const { id, text, options, points, topic } = questionSnapshot;

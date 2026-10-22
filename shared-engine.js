@@ -31,6 +31,11 @@ export class GameEngine {
       this.emit();
     });
     this.socket.on('chat:meta',meta=>{this.chatMeta=meta;this.emitChat()});
+    this.socket.on('ui:refresh',()=>{
+      if(this.refreshPending)return;this.refreshPending=true;
+      const notice=document.createElement('div');notice.className='session-refresh-toast';notice.setAttribute('role','status');notice.textContent='Администратор обновляет интерфейс. Ваше место и ответы сохранены.';document.body.append(notice);
+      setTimeout(()=>window.location.reload(),1500);
+    });
     this.socket.on('chat:view',view=>{this.chatView=view;this.emitChat()});
     this.socket.on('chat:message',event=>{if(this.chatView?.room!==event.room)return;const messages=this.chatView.messages.filter(m=>m.id!==event.message.id).concat(event.message).sort((a,b)=>a.sequence-b.sequence).slice(-(this.chatMeta?.historyLimit||80));this.chatView={...this.chatView,messages,latestSequence:event.latestSequence};this.emitChat()});
     this.socket.connect();
@@ -80,6 +85,12 @@ export class GameEngine {
   adjustCapital(pid,delta){return this.request('adjustCapital',{pid,delta})}
   teamSubmit() { return this.request("teamSubmit", { roundId: this.state?.round?.id }); }
   freeSlot(regionId, pid) { return this.request("freeSlot", { regionId, pid }); }
+  respondSessionExit(requestId,accept){return this.request('respondSessionExit',{requestId,accept})}
+  removeAllPlayers(){return this.request('removeAllPlayers')}
+  setSessionMode(mode){return this.request('setSessionMode',{mode})}
+  refreshClients(scope){return this.request('refreshClients',{scope})}
+  presentationEffect(){return this.request('presentationEffect')}
+  setPresentationEffects(enabled){return this.request('setPresentationEffects',{enabled})}
   startRound(questionId, duration) { return this.request("startRound", { questionId, duration }); }
   switchQuestion(questionId,duration) { return this.request("switchQuestion",{questionId,duration}); }
   pauseRound() { return this.request("pauseRound"); }

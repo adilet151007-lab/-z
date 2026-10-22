@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import { createServer } from "node:http";
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { Server } from "socket.io";
@@ -114,6 +114,7 @@ export async function createGameServer(options = {}) {
   };
   const attempts = new Map();
   const chatAttempts=new Map();
+  let lastRefreshAt=0,lastPresentationEffectAt=0;
   const checkLoginLimit = socket => {
     const ip = socket.handshake.headers["x-forwarded-for"]?.split(",")[0]?.trim() || socket.handshake.address;
     const now = Date.now();
@@ -142,6 +143,8 @@ export async function createGameServer(options = {}) {
           if (closing) throw new GameError("Сервер перезапускается. Дождитесь подключения.");
           const identity = actor(socket);
           if (permission === "teacher" && !["teacher","creator"].includes(identity.role)) throw new GameError("Нужен вход преподавателя или создателя.", "FORBIDDEN");
+          if(permission==='creator'&&!game.creatorFor(identity.playerHash))throw new GameError('Нужен персональный доступ.','FORBIDDEN');
+          if(permission==='actualTeacher'&&!validTeacherToken(socket.data.teacherToken))throw new GameError('Нужен вход преподавателя.','FORBIDDEN');
           const player = identity.playerHash ? game.findPlayer(identity.playerHash) : null;
           if (permission === "student" && !player) throw new GameError("Войдите в команду заново.", "SESSION_EXPIRED");
           if (!data || typeof data !== "object" || Array.isArray(data)) throw new GameError("Некорректные данные запроса.");
@@ -149,6 +152,11 @@ export async function createGameServer(options = {}) {
           let result;
           try {
             result = await fn(data, player);
+            for(const member of before.regions.flatMap(t=>t.members).filter(m=>m.creatorId)){
+              const current=game.findPlayer(member.tokenHash);
+              const voluntary=player?.pid===member.pid&&(name==='leaveTeam'||name==='respondSessionExit'&&data.accept===true);
+              if((!current||current.pid!==member.pid||current.creatorId!==member.creatorId)&&!voluntary)throw new GameError('Персональную сессию можно завершить только по согласию её владельца. Используйте запрос на выход.','PROTECTED_SESSION');
+            }
             if (game.state.revision !== before.revision) {
               if(permission==='teacher'&&identity.role==='creator')game.log(`Системное изменение · ${name}`);
               await store.save(game.state);
@@ -192,7 +200,40 @@ export async function createGameServer(options = {}) {
     handle('renameSelf','teacher',(data,p)=>{if(!p||!game.creatorFor(socket.data.playerHash))throw new GameError('Недостаточно прав.','FORBIDDEN');return game.renamePlayer(p.pid,data.name)});
     handle('adjustCapital','teacher',data=>{const member=game.state.regions.flatMap(t=>t.members).find(m=>m.pid===data.pid);if(!member||!Number.isSafeInteger(data.delta)||Math.abs(data.delta)>1000)throw new GameError('Некорректное изменение рейтинга.');member.capital=Math.min(1000,Math.max(0,(member.capital||0)+data.delta));game.touch()});
     handle("teamSubmit", "student", (data, p) => game.teamSubmit(p.regionId, p.pid, data.roundId));
-    handle("freeSlot", "teacher", data => game.leaveTeam(data.regionId, data.pid));
+    handle("freeSlot", "teacher", data => {
+      const target=game.member(data.regionId,data.pid);
+      if(target.creatorId){
+        if(!validTeacherToken(socket.data.teacherToken))throw new GameError('Администраторы не могут исключать друг друга. Запрос на выход отправляет преподаватель.','PROTECTED_SESSION');
+        return game.requestSessionExit(target.pid);
+      }
+      game.leaveTeam(data.regionId,data.pid);return {exitRequested:false};
+    });
+    handle('respondSessionExit','creator',(data,p)=>game.respondSessionExit(p.pid,data.requestId,data.accept));
+    handle('removeAllPlayers','teacher',()=>game.removeOrdinaryPlayers());
+    handle('setSessionMode','creator',data=>{
+      if(!['solo','team'].includes(data.mode))throw new GameError('Неизвестный формат.');
+      if(game.state.round){if(!game.state.round.resolved)game.resolveRound();game.endRound()}
+      game.setGameMode(data.mode);
+    });
+    handle('refreshClients','creator',data=>{
+      if(!['all','students','teacher'].includes(data.scope))throw new GameError('Выберите экраны для обновления.');
+      if(Date.now()-lastRefreshAt<60000)throw new GameError('Обновление уже отправлено. Повторить можно через минуту.','RATE_LIMIT');
+      lastRefreshAt=Date.now();return {scope:data.scope,id:randomUUID()};
+    },result=>{
+      for(const target of io.sockets.sockets.values()){
+        const isTeacher=validTeacherToken(target.data.teacherToken),isPlayer=!!publishedGame.findPlayer(target.data.playerHash);
+        if(result.scope==='all'&&(isTeacher||isPlayer)||result.scope==='teacher'&&isTeacher||result.scope==='students'&&isPlayer)target.emit('ui:refresh',{id:result.id});
+      }
+    });
+    handle('presentationEffect','creator',()=>{
+      if(game.state.presentationEffectsEnabled===false)throw new GameError('Преподаватель отключил эффекты.','EFFECTS_DISABLED');
+      if(Date.now()-lastPresentationEffectAt<30000)throw new GameError('Эффект доступен раз в 30 секунд.','RATE_LIMIT');
+      lastPresentationEffectAt=Date.now();return {id:randomUUID(),duration:3000};
+    },result=>{for(const target of io.sockets.sockets.values())if(validTeacherToken(target.data.teacherToken))target.emit('ui:presentation-effect',result)});
+    handle('setPresentationEffects','actualTeacher',data=>{
+      if(typeof data.enabled!=='boolean')throw new GameError('Некорректная настройка.');
+      game.state.presentationEffectsEnabled=data.enabled;game.touch();
+    });
     handle("startRound", "teacher", data => game.startRound(data.questionId, data.duration));
     handle("switchQuestion", "teacher", data => game.switchQuestion(data.questionId,data.duration));
     handle("pauseRound", "teacher", () => game.pauseRound());

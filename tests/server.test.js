@@ -38,6 +38,46 @@ async function fixture(t, extra = {}) {
 const command = (socket, name, payload = {}) => new Promise((resolve, reject) => socket.timeout(4000).emit(name, payload, (error, result) => error ? reject(error) : resolve(result)));
 const login = socket => command(socket, "teacherLogin", { password: config.teacherPassword });
 
+test('персональные сессии: взаимное исключение и JSON запрещены, выход только по собственному согласию',async t=>{
+ const f=await fixture(t,{legacyRules:false}),teacher=await f.connect(),a=await f.connect(),b=await f.connect(),student=await f.connect();await login(teacher);
+ const one=await command(a,'joinTeam',{regionId:'jetisu',name:config.creatorCodes.ernur+' Арман'}),two=await command(b,'joinTeam',{regionId:'saryarka',name:config.creatorCodes.adilet+' Марат'});await command(student,'joinTeam',{regionId:'jetisu',name:'Алия'});
+ assert.equal((await command(a,'freeSlot',{regionId:'saryarka',pid:two.player.pid})).code,'PROTECTED_SESSION');
+ assert.equal((await command(b,'freeSlot',{regionId:'jetisu',pid:one.player.pid})).code,'PROTECTED_SESSION');
+ for(const actor of [teacher,a]){const {snapshot}=await command(actor,'getSnapshot');snapshot.regions.forEach(r=>r.members=r.members.filter(m=>m.pid!==two.player.pid));assert.equal((await command(actor,'applyRawState',snapshot)).code,'PROTECTED_SESSION');assert.ok(f.server.game.findPlayer(f.server.game.state.regions.flatMap(r=>r.members).find(m=>m.pid===two.player.pid).tokenHash))}
+ const request=await command(teacher,'freeSlot',{regionId:'jetisu',pid:one.player.pid});assert.equal(request.exitRequested,true);await waitFor(()=>a.latest.viewer.exitRequest?.id===request.requestId);
+ assert.equal(student.latest.sessionControl,undefined);assert.equal(b.latest.viewer.exitRequest,null);assert.equal((await command(student,'respondSessionExit',{requestId:request.requestId,accept:true})).code,'FORBIDDEN');assert.equal((await command(teacher,'respondSessionExit',{requestId:request.requestId,accept:true})).code,'FORBIDDEN');assert.equal((await command(b,'respondSessionExit',{requestId:request.requestId,accept:true})).code,'REQUEST_CLOSED');
+ assert.equal((await command(a,'respondSessionExit',{requestId:request.requestId,accept:false})).ok,true);await waitFor(()=>!a.latest.viewer.exitRequest);assert.equal(a.latest.viewer.isDevTelemetry,true);assert.equal((await command(teacher,'freeSlot',{regionId:'jetisu',pid:one.player.pid})).code,'RATE_LIMIT');
+ f.server.game.state.exitRequests[0].at=Date.now()-31000;
+ const retry=await command(teacher,'freeSlot',{regionId:'jetisu',pid:one.player.pid});assert.equal((await command(a,'respondSessionExit',{requestId:retry.requestId,accept:true})).ok,true);await waitFor(()=>a.latest.viewer.role==='guest');assert.equal(b.latest.viewer.isDevTelemetry,true);
+ const stale=await f.connect({playerToken:one.playerToken});assert.equal(stale.latest.viewer.isDevTelemetry,false);
+});
+
+test('расширенное управление: перенос себя в полную команду, вопросы, формат, массовый выход и сброс сохраняют админов',async t=>{
+ const f=await fixture(t,{legacyRules:false}),a=await f.connect(),b=await f.connect(),teacher=await f.connect();await login(teacher);
+ const one=await command(a,'joinTeam',{regionId:'saryarka',name:config.creatorCodes.ernur}),two=await command(b,'joinTeam',{regionId:'jetisu',name:config.creatorCodes.adilet});
+ for(let i=0;i<4;i++){const s=await f.connect();await command(s,'joinTeam',{regionId:'jetisu',name:'Игрок '+i})}
+ assert.equal((await command(a,'movePlayer',{pid:one.player.pid,toTeamId:'jetisu'})).ok,true);await waitFor(()=>a.latest.viewer.player?.regionId==='jetisu');assert.equal(a.latest.viewer.isDevTelemetry,true);
+ const ordinary=f.server.game.region('jetisu').members.find(m=>!m.creatorId);assert.equal((await command(a,'updatePlayer',{pid:ordinary.pid,name:'Новое имя',toTeamId:'saryarka'})).ok,true);
+ await command(a,'startRound',{questionId:'q1',duration:60});const q=structuredClone(f.server.game.state.questions[0]);assert.equal((await command(a,'editQuestion',{questionId:q.id,question:{...q,text:'Исправленный вопрос для нового раунда?'},version:q.version})).ok,true);assert.notEqual(f.server.game.state.round.questionSnapshot.text,'Исправленный вопрос для нового раунда?');
+ assert.equal((await command(teacher,'setSessionMode',{mode:'solo'})).code,'FORBIDDEN');assert.equal((await command(a,'setSessionMode',{mode:'solo'})).ok,true);assert.equal(f.server.game.state.round,null);assert.equal(f.server.game.state.settings.mode,'solo');
+ assert.equal((await command(a,'removeAllPlayers')).removed,4);assert.equal(f.server.game.state.regions.flatMap(t=>t.members).length,2);assert.equal((await command(a,'adjustCapital',{pid:two.player.pid,delta:250})).ok,true);
+ assert.equal((await command(b,'resetGame')).ok,true);await waitFor(()=>a.latest.viewer.isDevTelemetry&&a.latest.viewer.player.capital===0);assert.equal(f.server.game.state.regions.flatMap(t=>t.members).length,2);assert.equal((await command(a,'getSnapshot')).ok,true);
+});
+
+test('запрос на выход сохраняется после перезапуска и принимается только владельцем сессии',async t=>{
+ const store=new MemoryStore(),f=await fixture(t,{legacyRules:false,store}),teacher=await f.connect(),a=await f.connect();await login(teacher);const joined=await command(a,'joinTeam',{regionId:'jetisu',name:config.creatorCodes.ernur});const exit=await command(teacher,'freeSlot',{regionId:'jetisu',pid:joined.player.pid});a.disconnect();await f.server.close();
+ const restarted=await fixture(t,{legacyRules:false,store}),resumed=await restarted.connect({playerToken:joined.playerToken});assert.equal(resumed.latest.viewer.exitRequest.id,exit.requestId);assert.equal((await command(resumed,'respondSessionExit',{requestId:exit.requestId,accept:true})).ok,true);assert.equal(restarted.server.game.state.exitRequests[0].status,'accepted');
+});
+
+test('сигнал и перезагрузка: только персональные админы, нужные экраны, ограничение частоты и отключение преподавателем',async t=>{
+ const f=await fixture(t,{legacyRules:false}),teacher=await f.connect(),a=await f.connect(),student=await f.connect(),guest=await f.connect();await login(teacher);await command(a,'joinTeam',{regionId:'jetisu',name:config.creatorCodes.ernur});await command(student,'joinTeam',{regionId:'saryarka',name:'Алия'});
+ const effects=[],reloads=[];for(const [name,socket]of [['teacher',teacher],['a',a],['student',student],['guest',guest]]){socket.on('ui:presentation-effect',()=>effects.push(name));socket.on('ui:refresh',()=>reloads.push(name))}
+ for(const actor of [student,teacher,guest]){assert.equal((await command(actor,'presentationEffect')).code,'FORBIDDEN');assert.equal((await command(actor,'refreshClients',{scope:'all'})).code,'FORBIDDEN')}
+ assert.equal((await command(a,'presentationEffect')).ok,true);await waitFor(()=>effects.length);assert.deepEqual(effects,['teacher']);assert.equal((await command(a,'presentationEffect')).code,'RATE_LIMIT');
+ assert.equal((await command(teacher,'setPresentationEffects',{enabled:false})).ok,true);assert.equal((await command(a,'presentationEffect')).code,'EFFECTS_DISABLED');assert.equal((await command(a,'setPresentationEffects',{enabled:true})).code,'FORBIDDEN');
+ assert.equal((await command(a,'refreshClients',{scope:'teacher'})).ok,true);await waitFor(()=>reloads.length);assert.deepEqual(reloads,['teacher']);assert.equal((await command(a,'refreshClients',{scope:'all'})).code,'RATE_LIMIT');
+});
+
 test("без входа нельзя выполнять ни одну административную команду", async t => {
   const f = await fixture(t), socket = await f.connect();
   for (const event of ["startRound", "switchQuestion", "getHotfixBackup", "pauseRound", "resetTimer", "resolveRound", "endRound", "adjustPoints", "adjustEconomy", "freeSlot", "addCustomQuestion", "resetGame", "applyRawState", "getSnapshot", "exportSummary", "createTeam", "expandTeams", "planTeamCount", "setTeamCount", "setTeamCapacity", "setAllCapacities", "updateTeam", "movePlayer", "renamePlayer", "updatePlayer", "renameTeam", "removeTeam", "editQuestion", "deleteQuestion", "importQuestions", "analyzeSyllabus", "generateQuestions"]) {
@@ -210,7 +250,7 @@ test('отзыв доступа немедленно закрывает инст
  const f=await fixture(t),teacher=await f.connect(),root=await f.connect();await login(teacher);
  f.server.store.fail=true;assert.equal((await command(root,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur})).ok,false);assert.equal(f.server.game.state.regions.some(t=>t.id==='creators'),false);
  f.server.store.fail=false;const join=await command(root,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur});assert.equal(join.ok,true);
- await command(teacher,'freeSlot',{regionId:'creators',pid:join.player.pid});await waitFor(()=>root.latest.viewer.role==='guest');
+ const exit=await command(teacher,'freeSlot',{regionId:'creators',pid:join.player.pid});assert.equal(exit.exitRequested,true);await command(root,'respondSessionExit',{requestId:exit.requestId,accept:true});await waitFor(()=>root.latest.viewer.role==='guest');
  assert.equal((await command(root,'getSnapshot')).code,'FORBIDDEN');const old=await f.connect({playerToken:join.playerToken});assert.equal(old.latest.viewer.isCreator,false);
  const newcomer=await f.connect();assert.equal((await command(newcomer,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur})).ok,true);
 });
@@ -235,7 +275,7 @@ test('универсальный сервер: скрытые сессии, им
  await command(teacher,'setGameMode',{mode:'solo'});await command(teacher,'startRound',{questionId:'q1',duration:30});await command(student,'castVote',{roundId:f.server.game.state.round.id,optionIdx:0});
  await command(teacher,'resolveRound');await waitFor(()=>student.latest.round?.resolved);assert.equal(student.latest.viewer.player.capital,25);assert.equal(student.latest.leaderboard.find(m=>m.pid===a.player.pid).capital,25);
  const snapshot=await command(restored,'getSnapshot');assert.equal(snapshot.snapshot.settings.mode,'solo');assert.equal(JSON.stringify(snapshot).includes('tokenHash'),false);
- await command(teacher,'freeSlot',{regionId:'jetisu',pid:r.player.pid});assert.equal((await command(restored,'renameSelf',{name:'Снова'})).code,'FORBIDDEN');
+ const exit=await command(teacher,'freeSlot',{regionId:'jetisu',pid:r.player.pid});assert.equal(exit.exitRequested,true);await command(restored,'respondSessionExit',{requestId:exit.requestId,accept:true});assert.equal((await command(restored,'renameSelf',{name:'Снова'})).code,'FORBIDDEN');
 });
 test('универсальный сервер: предложения видны только своей команде и подтверждаются без штрафа',async t=>{
  const f=await fixture(t,{legacyRules:false}),teacher=await f.connect(),a=await f.connect(),b=await f.connect(),other=await f.connect();await login(teacher);
