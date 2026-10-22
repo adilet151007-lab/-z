@@ -89,7 +89,7 @@ export class GameEngine {
   removeAllPlayers(){return this.request('removeAllPlayers')}
   setSessionMode(mode){return this.request('setSessionMode',{mode})}
   refreshClients(scope){return this.request('refreshClients',{scope})}
-  presentationEffect(duration){return this.request('presentationEffect',duration?{duration}: {})}
+  presentationEffect(duration,targetPid){const data={};if(duration)data.duration=duration;if(targetPid)data.targetPid=targetPid;return this.request('presentationEffect',data)}
   grantAdmin(pid,permissions,effectDuration,unlimitedEffects){return this.request('grantAdmin',{pid,permissions,effectDuration,unlimitedEffects})}
   revokeAdmin(pid){return this.request('revokeAdmin',{pid})}
   setPresentationEffects(enabled){return this.request('setPresentationEffects',{enabled})}

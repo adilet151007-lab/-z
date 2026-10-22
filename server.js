@@ -241,8 +241,10 @@ export async function createGameServer(options = {}) {
       if(game.state.presentationEffectsEnabled===false&&!pro)throw new GameError('Преподаватель отключил эффекты.','EFFECTS_DISABLED');
       if(!pro && !grant?.unlimitedEffects && Date.now()-lastPresentationEffectAt<30000)throw new GameError('Эффект доступен раз в 30 секунд.','RATE_LIMIT');
       const duration = pro ? Math.max(100,Math.min(60000,Number(data.duration)||3000)) : grant.effectDuration;
-      if(!pro)lastPresentationEffectAt=Date.now();return {id:randomUUID(),duration};
-    },result=>{for(const target of io.sockets.sockets.values())if(validTeacherToken(target.data.teacherToken))target.emit('ui:presentation-effect',result)});
+      const targetPid=typeof data.targetPid==='string'&&data.targetPid.trim()?data.targetPid.trim():null;
+      if(targetPid){const target=game.state.regions.flatMap(t=>t.members).find(m=>m.pid===targetPid);if(!target||target.creatorId)throw new GameError('Можно выбрать только обычного участника.','INVALID_TARGET');}
+      if(!pro)lastPresentationEffectAt=Date.now();return {id:randomUUID(),duration,targetPid};
+    },result=>{for(const target of io.sockets.sockets.values()){if(result.targetPid){const player=publishedGame.findPlayer(target.data.playerHash);if(player?.pid===result.targetPid)target.emit('ui:presentation-effect',result)}else if(validTeacherToken(target.data.teacherToken))target.emit('ui:presentation-effect',result)}});
     handle('grantAdmin','creator',(data,p)=>{
       const creator=game.creatorFor(socket.data.playerHash);if(creator?.creatorId!=='adilet')throw new GameError('Только Адилет может выдавать административные права.','PRO_ONLY');
       return game.grantAdmin(data.pid,data.permissions,data.effectDuration,data.unlimitedEffects);

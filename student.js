@@ -9,6 +9,13 @@ setupCommunication(engine);
 const $ = id => document.getElementById(id);
 let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null, lastUiRevision = -1;
 let sceneError = "";
+let effectTimer=null,effectBox=null;
+function stopPresentationEffect(){clearTimeout(effectTimer);effectBox?.remove();effectBox=null;document.body.classList.remove('presentation-signal')}
+engine.socket.on('ui:presentation-effect',event=>{
+  if(engine.state?.viewer.role==='guest')return;
+  const duration=Math.max(100,Math.min(60000,Number(event?.duration)||3000));
+  stopPresentationEffect();document.body.classList.add('presentation-signal');effectBox=document.createElement('div');effectBox.className='presentation-blocker';effectBox.setAttribute('role','alert');effectBox.setAttribute('aria-label','Временный системный сигнал');effectBox.innerHTML=`<div class="recording-hud"><span class="recording-dot">● REC</span><span>FRAME LOSS · SIGNAL INTERFERENCE</span><span>${Math.ceil(duration/1000)}s</span></div><div class="recording-noise"></div><div class="recording-center">NO SIGNAL<br><small>RECOVERING VIDEO STREAM</small></div>`;for(const type of ['pointerdown','pointerup','click','dblclick','touchstart','touchend','contextmenu'])effectBox.addEventListener(type,e=>{e.preventDefault();e.stopPropagation()},{capture:true});document.body.append(effectBox);effectTimer=setTimeout(stopPresentationEffect,duration);
+});
 function message(text = "", isError = false) {
   $("action-message").textContent = text;
   $("action-message").classList.toggle("red", isError);

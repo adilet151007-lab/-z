@@ -20,7 +20,8 @@ $("teacher-login-form").addEventListener("submit",async e=>{
 });
 $("logout-btn").addEventListener("click",()=>act(()=>engine.teacherLogout()));
 $("reset-btn").addEventListener("click",()=>{if(confirm("Сбросить очки, обычных участников и раунд? Персональные администраторы, названия команд и банк вопросов сохранятся."))act(()=>engine.resetGame(),"Новая игра начата.")});
-let effectTimer=null,effectBox=null;
+let effectTimer=null,effectBox=null,adminCollapsed=false;
+$("collapse-admin-btn").addEventListener("click",()=>{adminCollapsed=!adminCollapsed;document.body.classList.toggle("teacher-ui-collapsed",adminCollapsed);$("collapse-admin-btn").textContent=adminCollapsed?"Развернуть управление":"Свернуть управление";scene?.resize()});
 function stopPresentationEffect(){clearTimeout(effectTimer);effectBox?.remove();effectBox=null;document.body.classList.remove('presentation-signal')}
 engine.socket.on('ui:presentation-effect',event=>{
  if(engine.state?.viewer.role!=='teacher'||engine.state.sessionControl?.presentationEffectsEnabled===false)return;

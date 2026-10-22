@@ -34,6 +34,7 @@
     <span id="phase-pill" class="pill"></span>
     <span id="conn-status" class="pill"></span>
     <button class="ghost teacher-private" id="export-btn">Выгрузить ведомость</button>
+    <button class="ghost teacher-private" id="collapse-admin-btn" type="button">Свернуть управление</button>
     <button class="ghost teacher-private" id="dev-open-btn">Инструменты разработчика</button>
     <button class="danger teacher-private" id="reset-btn">Сбросить игру</button>
     <button class="ghost" id="projector-btn">Скрыть ответы для проектора</button><button class="ghost" id="logout-btn">Выйти</button>
@@ -84,7 +85,7 @@
         <form id="capacity-form" class="admin-setting section-gap"><label for="capacity-all">Мест в каждой команде <small>Применить ко всем и новым командам</small></label><input id="capacity-all" type="number" min="1" max="50" value="4" required><button id="capacity-apply" type="submit">Применить вместимость</button></form>
         <details class="section-gap"><summary>Показатели выбранной области</summary><form id="team-form" class="qform section-gap"><label for="team-name" class="field-label">Название</label><input id="team-name" type="text" minlength="2" maxlength="60" readonly required><label for="team-base" class="field-label">Регион на карте</label><select id="team-base"></select><div class="team-edit-fields"><label>Мест<input id="team-capacity" type="number" min="4" max="4" value="4" readonly required></label><label>Ресурс<input id="team-points" type="number" min="0" max="1000" value="0" required></label><label>Экономика, %<input id="team-economy" type="number" min="15" max="100" value="100" required></label></div><div class="row"><button id="team-save" class="pri" type="submit">Сохранить показатели</button><button id="team-cancel" type="button" hidden>Отмена</button></div></form></details>
       </section>
-      <section class="glass dock-panel">
+      <section class="glass dock-panel" id="roster-panel">
         <div class="row spaced"><h2>Команды и участники</h2><input id="roster-search" type="search" placeholder="Поиск команды или участника" aria-label="Поиск команды или участника"></div>
         <p class="small-note mut teacher-private">Нажмите на имя участника, чтобы изменить имя, перенести в другую команду или исключить. Перенос сохраняет вход игрока; его голос в текущем раунде нужно подать заново.</p><div class="roster-scroll"><table class="roster-table" id="roster-table"></table></div>
       </section>
