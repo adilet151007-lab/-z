@@ -7,7 +7,7 @@ const engine = new GameEngine("student");
 setupTelemetry(engine);
 setupCommunication(engine);
 const $ = id => document.getElementById(id);
-let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null;
+let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null, lastUiRevision = -1;
 let sceneError = "";
 function message(text = "", isError = false) {
   $("action-message").textContent = text;
@@ -120,7 +120,7 @@ engine.onChange(state => {
   const player = state.viewer.player;
   $("reg-screen").style.display = player ? "none" : "flex";
   $("app").style.display = player ? "flex" : "none";
-  if (!player) { renderRegistration(state); previousRound = null; return; }
+  if (!player) { renderRegistration(state); previousRound = null; lastUiRevision = -1; return; }
   if (!scene && !sceneError) {
     try { scene = createScene($("scene-canvas")); }
     catch { sceneError = "3D недоступно в этом браузере. Командная игра продолжает работать."; message(sceneError, true); }
@@ -130,9 +130,15 @@ engine.onChange(state => {
     if (focusedRegion !== base) { scene.focusRegion(base); focusedRegion = base; }
     scene.update(state, player.regionId);
   }
-  if (previousRound !== state.round?.id) { previousRound = state.round?.id; message(sceneError); }
-  renderTeam(state);
-  renderQuestion(state);
+  const roundChanged = previousRound !== state.round?.id;
+  if (roundChanged) { previousRound = state.round?.id; message(sceneError); }
+  // Частые пакеты голосов не должны каждый раз пересобирать весь DOM телефона.
+  // Таймер обновляется отдельно, поэтому полная перерисовка нужна только при изменении состояния.
+  if (lastUiRevision !== state.revision || roundChanged) {
+    lastUiRevision = state.revision;
+    renderTeam(state);
+    renderQuestion(state);
+  }
 });
 setInterval(updateTimer, 200);
 let mapCollapsed=false;

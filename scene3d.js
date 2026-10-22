@@ -112,10 +112,11 @@ export function labelScaleForDepth(depth,height,fov=40){
   return {pixels,world:pixels*2*Math.tan(THREE.MathUtils.degToRad(fov*.5))*Math.max(.1,depth)/Math.max(1,height)};
 }
 export function createScene(canvas, opts = {}) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
+  const mobile = window.matchMedia("(max-width: 700px), (pointer: coarse)").matches;
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: !mobile, alpha: false, powerPreference: "high-performance" });
+  renderer.setPixelRatio(Math.min(mobile ? 1 : 1.5, window.devicePixelRatio || 1));
   renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.25;
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = !mobile; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x07151e); scene.fog = new THREE.FogExp2(0x07151e, .004);
   const camera = new THREE.PerspectiveCamera(40, 1, .1, 320);
   const controls = new OrbitControls(camera, canvas);
@@ -124,7 +125,7 @@ export function createScene(canvas, opts = {}) {
   controls.target.set(0, 0, 0);
   scene.add(new THREE.HemisphereLight(0xc7eaff, 0x3e3825, 2.1));
   const sun = new THREE.DirectionalLight(0xffedce, 3.2); sun.position.set(-24, 45, -12); sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048); Object.assign(sun.shadow.camera, { left: -43, right: 43, top: 30, bottom: -30, near: 1, far: 110 });
+  sun.shadow.mapSize.set(mobile ? 512 : 1024, mobile ? 512 : 1024); Object.assign(sun.shadow.camera, { left: -43, right: 43, top: 30, bottom: -30, near: 1, far: 110 });
   sun.shadow.camera.updateProjectionMatrix();
   sun.shadow.bias = -.0004; sun.shadow.normalBias = .035; scene.add(sun);
   const rim = new THREE.DirectionalLight(0x79baff, 1.2); rim.position.set(25, 12, 28); scene.add(rim);

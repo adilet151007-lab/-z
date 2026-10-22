@@ -6,7 +6,7 @@ import * as THREE from 'three';
 
 test('сцена: камера следует высоте города, крайний зум не теряет подпись, статичная карта останавливается',async()=>{
  const sourceURL=new URL('../scene3d.js',import.meta.url),temporary=new URL('../.scene-test-'+process.pid+'.mjs',import.meta.url);
- const source=(await readFile(sourceURL,'utf8')).replace('new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false })','new globalThis.SceneTestRenderer()');
+ const source=(await readFile(sourceURL,'utf8')).replace('new THREE.WebGLRenderer({ canvas, antialias: !mobile, alpha: false, powerPreference: "high-performance" })','new globalThis.SceneTestRenderer()');
  let now=0,nextId=0,renders=0;const frames=new Map(),events=new Map();
  const context=new Proxy({}, {get:(_target,key)=>key==='measureText'?()=>({width:1}):()=>{},set:()=>true});
  const element=()=>({style:{},clientWidth:390,clientHeight:230,addEventListener(){},removeEventListener(){},setAttribute(){},append(){},remove(){},getContext(){return context},getRootNode(){return this},getBoundingClientRect(){return {left:0,top:0,width:390,height:230}}});
@@ -20,7 +20,7 @@ test('сцена: камера следует высоте города, кра�
  await writeFile(temporary,source);
  let api;
  try{
-  const {createScene}=await import(temporary.href);api=createScene(canvas);assert.equal(api.renderer.pixelRatio,1.5);
+  const {createScene}=await import(temporary.href);api=createScene(canvas);assert.equal(api.renderer.pixelRatio,1);
   api.update({regions:[{id:'astana',baseRegionId:'astana',name:'Астана',points:1000,economy:100,members:[]}]},'astana');step();
   api.focusRegion('astana');step();const group=api.scene.children.find(g=>g.children.some(o=>o.userData.regionId==='astana'));
   assert.ok(group);assert.ok(Math.abs(api.controls.target.y-(group.position.y+.71))<.01);
