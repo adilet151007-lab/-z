@@ -312,7 +312,7 @@ export function createScene(canvas, opts = {}) {
     const region = regions.find(r => r.meta.id === id); if (!region) return;
     selected = id; regionSelect.value=id;
     const width = region.data.bounds[2] - region.data.bounds[0], depth = region.data.bounds[3] - region.data.bounds[1];
-    const target = new THREE.Vector3(region.data.city[0], .6, region.data.city[1]);
+    const target = new THREE.Vector3(region.data.city[0], region.group.position.y + .71, region.data.city[1]);
     const distance = Math.max(4, Math.max(width / Math.max(.8, camera.aspect), depth * .9) * 1.65);
     moveCamera(target, distance);
   }
@@ -389,7 +389,13 @@ export function createScene(canvas, opts = {}) {
     let settling=false;
     for (const region of regions) {
       if(Math.abs(region.group.position.y-region.targetY)>.001)settling=true;
+      const previousY=region.group.position.y;
       region.group.position.y = THREE.MathUtils.lerp(region.group.position.y, region.targetY, rate);
+      if(region.meta.id===selected){
+        const lift=region.group.position.y-previousY;
+        camera.position.y+=lift;controls.target.y+=lift;
+        if(cameraTween){cameraTween.position.y+=lift;cameraTween.target.y+=lift}
+      }
       region.topTint.lerp(region.targetColor, rate); region.topMat.color.copy(region.topTint);
       for (let i = 0; i < region.stages.length; i++) {
         const stage = region.stages[i], target = i < region.stage ? 1 : .001;
