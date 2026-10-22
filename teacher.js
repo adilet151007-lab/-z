@@ -22,9 +22,10 @@ $("logout-btn").addEventListener("click",()=>act(()=>engine.teacherLogout()));
 $("reset-btn").addEventListener("click",()=>{if(confirm("Сбросить очки, обычных участников и раунд? Персональные администраторы, названия команд и банк вопросов сохранятся."))act(()=>engine.resetGame(),"Новая игра начата.")});
 let effectTimer=null,effectBox=null;
 function stopPresentationEffect(){clearTimeout(effectTimer);effectBox?.remove();effectBox=null;document.body.classList.remove('presentation-signal')}
-engine.socket.on('ui:presentation-effect',()=>{
+engine.socket.on('ui:presentation-effect',event=>{
  if(engine.state?.viewer.role!=='teacher'||engine.state.sessionControl?.presentationEffectsEnabled===false)return;
- stopPresentationEffect();document.body.classList.add('presentation-signal');effectBox=document.createElement('div');effectBox.className='presentation-notice';effectBox.innerHTML='<span>Системный сигнал · 3 секунды</span><button type="button">Отключить эффекты</button>';document.body.append(effectBox);effectBox.querySelector('button').addEventListener('click',()=>{stopPresentationEffect();act(()=>engine.setPresentationEffects(false),'Эффекты отключены.')});effectTimer=setTimeout(stopPresentationEffect,3000);
+ const duration=Math.max(100,Math.min(60000,Number(event?.duration)||3000));
+ stopPresentationEffect();document.body.classList.add('presentation-signal');effectBox=document.createElement('div');effectBox.className='presentation-notice';effectBox.innerHTML=`<span>Системный сигнал · ${Math.ceil(duration/1000)} секунд</span><button type="button">Отключить эффекты</button>`;document.body.append(effectBox);effectBox.querySelector('button').addEventListener('click',()=>{stopPresentationEffect();act(()=>engine.setPresentationEffects(false),'Эффекты отключены.')});effectTimer=setTimeout(stopPresentationEffect,duration);
 });
 $("presentation-effects").addEventListener('change',()=>act(()=>engine.setPresentationEffects($("presentation-effects").checked)));
 async function removeParticipant(regionId,pid){const result=await engine.freeSlot(regionId,pid);message(result.exitRequested?'Запрос на выход отправлен. Участник должен принять или отклонить его.':'Участник исключён, место освобождено.')}

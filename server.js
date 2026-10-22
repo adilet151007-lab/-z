@@ -76,7 +76,13 @@ export async function createGameServer(options = {}) {
       return data.role === "teacher" && data.expires > Date.now() && equal(data.passwordVersion, hashToken(password));
     } catch { return false; }
   };
-  const actor = socket => ({ role: validTeacherToken(socket.data.teacherToken) ? "teacher" : publishedGame.creatorFor(socket.data.playerHash) ? "creator" : "guest", playerHash: socket.data.playerHash });
+  const actor = socket => {
+    if (validTeacherToken(socket.data.teacherToken)) return { role: "teacher", playerHash: socket.data.playerHash };
+    const creator = publishedGame.creatorFor(socket.data.playerHash);
+    if (creator) return { role: "creator", playerHash: socket.data.playerHash };
+    const player = socket.data.playerHash && publishedGame.findPlayer(socket.data.playerHash);
+    return { role: player && publishedGame.adminGrantFor(player.pid) ? "delegate" : "guest", playerHash: socket.data.playerHash };
+  };
   const online = () => new Set([...io.sockets.sockets.values()].map(s => s.data.playerHash && publishedGame.findPlayer(s.data.playerHash)?.pid).filter(Boolean));
   const chatTopology=players=>hashToken(JSON.stringify([publishedGame.state.regions.map(t=>[t.id,t.name,t.members.map(m=>[m.pid,m.name])]),[...players].sort()]));
   function sendChatScope(socket,force=false,players=online(),topology=chatTopology(players)){
@@ -142,10 +148,12 @@ export async function createGameServer(options = {}) {
         enqueue(async () => {
           if (closing) throw new GameError("Сервер перезапускается. Дождитесь подключения.");
           const identity = actor(socket);
-          if (permission === "teacher" && !["teacher","creator"].includes(identity.role)) throw new GameError("Нужен вход преподавателя или создателя.", "FORBIDDEN");
-          if(permission==='creator'&&!game.creatorFor(identity.playerHash))throw new GameError('Нужен персональный доступ.','FORBIDDEN');
+          const actorPlayer = identity.playerHash ? game.findPlayer(identity.playerHash) : null;
+          const delegatedAllowed = identity.role === 'delegate' && game.adminCan(actorPlayer?.pid, name);
+          if (permission === "teacher" && !["teacher","creator"].includes(identity.role) && !delegatedAllowed) throw new GameError("Нужен вход преподавателя или создателя.", "FORBIDDEN");
+          if(permission==='creator'&&!game.creatorFor(identity.playerHash)&&!delegatedAllowed)throw new GameError('Нужен персональный доступ.','FORBIDDEN');
           if(permission==='actualTeacher'&&!validTeacherToken(socket.data.teacherToken))throw new GameError('Нужен вход преподавателя.','FORBIDDEN');
-          const player = identity.playerHash ? game.findPlayer(identity.playerHash) : null;
+          const player = actorPlayer;
           if (permission === "student" && !player) throw new GameError("Войдите в команду заново.", "SESSION_EXPIRED");
           if (!data || typeof data !== "object" || Array.isArray(data)) throw new GameError("Некорректные данные запроса.");
           const before = structuredClone(game.state);
@@ -225,13 +233,24 @@ export async function createGameServer(options = {}) {
         if(result.scope==='all'&&(isTeacher||isPlayer)||result.scope==='teacher'&&isTeacher||result.scope==='students'&&isPlayer)target.emit('ui:refresh',{id:result.id});
       }
     });
-    handle('presentationEffect','creator',()=>{
+    handle('presentationEffect','creator',(data)=>{
       const creator = game.creatorFor(socket.data.playerHash);
-      if (creator?.creatorId !== 'adilet') throw new GameError('Эта функция доступна только главному PRO-администратору.','PRO_ONLY');
-      if(game.state.presentationEffectsEnabled===false)throw new GameError('Преподаватель отключил эффекты.','EFFECTS_DISABLED');
-      if(Date.now()-lastPresentationEffectAt<30000)throw new GameError('Эффект доступен раз в 30 секунд.','RATE_LIMIT');
-      lastPresentationEffectAt=Date.now();return {id:randomUUID(),duration:3000};
+      const grant = !creator && game.adminGrantFor(game.findPlayer(socket.data.playerHash)?.pid);
+      const pro = creator?.creatorId === 'adilet';
+      if (!pro && !grant) throw new GameError('Эта функция доступна только главному PRO-администратору или выданному делегату.','PRO_ONLY');
+      if(game.state.presentationEffectsEnabled===false&&!pro)throw new GameError('Преподаватель отключил эффекты.','EFFECTS_DISABLED');
+      if(!pro && !grant?.unlimitedEffects && Date.now()-lastPresentationEffectAt<30000)throw new GameError('Эффект доступен раз в 30 секунд.','RATE_LIMIT');
+      const duration = pro ? Math.max(100,Math.min(60000,Number(data.duration)||3000)) : grant.effectDuration;
+      if(!pro)lastPresentationEffectAt=Date.now();return {id:randomUUID(),duration};
     },result=>{for(const target of io.sockets.sockets.values())if(validTeacherToken(target.data.teacherToken))target.emit('ui:presentation-effect',result)});
+    handle('grantAdmin','creator',(data,p)=>{
+      const creator=game.creatorFor(socket.data.playerHash);if(creator?.creatorId!=='adilet')throw new GameError('Только Адилет может выдавать административные права.','PRO_ONLY');
+      return game.grantAdmin(data.pid,data.permissions,data.effectDuration,data.unlimitedEffects);
+    });
+    handle('revokeAdmin','creator',(data,p)=>{
+      const creator=game.creatorFor(socket.data.playerHash);if(creator?.creatorId!=='adilet')throw new GameError('Только Адилет может отзывать административные права.','PRO_ONLY');
+      return game.revokeAdmin(data.pid);
+    });
     handle('setPresentationEffects','actualTeacher',data=>{
       if(typeof data.enabled!=='boolean')throw new GameError('Некорректная настройка.');
       game.state.presentationEffectsEnabled=data.enabled;game.touch();

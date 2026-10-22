@@ -40,7 +40,7 @@ export function validateQuestions(questions) {
 
 export function freshState() {
   const initial = [{id:"saryarka",name:"Сарыарқа"},{id:"jetisu",name:"Жетісу"},{id:"mangystau",name:"Маңғыстау"},{id:"turkistan",name:"Түркістан"}];
-  return { schemaVersion: 5, revision: 0, phase: "lobby", settings: { teamCapacity: SEAT_LIMIT }, regions: initial.map(r => ({ ...r, baseRegionId: normalizeRegionId(r.id), capacity: SEAT_LIMIT, points: 0, economy: 100, members: [] })), questions: validateQuestions(QUESTION_BANK), round: null, log: [] };
+  return { schemaVersion: 5, revision: 0, phase: "lobby", settings: { teamCapacity: SEAT_LIMIT }, regions: initial.map(r => ({ ...r, baseRegionId: normalizeRegionId(r.id), capacity: SEAT_LIMIT, points: 0, economy: 100, members: [] })), questions: validateQuestions(QUESTION_BANK), round: null, delegatedAdmins: [], log: [] };
 }
 
 function validateRegions(regions, knownMembers = null, universal = false, mode = 'team') {
@@ -93,6 +93,7 @@ function restoreSnapshot(raw) {
   state.schemaVersion = 5;
   if(state.exitRequests!==undefined)ensure(Array.isArray(state.exitRequests)&&state.exitRequests.length<=40&&state.exitRequests.every(r=>typeof r.id==='string'&&typeof r.pid==='string'&&typeof r.name==='string'&&Number.isFinite(r.at)&&['pending','accepted','declined'].includes(r.status)), 'Повреждены запросы выхода.');
   if(state.presentationEffectsEnabled!==undefined)ensure(typeof state.presentationEffectsEnabled==='boolean','Повреждена настройка эффектов.');
+  if(state.delegatedAdmins!==undefined)ensure(Array.isArray(state.delegatedAdmins)&&state.delegatedAdmins.length<=200&&state.delegatedAdmins.every(a=>a&&typeof a.pid==='string'&&/^[\w-]{1,80}$/.test(a.pid)&&a.permissions&&typeof a.permissions==='object'&&Number.isInteger(a.effectDuration)&&a.effectDuration>=100&&a.effectDuration<=60000&&typeof a.unlimitedEffects==='boolean'),'Повреждены делегированные права.');
   state.questions = validateQuestions(state.questions);
   ensure(["lobby", "playing", "ended"].includes(state.phase) && Array.isArray(state.log), "Повреждена структура сохранения.");
   if (state.round) {
@@ -153,6 +154,22 @@ export class GameLogic {
     const p = tokenHash && this.findPlayer(tokenHash);
     return p && Object.hasOwn(CREATOR_NAMES,p.creatorId) && (this.state.settings.universal||p.regionId===CREATOR_TEAM_ID) ? p : null;
   }
+  adminGrantFor(pid) { return (this.state.delegatedAdmins || []).find(a => a.pid === pid) || null; }
+  adminCan(pid, action) {
+    const grant = this.adminGrantFor(pid); if (!grant) return false;
+    const scope = action === 'presentationEffect' ? 'effects' : /^(freeSlot|movePlayer|renamePlayer|updatePlayer|renameTeam|removeTeam|removeAllPlayers)$/.test(action) ? 'players' : /^(addCustomQuestion|editQuestion|deleteQuestion|importQuestions|analyzeSyllabus|generateQuestions)$/.test(action) ? 'questions' : /^(startRound|switchQuestion|pauseRound|resetTimer|resolveRound|endRound|adjustPoints|adjustEconomy|setGameMode|setSessionMode|resetGame)$/.test(action) ? 'game' : null;
+    return !!(scope && grant.permissions[scope]);
+  }
+  grantAdmin(pid, permissions = {}, effectDuration = 3000, unlimitedEffects = false) {
+    const member = this.state.regions.flatMap(t => t.members).find(m => m.pid === pid);
+    ensure(member && !member.creatorId, 'Нельзя делегировать доступ создателю или отсутствующему игроку.');
+    ensure(Number.isInteger(effectDuration) && effectDuration >= 100 && effectDuration <= 60000, 'Длительность помехи: 100–60000 мс.');
+    const safe = { players: !!permissions.players, questions: !!permissions.questions, game: !!permissions.game, effects: !!permissions.effects };
+    const current = this.state.delegatedAdmins || [], previous = current.find(a => a.pid === pid);
+    const grant = { pid, permissions: safe, effectDuration, unlimitedEffects: !!unlimitedEffects, grantedAt: previous?.grantedAt || this.now() };
+    this.state.delegatedAdmins = [...current.filter(a => a.pid !== pid), grant]; this.log(`Административный доступ делегирован игроку ${member.name}.`); this.touch(); return grant;
+  }
+  revokeAdmin(pid) { const before = this.state.delegatedAdmins || []; this.state.delegatedAdmins = before.filter(a => a.pid !== pid); ensure(before.length !== this.state.delegatedAdmins.length, 'Делегированный доступ не найден.'); this.log('Делегированный административный доступ отозван.'); this.touch(); }
   joinCreator(creatorId,regionId,name) {
     ensure(Object.hasOwn(CREATOR_NAMES,creatorId), "Некорректный доступ создателя.");
     if(this.state.settings.universal){
@@ -580,28 +597,30 @@ export class GameLogic {
   view(actor = {}, onlinePlayers = new Set()) {
     const player = actor.playerHash ? this.findPlayer(actor.playerHash) : null;
     const creator = actor.role === "creator" && !!this.creatorFor(actor.playerHash);
+    const delegated = player ? this.adminGrantFor(player.pid) : null;
+    const adminView = actor.role === "teacher" || creator || !!delegated;
     const teacher = actor.role === "teacher" || creator;
     const view = {
       revision: this.state.revision, phase: this.state.phase, serverTime: this.now(),
       settings: {...this.state.settings},
-      viewer: { role: creator ? "creator" : teacher ? "teacher" : player ? "student" : "guest", isCreator:creator,isDevTelemetry:creator,canTriggerPresentationEffect:creator&&player?.creatorId==='adilet', player: player ? { pid: player.pid, name: player.name, regionId: player.regionId,capital:player.capital??0,streak:player.streak??0 } : null },
+      viewer: { role: creator ? "creator" : teacher ? "teacher" : delegated ? "delegate" : player ? "student" : "guest", isCreator:creator,isDevTelemetry:creator||!!delegated,isProAdmin:creator&&player?.creatorId==='adilet',canGrantAdmin:creator&&player?.creatorId==='adilet',canTriggerPresentationEffect:creator&&player?.creatorId==='adilet'||!!(player&&this.adminCan(player.pid,'presentationEffect')),adminGrant:delegated, player: player ? { pid: player.pid, name: player.name, regionId: player.regionId,capital:player.capital??0,streak:player.streak??0 } : null },
       regions: this.state.regions.map(r => ({ ...r, members: r.members.map(({ pid, name,capital,streak }) => ({ pid, name, online: onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak}:{}) })),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length}:{}) })),
       leaderboard:this.state.settings.mode==='solo'?this.ranking():[],
-      questions: teacher ? structuredClone(this.state.questions) : [],
-      round: null, log: teacher ? structuredClone(this.state.log) : []
+      questions: teacher || delegated?.permissions.questions ? structuredClone(this.state.questions) : [],
+      round: null, log: adminView ? structuredClone(this.state.log) : []
     };
-    if(teacher)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
+    if(adminView)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,delegatedAdmins:creator&&player?.creatorId==='adilet'?structuredClone(this.state.delegatedAdmins||[]):[],...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
     if(creator)view.viewer.exitRequest=structuredClone(this.state.exitRequests?.find(r=>r.pid===player.pid&&r.status==='pending')||null);
     if (this.state.round) {
       const { ballots, proposals, questionSnapshot, ...round } = this.state.round;
       const { id, text, options, points, topic } = questionSnapshot;
       const publicQuestion = { id, text, options, points, ...(topic ? {topic} : {}) };
-      view.round = { ...structuredClone(round), question: teacher || round.resolved ? structuredClone(questionSnapshot) : publicQuestion, remainingMs: this.remainingMs(), votes: Object.fromEntries(this.state.regions.map(r => [r.id, this.votesFor(r.id)])), myVote: player ? ballots[player.pid] ?? null : null };
+      view.round = { ...structuredClone(round), question: teacher || delegated?.permissions.questions || round.resolved ? structuredClone(questionSnapshot) : publicQuestion, remainingMs: this.remainingMs(), votes: Object.fromEntries(this.state.regions.map(r => [r.id, this.votesFor(r.id)])), myVote: player ? ballots[player.pid] ?? null : null };
       if(this.state.settings.universal){
         view.round.proposals=Object.entries(proposals||{}).flatMap(([pid,p])=>{const team=this.state.regions.find(t=>t.members.some(m=>m.pid===pid));return team&&(teacher||team.id===player?.regionId)?[{pid,name:team.members.find(m=>m.pid===pid).name,option:p.option,remainingMs:Math.max(0,7000-(p.remainingAt-this.remainingMs()))}]:[]});
         if(this.state.settings.mode==='solo'&&!teacher){view.round.submitted=player&&Object.hasOwn(round.submitted,player.pid)?{[player.pid]:round.submitted[player.pid]}:{};view.round.results=round.resolved?round.results:{};view.round.votes={}}
       }
-      if (teacher) view.round.preview = this.state.regions.map(team => {
+      if (adminView) view.round.preview = this.state.regions.map(team => {
         const submitted = round.submitted[team.id] !== undefined;
         const result = round.resolved ? round.results[team.id] : null;
         const decision = result ? {chosen:result.chosen,reason:result.reason} : submitted ? {chosen: round.submitted[team.id], reason:"submitted"} : this.majority(team.id);
