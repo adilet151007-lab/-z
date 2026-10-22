@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, capacityFor, totalCapacity, normalizeRegionId } from "./game-config.js";
+import { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, capacityFor, totalCapacity, normalizeRegionId, CREATOR_TEAM_ID, CREATOR_NAMES, isCreatorTeam, regularTeams } from "./game-config.js";
 import { QUESTION_BANK } from "./question-bank.js";
 export { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD } from "./game-config.js";
 
@@ -39,12 +39,12 @@ export function validateQuestions(questions) {
 
 export function freshState() {
   const initial = [{id:"saryarka",name:"Сарыарқа"},{id:"jetisu",name:"Жетісу"},{id:"mangystau",name:"Маңғыстау"},{id:"turkistan",name:"Түркістан"}];
-  return { schemaVersion: 4, revision: 0, phase: "lobby", settings: { teamCapacity: SEAT_LIMIT }, regions: initial.map(r => ({ ...r, baseRegionId: normalizeRegionId(r.id), capacity: SEAT_LIMIT, points: 0, economy: 100, members: [] })), questions: validateQuestions(QUESTION_BANK), round: null, log: [] };
+  return { schemaVersion: 5, revision: 0, phase: "lobby", settings: { teamCapacity: SEAT_LIMIT }, regions: initial.map(r => ({ ...r, baseRegionId: normalizeRegionId(r.id), capacity: SEAT_LIMIT, points: 0, economy: 100, members: [] })), questions: validateQuestions(QUESTION_BANK), round: null, log: [] };
 }
 
 function validateRegions(regions, knownMembers = null) {
-  ensure(Array.isArray(regions) && regions.length >= 1 && regions.length <= MAX_TEAMS, `Нужно от 1 до ${MAX_TEAMS} команд.`);
-  const seenRegions = new Set(), seenPlayers = new Set(), seenNames = new Set();
+  ensure(Array.isArray(regions) && regularTeams(regions).length >= 1 && regularTeams(regions).length <= MAX_TEAMS && regions.length <= MAX_TEAMS + 1, `Нужно от 1 до ${MAX_TEAMS} обычных команд.`);
+  const seenRegions = new Set(), seenPlayers = new Set(), seenNames = new Set(), seenCreators = new Set();
   return regions.map(r => {
     ensure(r && typeof r.id === "string" && /^[\w-]{1,80}$/.test(r.id) && !seenRegions.has(r.id), "ID команд должны быть уникальными.");
     seenRegions.add(r.id);
@@ -54,20 +54,26 @@ function validateRegions(regions, knownMembers = null) {
     ensure(!seenNames.has(nameKey), "Названия команд должны быть уникальными."); seenNames.add(nameKey);
     ensure(integer(r.points, 0, RESOURCE_CAP) && integer(r.economy, 0, 100), `Ресурс: 0–${RESOURCE_CAP}; экономика: 0–100.`);
     const capacity = capacityFor(r);
+    ensure(!isCreatorTeam(r) || capacity === 2, "В команде создателей ровно два места.");
     ensure(integer(capacity, 1, MAX_TEAM_CAPACITY), `Вместимость команды: 1–${MAX_TEAM_CAPACITY}.`);
     ensure(Array.isArray(r.members) && r.members.length <= capacity, "Количество участников превышает вместимость команды.");
     const members = r.members.map(m => {
       ensure(m && typeof m.pid === "string" && /^[\w-]{1,80}$/.test(m.pid) && !seenPlayers.has(m.pid), "Некорректный или повторный участник."); seenPlayers.add(m.pid);
       const original = knownMembers ? knownMembers.get(m.pid) : m;
       ensure(original && /^[a-f0-9]{64}$/.test(original.tokenHash), "Добавляйте новых участников через экран регистрации.");
-      return { pid: m.pid, name: cleanText(m.name, 2, 40, "Имя"), tokenHash: original.tokenHash, joinedAt: original.joinedAt };
+      const creatorId = original.creatorId;
+      if (creatorId) {
+        ensure(Object.hasOwn(CREATOR_NAMES,creatorId) && isCreatorTeam(r) && !seenCreators.has(creatorId), "Доступ создателя должен оставаться в защищённой команде.");
+        seenCreators.add(creatorId);
+      } else ensure(!isCreatorTeam(r), "Команда создателей доступна только по персональному коду.");
+      return { pid: m.pid, name: creatorId ? CREATOR_NAMES[creatorId] : cleanText(m.name, 2, 40, "Имя"), tokenHash: original.tokenHash, joinedAt: original.joinedAt, ...(creatorId?{creatorId}:{}) };
     });
     return { id: r.id, name, baseRegionId, capacity, points: r.points, economy: r.economy, members };
   });
 }
 
 function restoreSnapshot(raw) {
-  ensure([2, 3, 4].includes(raw?.schemaVersion) && integer(raw.revision, 0, Number.MAX_SAFE_INTEGER), "Неизвестная версия сохранения. Данные не были сброшены.");
+  ensure([2, 3, 4, 5].includes(raw?.schemaVersion) && integer(raw.revision, 0, Number.MAX_SAFE_INTEGER), "Неизвестная версия сохранения. Данные не были сброшены.");
   const state = structuredClone(raw);
   // Сохранения предыдущей версии могли содержать больше 1000 ресурсов.
   // Ограничиваем только это поле, сохраняя игроков, вопросы и текущий раунд.
@@ -77,7 +83,7 @@ function restoreSnapshot(raw) {
   state.regions = validateRegions(state.regions);
   state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT };
   ensure(integer(state.settings.teamCapacity, 1, MAX_TEAM_CAPACITY), "Повреждена настройка вместимости.");
-  state.schemaVersion = 4;
+  state.schemaVersion = 5;
   state.questions = validateQuestions(state.questions);
   ensure(["lobby", "playing", "ended"].includes(state.phase) && Array.isArray(state.log), "Повреждена структура сохранения.");
   if (state.round) {
@@ -107,7 +113,25 @@ export class GameLogic {
     return null;
   }
   member(regionId, pid) { const m = this.region(regionId).members.find(p => p.pid === pid); ensure(m, "Войдите в команду заново.", "SESSION_EXPIRED"); return m; }
+  creatorFor(tokenHash) {
+    const p = tokenHash && this.findPlayer(tokenHash);
+    return p?.regionId===CREATOR_TEAM_ID && Object.hasOwn(CREATOR_NAMES,p.creatorId) ? p : null;
+  }
+  joinCreator(creatorId) {
+    ensure(Object.hasOwn(CREATOR_NAMES,creatorId), "Некорректный доступ создателя.");
+    let team=this.state.regions.find(isCreatorTeam);
+    ensure(!team?.members.some(m=>m.creatorId===creatorId), "Доступ администратора уже занят. Продолжите в своём браузере или освободите доступ через преподавателя.", "CREATOR_OCCUPIED");
+    if(!team){
+      const name=this.state.regions.some(t=>t.name==='Создатели игры')?'Создатели · Creative':'Создатели игры';
+      team={id:CREATOR_TEAM_ID,name,baseRegionId:'astana',capacity:2,points:0,economy:100,members:[]};this.state.regions.push(team);
+    }
+    ensure(team.members.length<2,"Доступ администратора уже занят.","CREATOR_OCCUPIED");
+    const token=randomBytes(32).toString('base64url'),member={pid:randomUUID(),name:CREATOR_NAMES[creatorId],creatorId,tokenHash:hashToken(token),joinedAt:this.now()};
+    team.members.push(member);this.log(`${member.name} вошёл в команду создателей.`);this.touch();
+    return {playerToken:token,isCreator:true,player:{pid:member.pid,name:member.name,regionId:team.id}};
+  }
   joinTeam(regionId, name) {
+    ensure(regionId!==CREATOR_TEAM_ID,"Команда создателей доступна только по персональному коду.","FORBIDDEN");
     const region = this.region(regionId);
     const cleanName = cleanText(name, 2, 40, "Имя");
     ensure(region.members.length < capacityFor(region), `Команда уже заполнена (${capacityFor(region)}/${capacityFor(region)}).`, "TEAM_FULL");
@@ -135,6 +159,7 @@ export class GameLogic {
     const source = this.state.regions.find(t => t.members.some(m => m.pid === pid));
     ensure(source, "Участник не найден.");
     const target = this.region(toTeamId);
+    ensure(!isCreatorTeam(source) && !isCreatorTeam(target), "Участники команды создателей входят только по персональным кодам.");
     ensure(source.id !== target.id, "Участник уже в этой команде.");
     ensure(target.members.length < capacityFor(target), "В выбранной команде нет свободных мест.", "TEAM_FULL");
     const member = source.members.find(m => m.pid === pid);
@@ -146,6 +171,7 @@ export class GameLogic {
   renamePlayer(pid, name) {
     const member = this.state.regions.flatMap(t => t.members).find(m => m.pid === pid);
     ensure(member, "Участник не найден.");
+    ensure(!member.creatorId || name===CREATOR_NAMES[member.creatorId], "Имя создателя закреплено за его доступом.");
     const cleanName = cleanText(name, 2, 40, "Имя"), previous = member.name;
     member.name = cleanName; this.log(`${previous}: имя исправлено на «${cleanName}».`); this.touch();
   }
@@ -160,14 +186,15 @@ export class GameLogic {
   setTeamCapacity(teamId, capacity) {
     ensure(integer(capacity, 1, MAX_TEAM_CAPACITY), `Вместимость: 1–${MAX_TEAM_CAPACITY} участников.`);
     const team = this.region(teamId);
+    ensure(!isCreatorTeam(team) || capacity===2,"В команде создателей ровно два места.");
     ensure(team.members.length <= capacity, `В команде ${team.members.length} участников. Сначала перенесите лишних игроков.`);
     team.capacity = capacity; this.log(`Вместимость «${team.name}»: ${capacity}.`); this.touch();
   }
   setAllCapacities(capacity) {
     ensure(integer(capacity, 1, MAX_TEAM_CAPACITY), `Вместимость: 1–${MAX_TEAM_CAPACITY} участников.`);
-    const crowded = this.state.regions.filter(t => t.members.length > capacity);
+    const teams=regularTeams(this.state.regions),crowded = teams.filter(t => t.members.length > capacity);
     ensure(!crowded.length, `Сначала перенесите игроков из переполненных команд: ${crowded.map(t => t.name).join(", ")}.`);
-    this.state.regions.forEach(t => t.capacity = capacity); this.state.settings.teamCapacity = capacity;
+    teams.forEach(t => t.capacity = capacity); this.state.settings.teamCapacity = capacity;
     this.log(`Вместимость всех команд и новых команд: ${capacity}.`); this.touch();
   }
   startRound(questionId, duration) {
@@ -179,6 +206,11 @@ export class GameLogic {
     this.state.round = { id: randomUUID(), questionId, questionSnapshot: structuredClone(question), startedAt: this.now(), duration, deadline: this.now() + duration * 1000, remainingMs: duration * 1000, paused: false, resolved: false, ballots: {}, submitted: {}, results: {} };
     this.log(`Начат вопрос: ${question.text}`);
     this.touch();
+  }
+  switchQuestion(questionId,duration) {
+    ensure(this.state.questions.some(q=>q.id===questionId) && integer(duration,5,3600),"Проверьте вопрос и время.");
+    if(this.state.round&&!this.state.round.resolved)this.log("Активный вопрос заменён без начисления очков. Голоса очищены.");
+    this.state.round=null;this.startRound(questionId,duration);
   }
   requireRound(roundId, voting = false) {
     const round = this.state.round;
@@ -296,7 +328,7 @@ export class GameLogic {
     return { questionId: question.id };
   }
   createTeam(name, baseRegionId, capacity = this.state.settings.teamCapacity, points = 0, economy = 100) {
-    ensure(this.state.regions.length < MAX_TEAMS, `Максимум ${MAX_TEAMS} команд.`);
+    ensure(regularTeams(this.state.regions).length < MAX_TEAMS, `Максимум ${MAX_TEAMS} команд.`);
     const cleanName = cleanText(name, 2, 60, "Команда");
     ensure(!this.state.regions.some(t => t.name.toLocaleLowerCase() === cleanName.toLocaleLowerCase()), "Такая команда уже есть.");
     baseRegionId = normalizeRegionId(baseRegionId);
@@ -309,9 +341,9 @@ export class GameLogic {
   }
   expandTeams(count) {
     ensure(integer(count, 1, MAX_TEAMS), `Количество команд: 1–${MAX_TEAMS}.`);
-    ensure(count >= this.state.regions.length, "Удаляйте лишние команды кнопкой рядом с их названием.");
+    ensure(count >= regularTeams(this.state.regions).length, "Для уменьшения используйте точное количество команд.");
     let number = 1;
-    while (this.state.regions.length < count) {
+    while (regularTeams(this.state.regions).length < count) {
       while (this.state.regions.some(t => t.name === `Команда ${number}`)) number++;
       const base = [...REGIONS].sort((a,b) => this.state.regions.filter(t=>t.baseRegionId===a.id).length - this.state.regions.filter(t=>t.baseRegionId===b.id).length)[0];
       const baseName = base.name.replace(/ облысы$/, "");
@@ -324,7 +356,7 @@ export class GameLogic {
   }
   planTeamCount(count) {
     ensure(integer(count, 1, MAX_TEAMS), `Количество команд: 1–${MAX_TEAMS}.`);
-    const teams = this.state.regions;
+    const teams = regularTeams(this.state.regions);
     const keepIds = new Set(teams.map((team,index)=>({team,index})).sort((a,b)=>b.team.members.length-a.team.members.length || b.team.points-a.team.points || a.index-b.index).slice(0,count).map(({team})=>team.id));
     const kept = teams.filter(t=>keepIds.has(t.id)), removed = teams.filter(t=>!keepIds.has(t.id));
     const occupancy = new Map(kept.map(t=>[t.id,t.members.length])), moves = [];
@@ -341,7 +373,7 @@ export class GameLogic {
     if (layoutToken !== undefined) ensure(layoutToken === this.teamLayoutToken(), "Состав команд изменился. Проверьте план ещё раз.", "REVISION_CONFLICT");
     const plan = this.planTeamCount(count);
     ensure(!plan.overflow, `Не хватает ${plan.overflow} мест. Увеличьте вместимость команд или перенесите участников перед уменьшением.`);
-    if (count >= this.state.regions.length) { this.expandTeams(count); return {count,added:plan.added,moved:0,removed:0}; }
+    if (count >= regularTeams(this.state.regions).length) { this.expandTeams(count); return {count,added:plan.added,moved:0,removed:0}; }
     for (const move of plan.moves) this.movePlayer(move.pid,move.toTeamId);
     for (const team of plan.removed) this.removeTeam(team.id);
     this.log(`Установлено команд: ${count}. Перенесено участников: ${plan.moves.length}.`); this.touch();
@@ -359,7 +391,8 @@ export class GameLogic {
     this.updateTeam(teamId,{...this.region(teamId),name,baseRegionId});
   }
   removeTeam(teamId) {
-    ensure(this.state.regions.length>1,"Оставьте хотя бы одну команду.");
+    ensure(teamId!==CREATOR_TEAM_ID,"Команда создателей зарезервирована. Освободите доступ участника вместо удаления команды.");
+    ensure(regularTeams(this.state.regions).length>1,"Оставьте хотя бы одну команду.");
     const team=this.region(teamId), pids=new Set(team.members.map(m=>m.pid));
     this.state.regions=this.state.regions.filter(t=>t.id!==teamId);
     if(this.state.round){
@@ -418,6 +451,8 @@ export class GameLogic {
       ensure(JSON.stringify(current) === JSON.stringify(this.state.questions.find(q => q.id === round.questionId)), "Завершите текущий раунд перед изменением его вопроса.");
     }
     const previousTeams = new Map(this.state.regions.flatMap(t=>t.members.map(m=>[m.pid,t.id])));
+    const backup=structuredClone(this.state);delete backup.hotfixBackup;
+    this.state.hotfixBackup={at:this.now(),state:backup};
     this.state.regions = regions;
     this.state.settings = {teamCapacity:settings.teamCapacity};
     this.state.questions = questions;
@@ -434,12 +469,13 @@ export class GameLogic {
     this.touch();
   }
   view(actor = {}, onlinePlayers = new Set()) {
-    const teacher = actor.role === "teacher";
     const player = actor.playerHash ? this.findPlayer(actor.playerHash) : null;
+    const creator = actor.role === "creator" && !!this.creatorFor(actor.playerHash);
+    const teacher = actor.role === "teacher" || creator;
     const view = {
       revision: this.state.revision, phase: this.state.phase, serverTime: this.now(),
       settings: {...this.state.settings},
-      viewer: { role: teacher ? "teacher" : player ? "student" : "guest", player: player ? { pid: player.pid, name: player.name, regionId: player.regionId } : null },
+      viewer: { role: creator ? "creator" : teacher ? "teacher" : player ? "student" : "guest", isCreator:creator, player: player ? { pid: player.pid, name: player.name, regionId: player.regionId } : null },
       regions: this.state.regions.map(r => ({ ...r, members: r.members.map(({ pid, name }) => ({ pid, name, online: onlinePlayers.has(pid) })) })),
       questions: teacher ? structuredClone(this.state.questions) : [],
       round: null, log: teacher ? structuredClone(this.state.log) : []
@@ -457,6 +493,11 @@ export class GameLogic {
       });
     }
     return view;
+  }
+  hotfixBackupSnapshot() {
+    ensure(this.state.hotfixBackup?.state,"Резервной копии пока нет.");
+    const saved=new GameLogic(this.state.hotfixBackup.state,this.now);
+    return {at:this.state.hotfixBackup.at,snapshot:saved.editorSnapshot()};
   }
   exportSummary() {
     return this.state.regions.map(r => ({ region: r.name, members: r.members.map(m => m.name).join(", "), points: r.points, economy: r.economy, development: developmentFor(r.points).name, status: r.economy < CRISIS_THRESHOLD ? "кризис" : "норма" })).sort((a, b) => b.points - a.points || b.economy - a.economy);

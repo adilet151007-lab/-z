@@ -21,6 +21,7 @@
     <h1>Мәдениеттану: Великий путь</h1>
     <span class="mut">Введите имя и выберите свободную команду.</span>
     <input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="40" autocomplete="off">
+    <button id="creator-entry" class="ghost" type="button" hidden>Войти по персональному коду</button>
     <p id="reg-conn-status" class="mut" style="margin-top:10px"></p>
     <p id="registration-capacity" class="mut small-note"></p><input id="team-search" type="search" placeholder="Найти команду или регион" aria-label="Поиск команды" autocomplete="off"><div id="region-grid" class="region-grid"></div>
     <p id="reg-error" class="mut" style="margin-top:12px;min-height:18px"></p>
@@ -47,6 +48,8 @@
   </div>
 </div>
 
+<button id="creative-toggle" type="button" hidden aria-controls="creative-drawer" aria-expanded="false">⚡ CREATIVE / DEV</button>
+<aside id="creative-drawer" class="creative-drawer" aria-label="Панель создателя" hidden></aside>
 <script type="module" src="student.js"></script>
 </body>
 </html>

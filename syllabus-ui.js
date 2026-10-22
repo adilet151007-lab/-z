@@ -35,8 +35,8 @@ export async function readSyllabusFile(file,onProgress=()=>{}) {
 export function setupSyllabus(engine,message){
  const $=id=>document.getElementById(id);let busy=false,drafts=[];
  $("syllabus-panel").innerHTML=`<p class="mut small-note">Бесплатный подбор без ИИ и API: определения из текста и учебный банк культурологии. Правильные ответы и источники видны в черновиках. Перед добавлением проверьте соответствие вашей программе.</p><label class="file-drop section-gap" for="syllabus-file"><strong>Загрузить силлабус</strong><span>PDF, DOCX или TXT · до 10 МБ</span><input id="syllabus-file" type="file" accept=".pdf,.docx,.txt"></label><details class="section-gap"><summary>Посмотреть или вставить текст</summary><textarea id="syllabus-text" rows="8" maxlength="120000" aria-label="Текст силлабуса" placeholder="Вставьте силлабус или конспект с названиями тем и определениями"></textarea></details><div class="row section-gap"><button id="syllabus-analyze" class="pri">Найти темы</button><span id="syllabus-size" class="mut"></span></div><p id="syllabus-message" class="small-note mut" role="status" aria-live="polite"></p><div id="syllabus-topics" class="topic-options"></div><label class="field-label" for="syllabus-extra">Дополнительные темы — по одной на строке</label><textarea id="syllabus-extra" rows="2" maxlength="6000" placeholder="Например, Культурная идентичность"></textarea><div class="row section-gap"><label for="syllabus-count">Черновиков</label><input id="syllabus-count" type="number" min="1" max="60" value="20" style="width:80px"><button id="syllabus-generate">Подготовить вопросы</button></div><div id="syllabus-drafts" class="draft-list"></div><div class="row section-gap"><button id="syllabus-import" class="pri" hidden>Добавить выбранные в банк</button><button id="syllabus-select-all" hidden>Выбрать все</button><button id="syllabus-select-none" hidden>Снять выбор</button></div>`;
- function status(text,error=false){$("syllabus-message").textContent=text;$("syllabus-message").className=`small-note ${error?"red":"mut"}`}
- function lock(value){busy=value;for(const id of ["syllabus-file","syllabus-analyze","syllabus-generate","syllabus-import"])$(id).disabled=value||!engine.connected}
+ function status(text,error=false){if(!$("syllabus-message"))return;$("syllabus-message").textContent=text;$("syllabus-message").className=`small-note ${error?"red":"mut"}`}
+ function lock(value){busy=value;for(const id of ["syllabus-file","syllabus-analyze","syllabus-generate","syllabus-import"]){const el=$(id);if(el)el.disabled=value||!engine.connected}}
  async function task(fn){if(busy)return;lock(true);try{await fn()}catch(error){status(error.message,true)}finally{lock(false)}}
  function size(){$("syllabus-size").textContent=`${$("syllabus-text").value.length.toLocaleString("ru-RU")} символов`}
  $("syllabus-text").addEventListener("input",size);
@@ -65,5 +65,5 @@ export function setupSyllabus(engine,message){
   const chosen=drafts.filter(q=>q.selected).map(({selected,...q})=>q);if(!chosen.length)throw new Error("Выберите хотя бы один черновик.");
   const result=await engine.importQuestions(chosen);drafts=drafts.filter(q=>!q.selected);renderDrafts();status(`Добавлено в банк: ${result.added}. Пропущено дубликатов: ${result.skipped}.`);message(`Из силлабуса добавлено ${result.added} вопросов.`);
  }));
- engine.onChange(()=>{if(!busy)lock(false)});
+ return engine.onChange(()=>{if(!busy)lock(false)});
 }

@@ -8,6 +8,7 @@ import { Server } from "socket.io";
 import { GameLogic, GameError, hashToken } from "./game-logic.js";
 import { createStore } from "./storage.js";
 import { analyzeSyllabus, generateSyllabusQuestions } from "./syllabus-engine.js";
+import { CREATOR_TEAM_ID, CREATOR_NAMES } from "./game-config.js";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const digest = value => createHash("sha256").update(value).digest();
@@ -16,6 +17,9 @@ const equal = (a, b) => timingSafeEqual(digest(String(a)), digest(String(b)));
 export async function createGameServer(options = {}) {
   const password = options.teacherPassword ?? process.env.TEACHER_PASSWORD;
   const secret = options.sessionSecret ?? process.env.SESSION_SECRET;
+  const creatorCodes=options.creatorCodes ?? {ernur:process.env.CREATOR_ERNUR_CODE,adilet:process.env.CREATOR_ADILET_CODE};
+  const configured=Object.keys(CREATOR_NAMES).filter(id=>typeof creatorCodes[id]==='string'&&creatorCodes[id].length===26);
+  if(configured.length===2&&equal(creatorCodes.ernur,creatorCodes.adilet))throw new Error('Персональные коды создателей должны различаться.');
   if (typeof password !== "string" || password.length < 8 || password.length > 256 || password.includes("replace-with")) throw new Error("Задайте TEACHER_PASSWORD (от 8 до 256 символов). Локально: npm run setup.");
   if (typeof secret !== "string" || secret.length < 32 || secret.includes("replace-with")) throw new Error("Задайте SESSION_SECRET (минимум 32 случайных символа). Локально: npm run setup.");
   const store = options.store || await createStore();
@@ -34,8 +38,8 @@ export async function createGameServer(options = {}) {
     next();
   });
   app.get("/", (_req, res) => res.redirect("/student.html"));
-  app.get("/health", (_req, res) => res.status(closing ? 503 : 200).json({ ok: !closing, storage: store.kind }));
-  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/styles.css"]);
+  app.get("/health", (_req, res) => res.status(closing ? 503 : 200).json({ ok: !closing, storage: store.kind, creatorAccessEnabled:configured.length===2 }));
+  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/styles.css"]);
   app.use((req, res, next) => allowed.has(req.path) ? res.sendFile(path.join(directory, req.path.slice(1))) : next());
   app.get("/vendor/pdfjs/pdf.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.mjs")));
   app.get("/vendor/pdfjs/pdf.worker.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.worker.mjs")));
@@ -67,7 +71,7 @@ export async function createGameServer(options = {}) {
       return data.role === "teacher" && data.expires > Date.now() && equal(data.passwordVersion, hashToken(password));
     } catch { return false; }
   };
-  const actor = socket => ({ role: validTeacherToken(socket.data.teacherToken) ? "teacher" : "guest", playerHash: socket.data.playerHash });
+  const actor = socket => ({ role: validTeacherToken(socket.data.teacherToken) ? "teacher" : publishedGame.creatorFor(socket.data.playerHash) ? "creator" : "guest", playerHash: socket.data.playerHash });
   const online = () => new Set([...io.sockets.sockets.values()].map(s => s.data.playerHash && publishedGame.findPlayer(s.data.playerHash)?.pid).filter(Boolean));
   const sendState = socket => socket.emit("state", publishedGame.view(actor(socket), online()));
   // Сотни одновременных голосов объединяются в одну рассылку раз в 40 мс.
@@ -109,7 +113,7 @@ export async function createGameServer(options = {}) {
         enqueue(async () => {
           if (closing) throw new GameError("Сервер перезапускается. Дождитесь подключения.");
           const identity = actor(socket);
-          if (permission === "teacher" && identity.role !== "teacher") throw new GameError("Нужен вход преподавателя.", "FORBIDDEN");
+          if (permission === "teacher" && !["teacher","creator"].includes(identity.role)) throw new GameError("Нужен вход преподавателя или создателя.", "FORBIDDEN");
           const player = identity.playerHash ? game.findPlayer(identity.playerHash) : null;
           if (permission === "student" && !player) throw new GameError("Войдите в команду заново.", "SESSION_EXPIRED");
           if (!data || typeof data !== "object" || Array.isArray(data)) throw new GameError("Некорректные данные запроса.");
@@ -118,6 +122,7 @@ export async function createGameServer(options = {}) {
           try {
             result = await fn(data, player);
             if (game.state.revision !== before.revision) {
+              if(permission==='teacher'&&identity.role==='creator')game.log(`Creative · ${game.findPlayer(identity.playerHash)?.name||player?.name||'Создатель'} · ${name}`);
               await store.save(game.state);
               publishedGame = new GameLogic(game.state);
             }
@@ -143,6 +148,12 @@ export async function createGameServer(options = {}) {
     handle("teacherLogout", "teacher", () => ({}), () => { socket.data.teacherToken = null; });
     handle("joinTeam", "guest", data => {
       if (socket.data.playerHash && game.findPlayer(socket.data.playerHash)) throw new GameError("Вы уже состоите в команде.");
+      const name=typeof data.name==='string'?data.name.trim():'';
+      const creatorId=configured.find(id=>equal(name,creatorCodes[id]));
+      if(creatorId){checkLoginLimit(socket);return game.joinCreator(creatorId)}
+      if(data.regionId===CREATOR_TEAM_ID || /(?:ROOT_ACCESS|DEV_CONSOLE)/i.test(name)){
+        checkLoginLimit(socket);throw new GameError('Некорректный персональный код.','BAD_CREATOR_CODE');
+      }
       return game.joinTeam(data.regionId, data.name);
     }, result => { socket.data.playerHash = hashToken(result.playerToken); });
     handle("leaveTeam", "student", (_data, p) => game.leaveTeam(p.regionId, p.pid), () => { socket.data.playerHash = null; });
@@ -150,6 +161,7 @@ export async function createGameServer(options = {}) {
     handle("teamSubmit", "student", (data, p) => game.teamSubmit(p.regionId, p.pid, data.roundId));
     handle("freeSlot", "teacher", data => game.leaveTeam(data.regionId, data.pid));
     handle("startRound", "teacher", data => game.startRound(data.questionId, data.duration));
+    handle("switchQuestion", "teacher", data => game.switchQuestion(data.questionId,data.duration));
     handle("pauseRound", "teacher", () => game.pauseRound());
     handle("resetTimer", "teacher", () => game.resetTimer());
     handle("resolveRound", "teacher", () => game.resolveRound());
@@ -177,6 +189,7 @@ export async function createGameServer(options = {}) {
     handle("resetGame", "teacher", () => game.resetGame());
     handle("applyRawState", "teacher", data => game.applyRawState(data));
     handle("getSnapshot", "teacher", () => ({ snapshot: game.editorSnapshot() }));
+    handle("getHotfixBackup", "teacher", () => game.hotfixBackupSnapshot());
     handle("exportSummary", "teacher", () => ({ rows: game.exportSummary() }));
     socket.on("disconnect", () => broadcast());
   });

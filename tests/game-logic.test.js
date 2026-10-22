@@ -185,7 +185,7 @@ test("импорт вопросов атомарен, убирает дубли�
 test("новая версия загружает прежние четыре региона без удаления участников",()=>{
  const f=fixture(),old=structuredClone(f.game.state);old.schemaVersion=2;
  for(const r of old.regions){delete r.name;delete r.baseRegionId}
- const restored=new GameLogic(old);assert.equal(restored.state.schemaVersion,4);assert.equal(restored.region("saryarka").name,"Сарыарқа");assert.equal(restored.region("saryarka").members.length,2);
+ const restored=new GameLogic(old);assert.equal(restored.state.schemaVersion,5);assert.equal(restored.region("saryarka").name,"Сарыарқа");assert.equal(restored.region("saryarka").members.length,2);
 });
 
 test("вместимость меняется для всех или одной команды, переполнение не удаляет игроков",()=>{
@@ -245,4 +245,25 @@ test("старые сохранения мигрируют в 17 областе�
  const patch=restored.editorSnapshot(),member=patch.regions[0].members.shift();patch.regions[1].members.push(member);patch.regions[1].capacity=6;
  restored.applyRawState(patch);assert.equal(restored.findPlayer(hashToken(f.a.playerToken)).regionId,'jetisu');assert.equal(restored.state.round.ballots[member.pid],undefined);assert.equal(restored.state.round.submitted.saryarka,undefined);
  const created=restored.createTeam('Астана команда','astana');assert.equal(restored.region(created.teamId).baseRegionId,'astana');
+});
+
+test('защищённая команда: два создателя, одна сессия на личность, обычный вход запрещён',()=>{
+ const g=new GameLogic(),a=g.joinCreator('ernur'),b=g.joinCreator('adilet');
+ assert.equal(g.region('creators').members.length,2);assert.equal(a.player.name,'Ернур');assert.equal(b.player.name,'Адилет');
+ assert.throws(()=>g.joinCreator('ernur'),e=>e.code==='CREATOR_OCCUPIED');assert.throws(()=>g.joinCreator('unknown'));
+ assert.throws(()=>g.joinTeam('creators','Ернур'));assert.throws(()=>g.setTeamCapacity('creators',3));
+ g.setAllCapacities(6);assert.equal(g.region('creators').capacity,2);g.setTeamCount(1);assert.equal(g.state.regions.length,2);assert.ok(g.creatorFor(hashToken(a.playerToken)));
+ assert.throws(()=>g.removeTeam('creators'));const normal=g.state.regions.find(t=>t.id!=='creators');const p=g.joinTeam(normal.id,'Обычный');
+ assert.throws(()=>g.movePlayer(p.player.pid,'creators'));assert.throws(()=>g.movePlayer(a.player.pid,normal.id));
+ assert.equal(g.view({role:'creator',playerHash:hashToken(p.playerToken)}).viewer.isCreator,false);
+ const saved=new GameLogic(g.state);assert.equal(saved.creatorFor(hashToken(a.playerToken)).pid,a.player.pid);assert.throws(()=>saved.joinCreator('ernur'),/уже занят/);
+ saved.leaveTeam('creators',a.player.pid);assert.equal(saved.creatorFor(hashToken(a.playerToken)),null);assert.ok(saved.joinCreator('ernur').playerToken);
+});
+test('JSON не подделывает роль; резервная копия сохраняет состояние перед hotfix',()=>{
+ const g=new GameLogic(),a=g.joinCreator('ernur'),p=g.joinTeam('jetisu','Студент');
+ const bad=g.editorSnapshot();bad.regions.find(t=>t.id==='creators').capacity=3;assert.throws(()=>g.applyRawState(bad));
+ const moved=g.editorSnapshot(),ordinary=moved.regions.find(t=>t.id==='jetisu').members.shift();ordinary.creatorId='adilet';moved.regions.find(t=>t.id==='creators').members.push(ordinary);assert.throws(()=>g.applyRawState(moved));
+ const fake=g.editorSnapshot();fake.regions.find(t=>t.id==='jetisu').members[0].creatorId='adilet';fake.regions[0].points=500;g.applyRawState(fake);
+ assert.equal(g.creatorFor(hashToken(p.playerToken)),null);assert.equal(g.creatorFor(hashToken(a.playerToken)).name,'Ернур');
+ const backup=g.hotfixBackupSnapshot();assert.equal(backup.snapshot.regions[0].points,0);assert.equal(JSON.stringify(backup).includes('tokenHash'),false);assert.equal(g.state.regions[0].points,500);
 });

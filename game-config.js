@@ -2,6 +2,10 @@
 export const SEAT_LIMIT = 4;
 export const MAX_TEAMS = 50;
 export const MAX_TEAM_CAPACITY = 50;
+export const CREATOR_TEAM_ID = "creators";
+export const CREATOR_NAMES = { ernur: "Ернур", adilet: "Адилет" };
+export const isCreatorTeam = team => team?.id === CREATOR_TEAM_ID;
+export const regularTeams = teams => teams.filter(team => !isCreatorTeam(team));
 export const ECONOMY_PENALTY = 20;
 export const CRISIS_THRESHOLD = 30;
 export const RESOURCE_CAP = 1000;

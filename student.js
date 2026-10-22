@@ -1,7 +1,9 @@
-import { GameEngine, REGIONS, capacityFor, totalCapacity, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, metadataFor, escapeHTML as h } from "./shared-engine.js";
+import { GameEngine, REGIONS, capacityFor, totalCapacity, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, metadataFor, escapeHTML as h, CREATOR_TEAM_ID, isCreatorTeam, regularTeams } from "./shared-engine.js";
 import { createScene } from "./scene3d.js";
+import { setupCreatorOverlay } from "./creator-overlay.js";
 
 const engine = new GameEngine("student");
+setupCreatorOverlay(engine);
 const $ = id => document.getElementById(id);
 let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null;
 let sceneError = "";
@@ -19,23 +21,28 @@ async function act(fn) {
 function renderRegistration(state) {
   $("team-search").hidden = state.regions.length <= 8;
   const query = $("team-search").hidden ? "" : $("team-search").value.trim().toLocaleLowerCase();
-  $("registration-capacity").textContent = `${state.regions.length} команд · ${state.regions.reduce((sum,t)=>sum+t.members.length,0)} / ${totalCapacity(state.regions)} участников`;
+  $("registration-capacity").textContent = `${regularTeams(state.regions).length} команд${state.regions.some(isCreatorTeam)?' + создатели':''} · ${state.regions.reduce((sum,t)=>sum+t.members.length,0)} / ${totalCapacity(state.regions)} участников`;
   const teams = state.regions.filter(t=>!query || `${t.name} ${metadataFor(t).baseRegionId} ${REGIONS.find(r=>r.id===metadataFor(t).baseRegionId).name}`.toLocaleLowerCase().includes(query));
   $("region-grid").innerHTML = teams.map(region => {
     const meta = metadataFor(region), capacity = capacityFor(region), full = region.members.length >= capacity;
-    return `<button class="region-card" data-region="${meta.id}" ${full || !engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${h(meta.name)}</span><span class="team-region-sub">${h(REGIONS.find(r=>r.id===meta.baseRegionId).name)}</span><span class="seats">${region.members.length}/${capacity} ${full ? "— команда заполнена" : "— свободно"}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") || "Пока никого"}</span></button>`;
+    return `<button class="region-card" data-region="${meta.id}" ${isCreatorTeam(region) || full || !engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${h(meta.name)}</span><span class="team-region-sub">${isCreatorTeam(region)?'Персональный доступ · 2 места':h(REGIONS.find(r=>r.id===meta.baseRegionId).name)}</span><span class="seats">${region.members.length}/${capacity} ${isCreatorTeam(region)?'— вход по коду':full ? "— команда заполнена" : "— свободно"}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") || "Пока никого"}</span></button>`;
   }).join("") || '<p class="mut">Команды не найдены</p>';
 }
 $("team-search").addEventListener("input",()=>{if(engine.state)renderRegistration(engine.state)});
-$("region-grid").addEventListener("click", async event => {
+async function join(regionId) {
+  if(joining||!engine.connected)return;
+  joining=true;$("reg-error").textContent="Подключение…";renderRegistration(engine.state);
+  try{await engine.joinTeam(regionId,$("name-input").value.trim());$("name-input").value="";$("creator-entry").hidden=true;$("reg-error").textContent=""}
+  catch(error){$("reg-error").textContent=error.message}
+  finally{joining=false;if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state)}
+}
+$("name-input").addEventListener("input",()=>{$("creator-entry").hidden=$("name-input").value.trim().length!==26});
+$("name-input").addEventListener("keydown",event=>{if(event.key==='Enter'&&$("name-input").value.trim().length===26){event.preventDefault();join(CREATOR_TEAM_ID)}});
+$("creator-entry").addEventListener("click",()=>join(CREATOR_TEAM_ID));
+$("region-grid").addEventListener("click", event => {
   const card = event.target.closest("[data-region]");
   if (!card || joining || !engine.connected) return;
-  joining = true;
-  $("reg-error").textContent = "Подключение…";
-  renderRegistration(engine.state);
-  try { await engine.joinTeam(card.dataset.region, $("name-input").value.trim()); $("reg-error").textContent = ""; }
-  catch (error) { $("reg-error").textContent = error.message; }
-  finally { joining = false; if (engine.state && !engine.state.viewer.player) renderRegistration(engine.state); }
+  join(card.dataset.region);
 });
 $("leave-btn").addEventListener("click", () => {
   if (confirm("Выйти из команды и освободить своё место?")) act(() => engine.leaveTeam());
@@ -71,6 +78,7 @@ function renderQuestion(state) {
     if (round.resolved && i === question.correct) cls += " correct";
     else if (round.resolved && i === submitted) cls += " wrong";
     else if (!round.resolved && (i === round.myVote || i === submitted)) cls += " chosen";
+    if(!round.resolved&&state.viewer.isCreator&&i===question.correct)cls+=' creator-correct';
     return `<button class="${cls}" data-option="${i}" ${locked ? "disabled" : ""} aria-pressed="${i === round.myVote}"><span>${h(option)}</span><span class="votecount">${tally[i] ? `${tally[i]} гол.` : ""}${i === round.myVote && !round.resolved ? " · ваш" : ""}</span></button>`;
   }).join("")}</div>${!round.resolved && submitted === undefined ? `<div class="row" style="margin-top:12px"><button class="pri" data-submit ${locked || !totalVotes ? "disabled" : ""}>Отправить ответ команды (${totalVotes} гол.)</button></div><p class="mut small-note">Один участник — один голос. Выбор можно изменить. По таймеру ответ большинства отправится автоматически; при равенстве голосов ответ не засчитывается.</p>` : !round.resolved ? '<p class="cyan small-note">Ответ команды принят. Ожидайте результатов.</p>' : ""}${feedback}`;
   updateTimer();

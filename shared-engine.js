@@ -1,9 +1,11 @@
 import { io } from "/socket.io/socket.io.esm.min.js";
-export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity } from "./game-config.js";
+export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity, CREATOR_TEAM_ID, isCreatorTeam, regularTeams } from "./game-config.js";
 
 export const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 const getToken = key => { try { return sessionStorage.getItem(key) || undefined; } catch { return undefined; } };
 const setToken = (key, value) => { try { if (value) sessionStorage.setItem(key, value); else sessionStorage.removeItem(key); } catch {} };
+const creatorToken=()=>{try{return localStorage.getItem('cq_creator_session_v1')||undefined}catch{return undefined}};
+const saveCreatorToken=value=>{try{if(value)localStorage.setItem('cq_creator_session_v1',value);else localStorage.removeItem('cq_creator_session_v1')}catch{}};
 
 export class GameEngine {
   constructor(mode = "student") {
@@ -13,14 +15,14 @@ export class GameEngine {
     this.error = "";
     this.offset = 0;
     this.listeners = new Set();
-    this.socket = io({ autoConnect: false, auth: callback => callback({ playerToken: mode === "student" ? getToken("cq_player_token_v2") : undefined, teacherToken: mode === "teacher" ? getToken("cq_teacher_token_v2") : undefined }) });
+    this.socket = io({ autoConnect: false, auth: callback => callback({ playerToken: mode === "student" ? creatorToken()||getToken("cq_player_token_v2") : undefined, teacherToken: mode === "teacher" ? getToken("cq_teacher_token_v2") : undefined }) });
     this.socket.on("connect", () => { this.connected = true; this.error = ""; this.emit(); });
     this.socket.on("disconnect", () => { this.connected = false; this.emit(); });
     this.socket.on("connect_error", () => { this.connected = false; this.error = "Не удалось подключиться к серверу. Повторяем…"; this.emit(); });
     this.socket.on("state", state => {
       this.state = state;
       this.offset = state.serverTime - Date.now();
-      if (mode === "student" && !state.viewer.player) setToken("cq_player_token_v2", null);
+      if (mode === "student" && !state.viewer.player) {setToken("cq_player_token_v2", null);saveCreatorToken(null)}
       if (mode === "teacher" && state.viewer.role !== "teacher") setToken("cq_teacher_token_v2", null);
       this.emit();
     });
@@ -48,6 +50,7 @@ export class GameEngine {
   async joinTeam(regionId, name) {
     const result = await this.request("joinTeam", { regionId, name });
     setToken("cq_player_token_v2", result.playerToken);
+    saveCreatorToken(result.isCreator?result.playerToken:null);
     return result;
   }
   async teacherLogin(password) {
@@ -56,11 +59,12 @@ export class GameEngine {
     return result;
   }
   async teacherLogout() { await this.request("teacherLogout"); setToken("cq_teacher_token_v2", null); }
-  async leaveTeam() { await this.request("leaveTeam"); setToken("cq_player_token_v2", null); }
+  async leaveTeam() { await this.request("leaveTeam"); setToken("cq_player_token_v2", null);saveCreatorToken(null); }
   castVote(optionIdx) { return this.request("castVote", { optionIdx, roundId: this.state?.round?.id }); }
   teamSubmit() { return this.request("teamSubmit", { roundId: this.state?.round?.id }); }
   freeSlot(regionId, pid) { return this.request("freeSlot", { regionId, pid }); }
   startRound(questionId, duration) { return this.request("startRound", { questionId, duration }); }
+  switchQuestion(questionId,duration) { return this.request("switchQuestion",{questionId,duration}); }
   pauseRound() { return this.request("pauseRound"); }
   resetTimer() { return this.request("resetTimer"); }
   resolveRound() { return this.request("resolveRound"); }
@@ -88,5 +92,6 @@ export class GameEngine {
   resetGame() { return this.request("resetGame"); }
   applyRawState(snapshot) { return this.request("applyRawState", snapshot); }
   async getSnapshot() { return (await this.request("getSnapshot")).snapshot; }
+  getHotfixBackup() { return this.request("getHotfixBackup"); }
   async exportSummary() { return (await this.request("exportSummary")).rows; }
 }

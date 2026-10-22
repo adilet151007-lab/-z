@@ -8,7 +8,7 @@ import { io } from "socket.io-client";
 import { createGameServer } from "../server.js";
 import { FileStore } from "../storage.js";
 
-const config = { teacherPassword: "test-teacher-password", sessionSecret: "unit-test-session-secret-at-least-32-characters" };
+const config = { creatorCodes:{ernur:'E'.repeat(26),adilet:'A'.repeat(26)}, teacherPassword: "test-teacher-password", sessionSecret: "unit-test-session-secret-at-least-32-characters" };
 class MemoryStore {
   kind = "memory"; snapshot = null; fail = false;
   async load() { return structuredClone(this.snapshot); }
@@ -35,7 +35,7 @@ const login = socket => command(socket, "teacherLogin", { password: config.teach
 
 test("без входа нельзя выполнять ни одну административную команду", async t => {
   const f = await fixture(t), socket = await f.connect();
-  for (const event of ["startRound", "pauseRound", "resetTimer", "resolveRound", "endRound", "adjustPoints", "adjustEconomy", "freeSlot", "addCustomQuestion", "resetGame", "applyRawState", "getSnapshot", "exportSummary", "createTeam", "expandTeams", "planTeamCount", "setTeamCount", "setTeamCapacity", "setAllCapacities", "updateTeam", "movePlayer", "renamePlayer", "updatePlayer", "renameTeam", "removeTeam", "editQuestion", "deleteQuestion", "importQuestions", "analyzeSyllabus", "generateQuestions"]) {
+  for (const event of ["startRound", "switchQuestion", "getHotfixBackup", "pauseRound", "resetTimer", "resolveRound", "endRound", "adjustPoints", "adjustEconomy", "freeSlot", "addCustomQuestion", "resetGame", "applyRawState", "getSnapshot", "exportSummary", "createTeam", "expandTeams", "planTeamCount", "setTeamCount", "setTeamCapacity", "setAllCapacities", "updateTeam", "movePlayer", "renamePlayer", "updatePlayer", "renameTeam", "removeTeam", "editQuestion", "deleteQuestion", "importQuestions", "analyzeSyllabus", "generateQuestions"]) {
     const result = await command(socket, event, {}); assert.equal(result.code, "FORBIDDEN", event);
   }
   assert.equal((await command(socket, "teacherLogin", { password: "incorrect" })).ok, false);
@@ -105,7 +105,7 @@ test("ошибка сохранения отменяет изменение; у�
 });
 test("HTTP раздаёт обе страницы и локальные библиотеки, но не сервер и секреты", async t => {
   const f = await fixture(t);
-  for (const resource of ["/student.html", "/teacher.html", "/shared-engine.js", "/region-geography.js", "/scene3d.js", "/syllabus-ui.js", "/vendor/pdfjs/pdf.mjs", "/vendor/pdfjs/pdf.worker.mjs", "/vendor/mammoth/mammoth.browser.min.js", "/vendor/three/examples/jsm/utils/BufferGeometryUtils.js", "/vendor/three/build/three.module.js", "/vendor/three/examples/jsm/controls/OrbitControls.js", "/socket.io/socket.io.esm.min.js", "/health"]) assert.equal((await fetch(f.base + resource)).status, 200, resource);
+  for (const resource of ["/student.html", "/teacher.html", "/shared-engine.js", "/creator-overlay.js", "/region-geography.js", "/scene3d.js", "/syllabus-ui.js", "/vendor/pdfjs/pdf.mjs", "/vendor/pdfjs/pdf.worker.mjs", "/vendor/mammoth/mammoth.browser.min.js", "/vendor/three/examples/jsm/utils/BufferGeometryUtils.js", "/vendor/three/build/three.module.js", "/vendor/three/examples/jsm/controls/OrbitControls.js", "/socket.io/socket.io.esm.min.js", "/health"]) assert.equal((await fetch(f.base + resource)).status, 200, resource);
   for (const resource of ["/server.js", "/game-logic.js", "/question-bank.js", "/.env", "/data/game-state.json", "/storage.js", "/syllabus-engine.js", "/syllabus-bank.js"]) assert.equal((await fetch(f.base + resource)).status, 404, resource);
 });
 test("новое соединение получает только сохранённое состояние во время медленной записи", async t => {
@@ -179,4 +179,36 @@ test("только преподаватель меняет места, пере�
  student.disconnect();const resumed=await f.connect({playerToken:joined.playerToken});assert.equal(resumed.latest.viewer.player.regionId,'jetisu');
  const snapshot=structuredClone(f.server.store.snapshot);f.server.store.fail=true;
  assert.equal((await command(teacher,'setTeamCount',{count:1})).ok,false);assert.deepEqual(f.server.game.state,snapshot);
+});
+
+test('два кода дают только два доступа: конкурентный вход, God Eye, голоса и запрет для студента',async t=>{
+ const f=await fixture(t),clients=await Promise.all(Array.from({length:5},()=>f.connect()));
+ const attempts=await Promise.all(clients.slice(0,4).map(s=>command(s,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur})));
+ assert.equal(attempts.filter(r=>r.ok).length,1);assert.ok(attempts.filter(r=>!r.ok).every(r=>r.code==='CREATOR_OCCUPIED'));
+ const creator=clients[attempts.findIndex(r=>r.ok)],joined=attempts.find(r=>r.ok);assert.equal(joined.player.name,'Ернур');
+ const second=await command(clients[4],'joinTeam',{regionId:'creators',name:config.creatorCodes.adilet});assert.equal(second.player.name,'Адилет');
+ const student=await f.connect({isCreator:true,role:'creator'});await command(student,'joinTeam',{regionId:'jetisu',name:'Ернур'});
+ assert.equal((await command(student,'adjustPoints',{regionId:'jetisu',delta:100})).code,'FORBIDDEN');
+ assert.equal((await command(creator,'startRound',{questionId:'q1',duration:60})).ok,true);await waitFor(()=>creator.latest.round&&student.latest.round);
+ assert.equal(creator.latest.viewer.role,'creator');assert.equal(creator.latest.viewer.isCreator,true);assert.equal(creator.latest.round.question.correct,0);assert.ok(creator.latest.questions.length>1);
+ assert.equal(student.latest.round.question.correct,undefined);assert.equal(student.latest.questions.length,0);assert.equal(student.latest.viewer.isCreator,false);
+ assert.equal((await command(creator,'castVote',{roundId:creator.latest.round.id,optionIdx:0})).ok,true);assert.deepEqual(f.server.game.votesFor('creators'),{0:1});
+ const publicJSON=JSON.stringify(student.latest);assert.ok(!publicJSON.includes(config.creatorCodes.ernur));assert.ok(!publicJSON.includes('tokenHash'));assert.ok(!publicJSON.includes(joined.playerToken));
+ creator.disconnect();const intruder=await f.connect();assert.equal((await command(intruder,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur})).code,'CREATOR_OCCUPIED');
+ const resumed=await f.connect({playerToken:joined.playerToken});assert.equal(resumed.latest.viewer.isCreator,true);assert.equal(f.server.game.region('creators').members.length,2);
+});
+test('отзыв доступа немедленно закрывает инструменты, ошибочная запись не занимает слот',async t=>{
+ const f=await fixture(t),teacher=await f.connect(),root=await f.connect();await login(teacher);
+ f.server.store.fail=true;assert.equal((await command(root,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur})).ok,false);assert.equal(f.server.game.state.regions.some(t=>t.id==='creators'),false);
+ f.server.store.fail=false;const join=await command(root,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur});assert.equal(join.ok,true);
+ await command(teacher,'freeSlot',{regionId:'creators',pid:join.player.pid});await waitFor(()=>root.latest.viewer.role==='guest');
+ assert.equal((await command(root,'getSnapshot')).code,'FORBIDDEN');const old=await f.connect({playerToken:join.playerToken});assert.equal(old.latest.viewer.isCreator,false);
+ const newcomer=await f.connect();assert.equal((await command(newcomer,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur})).ok,true);
+});
+test('перезапуск сохраняет бронь создателя и полномочия по токену',async t=>{
+ const store=new MemoryStore(),first=await fixture(t,{store}),root=await first.connect();
+ const joined=await command(root,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur});root.disconnect();await first.server.close();
+ const second=await fixture(t,{store}),newClient=await second.connect();assert.equal((await command(newClient,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur})).code,'CREATOR_OCCUPIED');
+ const resumed=await second.connect({playerToken:joined.playerToken});assert.equal(resumed.latest.viewer.role,'creator');assert.equal((await command(resumed,'adjustPoints',{regionId:'creators',delta:25})).ok,true);
+ assert.equal(second.server.game.region('creators').points,25);
 });
