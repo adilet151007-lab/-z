@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, capacityFor, totalCapacity, normalizeRegionId, CREATOR_TEAM_ID, CREATOR_NAMES, isCreatorTeam, regularTeams } from "./game-config.js";
 import { QUESTION_BANK } from "./question-bank.js";
-import {MODE_NAMES,ECONOMY_FLOOR,soloMultiplier} from './game-config.js';
+import {MODE_NAMES,ECONOMY_FLOOR,soloMultiplier,DEFAULT_BRANDING,DEFAULT_SUBJECT} from './game-config.js';
 export { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD } from "./game-config.js";
 
 export class GameError extends Error {
@@ -19,6 +19,19 @@ const cleanText = (value, min, max, label) => {
   return text;
 };
 
+function validateBranding(raw={}) {
+  const value={...DEFAULT_BRANDING,...raw};
+  for(const [key,max]of [['university',120],['title',80],['subject',80]])value[key]=cleanText(value[key],2,max,key);
+  for(const key of ['operator','privacyContact'])value[key]=cleanText(value[key],0,240,key);
+  ensure(Array.isArray(value.subjects)&&value.subjects.length>0&&value.subjects.length<=20,'Укажите от 1 до 20 предметов.');
+  value.subjects=[...new Set(value.subjects.map(s=>cleanText(s,2,80,'Предмет')))];
+  ensure(value.subjects.includes(value.subject),'Текущий предмет должен быть в списке.');
+  for(const key of ['accent','gold'])ensure(/^#[0-9a-f]{6}$/i.test(value[key]),'Цвет задаётся как #RRGGBB.');
+  ensure(typeof value.logo==='string'&&value.logo.length<=200000,'Логотип: PNG, JPEG или WebP до 150 КБ.');
+  if(value.logo){const match=value.logo.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/);ensure(match,'Логотип: только PNG, JPEG или WebP.');const bytes=Buffer.from(match[2],'base64');ensure(bytes.length<=150000&&(match[1]==='png'&&bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))||match[1]==='jpeg'&&bytes[0]===255&&bytes[1]===216||match[1]==='webp'&&bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP'),'Формат логотипа не соответствует файлу.');}
+  return Object.fromEntries(Object.keys(DEFAULT_BRANDING).map(key=>[key,value[key]]));
+}
+
 export function validateQuestions(questions) {
   ensure(Array.isArray(questions) && questions.length >= 1 && questions.length <= 1000, "Нужно от 1 до 1000 вопросов.");
   const ids = new Set();
@@ -29,7 +42,7 @@ export function validateQuestions(questions) {
     ensure(integer(q.correct, 0, 3) && integer(q.points, 1, 1000), "Проверьте правильный вариант и баллы (1–1000).");
     ensure(integer(q.version ?? 1, 1, Number.MAX_SAFE_INTEGER), "Некорректная версия вопроса.");
     const extra = {};
-    for (const [key, max] of [["topic",200],["explanation",1200],["source",200],["sourceExcerpt",1200]]) {
+    for (const [key, max] of [["topic",200],["subject",80],["explanation",1200],["source",200],["sourceExcerpt",1200]]) {
       if (q[key]) extra[key] = cleanText(q[key], 1, max, key);
     }
     const options = q.options.map(o => cleanText(o, 1, 500, "Вариант"));
@@ -69,7 +82,7 @@ function validateRegions(regions, knownMembers = null, universal = false, mode =
       } else ensure(!isCreatorTeam(r), "Команда создателей доступна только по персональному коду.");
       const capital=m.capital??original.capital??0,streak=m.streak??original.streak??0;
       if(universal)ensure(integer(capital,0,RESOURCE_CAP)&&integer(streak,0,100000),'Проверьте личный рейтинг и серию.');
-      return { pid: m.pid, name: creatorId&&!universal ? CREATOR_NAMES[creatorId] : cleanText(m.name, 2, 40, "Имя"), tokenHash: original.tokenHash, joinedAt: original.joinedAt, ...(universal?{capital,streak}:{}), ...(creatorId?{creatorId}:{}) };
+      return { pid: m.pid, name: creatorId&&!universal ? CREATOR_NAMES[creatorId] : cleanText(m.name, 2, 40, "Имя"), tokenHash: original.tokenHash, joinedAt: original.joinedAt, ...(universal?{capital,streak}:{}), ...(creatorId?{creatorId}:{}),...(original.privacyConsent?{privacyConsent:structuredClone(original.privacyConsent)}:{}) };
     });
     return { id: r.id, name, baseRegionId, capacity, points: r.points, economy: r.economy, members };
   });
@@ -95,6 +108,7 @@ function restoreSnapshot(raw) {
   if(state.presentationEffectsEnabled!==undefined)ensure(typeof state.presentationEffectsEnabled==='boolean','Повреждена настройка эффектов.');
   if(state.delegatedAdmins!==undefined)ensure(Array.isArray(state.delegatedAdmins)&&state.delegatedAdmins.length<=200&&state.delegatedAdmins.every(a=>a&&typeof a.pid==='string'&&/^[\w-]{1,80}$/.test(a.pid)&&a.permissions&&typeof a.permissions==='object'&&Number.isInteger(a.effectDuration)&&a.effectDuration>=100&&a.effectDuration<=60000&&typeof a.unlimitedEffects==='boolean'),'Повреждены делегированные права.');
   state.questions = validateQuestions(state.questions);
+  state.branding = validateBranding(state.branding);
   ensure(["lobby", "playing", "ended"].includes(state.phase) && Array.isArray(state.log), "Повреждена структура сохранения.");
   if (state.round) {
     const r = state.round;
@@ -111,8 +125,27 @@ export class GameLogic {
   constructor(snapshot = null, clock = () => Date.now()) {
     this.now = clock;
     this.state = snapshot ? restoreSnapshot(snapshot) : freshState();
+    this.state.branding ??= structuredClone(DEFAULT_BRANDING);
   }
   touch() { this.state.revision++; }
+  updateBranding(raw){ensure(raw&&typeof raw==='object'&&!Array.isArray(raw),'Проверьте настройки организации.');const next=validateBranding({...this.state.branding,...raw});ensure(!this.state.round||this.state.round.resolved||next.subject===this.state.branding.subject,'Завершите вопрос перед сменой предмета.');this.state.branding=next;this.log('Обновлены оформление и настройки организации.');this.touch()}
+  publicBranding(){const {logo,...publicSettings}=this.state.branding;return {...publicSettings,subjects:[...publicSettings.subjects],logoUrl:logo?'/api/logo?v='+hashToken(logo).slice(0,16):''}}
+  backupSnapshot(){const snapshot=structuredClone(this.state);for(const key of ['restorePoints','hotfixBackup','migrationBackup'])delete snapshot[key];if(snapshot.round&&!snapshot.round.resolved){snapshot.round.remainingMs=this.remainingMs();snapshot.round.paused=true;snapshot.round.deadline=null}return snapshot}
+  createRestorePoint(label='Ручная копия',advance=true){
+    const point={id:randomUUID(),at:this.now(),label:cleanText(label,2,100,'Название копии'),snapshot:this.backupSnapshot()};
+    this.state.restorePoints=[point,...(this.state.restorePoints||[])].slice(0,3);if(advance)this.touch();return point;
+  }
+  restoreBackup(snapshot,revision){
+    ensure(revision===this.state.revision,'Игра уже изменилась. Обновите список копий перед восстановлением.','REVISION_CONFLICT');
+    const restored=new GameLogic(snapshot,this.now).state;
+    ensure(!!restored.settings.universal===!!this.state.settings.universal,'Копия использует другой формат движка.');
+    const personal=this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>({teamId:t.id,member:structuredClone(m)})));
+    restored.regions.forEach(t=>{t.members=t.members.filter(m=>!m.creatorId)});
+    for(const saved of personal){const team=restored.regions.find(t=>t.id===saved.teamId)||restored.regions[0];team.members.push(saved.member)}
+    if(restored.round&&!restored.round.resolved){restored.round.paused=true;restored.round.deadline=null;const ids=new Set(restored.regions.flatMap(t=>t.members.map(m=>m.pid)));for(const key of ['ballots','proposals'])for(const pid of Object.keys(restored.round[key]||{}))if(!ids.has(pid))delete restored.round[key][pid]}
+    restored.revision=this.state.revision;restored.restorePoints=this.state.restorePoints;restored.delegatedAdmins=[];restored.presentationEffectsEnabled=this.state.presentationEffectsEnabled;restored.exitRequests=this.state.exitRequests||[];
+    this.state=restored;this.log('Игра восстановлена из резервной копии. Активный вопрос поставлен на паузу.');this.touch();
+  }
   enableUniversal(){
     if(this.state.settings.universal)return;
     const backup=structuredClone(this.state),old=this.state.regions;
@@ -157,15 +190,22 @@ export class GameLogic {
   }
   adminGrantFor(pid) { return (this.state.delegatedAdmins || []).find(a => a.pid === pid) || null; }
   adminCan(pid, action) {
-    const grant = this.adminGrantFor(pid); if (!grant) return false;
-    const scope = action === 'presentationEffect' ? 'effects' : /^(freeSlot|movePlayer|renamePlayer|updatePlayer|renameTeam|removeTeam|removeAllPlayers)$/.test(action) ? 'players' : /^(addCustomQuestion|editQuestion|deleteQuestion|importQuestions|analyzeSyllabus|generateQuestions)$/.test(action) ? 'questions' : /^(startRound|switchQuestion|pauseRound|resetTimer|resolveRound|endRound|adjustPoints|adjustEconomy|setGameMode|setSessionMode|resetGame)$/.test(action) ? 'game' : null;
-    return !!(scope && grant.permissions[scope]);
+    const grant = this.adminGrantFor(pid);
+    if (!grant || !this.state.regions.some(t => t.members.some(m => m.pid === pid))) return false;
+    if (action === 'renameSelf' || action === 'exportSummary') return Object.values(grant.permissions).some(value => value === true);
+    const scope = action === 'presentationEffect' ? 'effects'
+      : /^(freeSlot|movePlayer|renamePlayer|updatePlayer|renameTeam|removeTeam|removeAllPlayers)$/.test(action) ? 'players'
+      : /^(addCustomQuestion|editQuestion|deleteQuestion|importQuestions|analyzeSyllabus|generateQuestions)$/.test(action) ? 'questions'
+      : /^(startRound|switchQuestion|pauseRound|resetTimer|resolveRound|endRound|adjustPoints|adjustEconomy|adjustCapital|setGameMode|setSessionMode|resetGame)$/.test(action) ? 'game' : null;
+    return !!(scope && grant.permissions[scope] === true);
   }
   grantAdmin(pid, permissions = {}, effectDuration = 3000, unlimitedEffects = false) {
     const member = this.state.regions.flatMap(t => t.members).find(m => m.pid === pid);
     ensure(member && !member.creatorId, 'Нельзя делегировать доступ создателю или отсутствующему игроку.');
+    ensure(permissions && typeof permissions === 'object' && !Array.isArray(permissions), 'Выберите разрешения администратора.');
     ensure(Number.isInteger(effectDuration) && effectDuration >= 100 && effectDuration <= 60000, 'Длительность помехи: 100–60000 мс.');
     const safe = { players: !!permissions.players, questions: !!permissions.questions, game: !!permissions.game, effects: !!permissions.effects };
+    ensure(Object.values(safe).some(Boolean), 'Выберите хотя бы одно разрешение или отзовите доступ.');
     const current = this.state.delegatedAdmins || [], previous = current.find(a => a.pid === pid);
     const grant = { pid, permissions: safe, effectDuration, unlimitedEffects: !!unlimitedEffects, grantedAt: previous?.grantedAt || this.now() };
     this.state.delegatedAdmins = [...current.filter(a => a.pid !== pid), grant]; this.log(`Административный доступ делегирован игроку ${member.name}.`); this.touch(); return grant;
@@ -206,6 +246,7 @@ export class GameLogic {
   leaveTeam(regionId, pid) {
     const region = this.region(regionId), member = this.member(regionId, pid);
     region.members = region.members.filter(m => m.pid !== pid);
+    this.state.delegatedAdmins = (this.state.delegatedAdmins || []).filter(a => a.pid !== pid);
     this.clearMembershipVotes([pid], [regionId]);
     this.log(`${member.name}: место в команде освобождено.`);
     this.touch();
@@ -232,7 +273,7 @@ export class GameLogic {
   removeOrdinaryPlayers() {
     let removed=0;
     for(const team of this.state.regions){const pids=team.members.filter(m=>!m.creatorId).map(m=>m.pid);if(!pids.length)continue;team.members=team.members.filter(m=>m.creatorId);this.clearMembershipVotes(pids,[team.id]);removed+=pids.length}
-    if(removed){this.log(`Освобождены обычные места: ${removed}. Персональные сессии сохранены.`);this.touch()}
+    if(removed){this.state.delegatedAdmins=[];this.log(`Освобождены обычные места: ${removed}. Персональные сессии сохранены.`);this.touch()}
     return {removed};
   }
   clearMembershipVotes(pids, teamIds) {
@@ -291,6 +332,7 @@ export class GameLogic {
     ensure(integer(duration, 5, 3600), "Время вопроса: от 5 до 3600 секунд.");
     const question = this.state.questions.find(q => q.id === questionId);
     ensure(question, "Вопрос не найден.");
+    ensure((question.subject||DEFAULT_SUBJECT)===this.state.branding.subject,'Выберите вопрос текущего предмета.');
     this.state.phase = "playing";
     this.state.round = { id: randomUUID(), questionId, questionSnapshot: structuredClone(question), startedAt: this.now(), duration, deadline: this.now() + duration * 1000, remainingMs: duration * 1000, paused: false, resolved: false, ballots: {}, submitted: {}, results: {},...(this.state.settings.universal?{proposals:{}}:{}) };
     this.log(`Начат вопрос: ${question.text}`);
@@ -435,7 +477,7 @@ export class GameLogic {
     this.touch();
   }
   addCustomQuestion(text, options, correctIdx, points = 25) {
-    const question = validateQuestions([{ id: `custom_${randomUUID()}`, text, options, correct: correctIdx, points }])[0];
+    const question = validateQuestions([{ id: `custom_${randomUUID()}`, text, options, correct: correctIdx, points,subject:this.state.branding.subject }])[0];
     ensure(this.state.questions.length < 1000, "В банке уже 1000 вопросов.");
     this.state.questions.push(question);
     this.log("В банк добавлен вопрос.");
@@ -525,7 +567,7 @@ export class GameLogic {
     const index=this.state.questions.findIndex(q=>q.id===id);ensure(index>=0,"Вопрос не найден.");
     const current=this.state.questions[index];
     ensure(expectedVersion===(current.version||1),"Вопрос уже изменён. Откройте его заново.","REVISION_CONFLICT");
-    const question=validateQuestions([{...changes,id,version:(current.version||1)+1}])[0];
+    const question=validateQuestions([{...changes,subject:changes.subject||current.subject||DEFAULT_SUBJECT,id,version:(current.version||1)+1}])[0];
     this.state.questions[index]=question;this.log("Вопрос обновлён в банке. Активный раунд использует свою сохранённую версию.");this.touch();
     return {questionId:id,activeRoundUnchanged:this.state.round?.questionId===id&&!this.state.round.resolved};
   }
@@ -537,20 +579,22 @@ export class GameLogic {
   }
   importQuestions(drafts) {
     ensure(Array.isArray(drafts)&&drafts.length>=1&&drafts.length<=60,"Можно добавить от 1 до 60 вопросов за раз.");
-    const seen=new Set(this.state.questions.map(q=>q.text.toLocaleLowerCase().trim()));
-    const questions=validateQuestions(drafts.map(q=>({...q,id:`import_${randomUUID()}`,version:1}))).filter(q=>{const key=q.text.toLocaleLowerCase().trim();if(seen.has(key))return false;seen.add(key);return true});
+    const signature=q=>(q.subject||DEFAULT_SUBJECT)+'\n'+q.text.toLocaleLowerCase().trim();
+    const seen=new Set(this.state.questions.map(signature));
+    const questions=validateQuestions(drafts.map(q=>({...q,subject:q.subject||this.state.branding.subject,id:`import_${randomUUID()}`,version:1}))).filter(q=>{const key=signature(q);if(seen.has(key))return false;seen.add(key);return true});
     ensure(this.state.questions.length+questions.length<=1000,"В банке может быть максимум 1000 вопросов.");
     if(questions.length){this.state.questions.push(...questions);this.log(`Добавлено вопросов из силлабуса: ${questions.length}.`);this.touch();}
     return {added:questions.length,skipped:drafts.length-questions.length};
   }
   resetGame() {
     const questions = this.state.questions, revision = this.state.revision, settings = this.state.settings;
-    const exitRequests=this.state.exitRequests,presentationEffectsEnabled=this.state.presentationEffectsEnabled;
+    const exitRequests=this.state.exitRequests,presentationEffectsEnabled=this.state.presentationEffectsEnabled,branding=this.state.branding,restorePoints=this.state.restorePoints;
     const teams = this.state.regions.map(r => ({...r,points:0,economy:100,members:r.members.filter(m=>m.creatorId).map(m=>({...m,...(settings.universal?{capital:0,streak:0}:{})}))}));
     this.state = freshState();
     this.state.questions = questions;
     this.state.settings = settings;
     this.state.regions = teams;
+    this.state.branding=branding;this.state.restorePoints=restorePoints;
     this.state.revision = revision;
     if(exitRequests)this.state.exitRequests=exitRequests;
     if(presentationEffectsEnabled!==undefined)this.state.presentationEffectsEnabled=presentationEffectsEnabled;
@@ -579,8 +623,11 @@ export class GameLogic {
     }
     const previousTeams = new Map(this.state.regions.flatMap(t=>t.members.map(m=>[m.pid,t.id])));
     const backup=structuredClone(this.state);delete backup.hotfixBackup;
+    delete backup.restorePoints;
     this.state.hotfixBackup={at:this.now(),state:backup};
     this.state.regions = regions;
+    const activePlayers = new Set(regions.flatMap(r => r.members.map(m => m.pid)));
+    this.state.delegatedAdmins = (this.state.delegatedAdmins || []).filter(a => activePlayers.has(a.pid));
     this.state.settings = {...this.state.settings,teamCapacity:settings.teamCapacity};
     this.state.questions = questions;
     if (round && !round.resolved) {
@@ -588,46 +635,60 @@ export class GameLogic {
       for (const pid of Object.keys(round.ballots)) if (!existing.has(pid)) delete round.ballots[pid];
       const currentTeams = new Map(regions.flatMap(t=>t.members.map(m=>[m.pid,t.id])));
       for (const [pid, oldTeam] of previousTeams) if (currentTeams.get(pid)!==oldTeam) this.clearMembershipVotes([pid],[oldTeam,...(currentTeams.has(pid)?[currentTeams.get(pid)]:[])]);
-      const teams = new Set(regions.map(r=>r.id));
+      const teams = this.state.settings.mode === 'solo' ? existing : new Set(regions.map(r=>r.id));
       for (const id of Object.keys(round.submitted)) if (!teams.has(id)) delete round.submitted[id];
       for (const id of Object.keys(round.results)) if (!teams.has(id)) delete round.results[id];
     }
     this.log("Преподаватель применил проверенный JSON-патч.");
     this.touch();
   }
-  view(actor = {}, onlinePlayers = new Set()) {
+  publicFrame(onlinePlayers = new Set()) {
+    return {
+      branding:this.publicBranding(),
+      regions:this.state.regions.map(r=>({...r,members:r.members.map(({pid,name,capital,streak})=>({pid,name,online:onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak}:{})})),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length}:{})})),
+      leaderboard:this.state.settings.mode==='solo'?this.ranking():[],
+      teamLeaderboard:this.state.settings.mode==='team'?this.teamRanking():[],
+      votes:this.state.round?Object.fromEntries(this.state.regions.map(r=>[r.id,this.votesFor(r.id)])):{}
+    };
+  }
+  view(actor = {}, onlinePlayers = new Set(), frame = this.publicFrame(onlinePlayers)) {
     const player = actor.playerHash ? this.findPlayer(actor.playerHash) : null;
     const creator = actor.role === "creator" && !!this.creatorFor(actor.playerHash);
-    const delegated = player ? this.adminGrantFor(player.pid) : null;
+    const delegated = !creator && actor.role !== 'teacher' && player ? this.adminGrantFor(player.pid) : null;
     const adminView = actor.role === "teacher" || creator || !!delegated;
     const teacher = actor.role === "teacher" || creator;
     const view = {
       revision: this.state.revision, phase: this.state.phase, serverTime: this.now(),
       settings: {...this.state.settings},
+      branding:frame.branding,
       viewer: { role: creator ? "creator" : teacher ? "teacher" : delegated ? "delegate" : player ? "student" : "guest", isCreator:creator,isDevTelemetry:creator||!!delegated,isProAdmin:creator&&player?.creatorId==='adilet',canGrantAdmin:creator&&player?.creatorId==='adilet',canTriggerPresentationEffect:creator&&player?.creatorId==='adilet'||!!(player&&this.adminCan(player.pid,'presentationEffect')),adminGrant:delegated, player: player ? { pid: player.pid, name: player.name, regionId: player.regionId,capital:player.capital??0,streak:player.streak??0 } : null },
-      regions: this.state.regions.map(r => ({ ...r, members: r.members.map(({ pid, name,capital,streak }) => ({ pid, name, online: onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak}:{}) })),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length}:{}) })),
-      leaderboard:this.state.settings.mode==='solo'?this.ranking():[],teamLeaderboard:this.state.settings.mode==='team'?this.teamRanking():[],
-      questions: teacher || delegated?.permissions.questions ? structuredClone(this.state.questions) : [],
+      regions: frame.regions,
+      leaderboard:frame.leaderboard,teamLeaderboard:frame.teamLeaderboard,
+      questions: teacher || delegated?.permissions.questions ? structuredClone(this.state.questions) : delegated?.permissions.game ? this.state.questions.map(({id,text,options,points,version,topic,subject})=>({id,text,options:[...options],points,version,topic,subject})) : [],
       round: null, log: adminView ? structuredClone(this.state.log) : []
     };
-    if(adminView)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,delegatedAdmins:creator&&player?.creatorId==='adilet'?structuredClone(this.state.delegatedAdmins||[]):[],...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
+    if(adminView)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>m.pid)),effectTargetIds:this.state.regions.flatMap(t=>t.members.filter(m=>!m.creatorId&&!this.adminGrantFor(m.pid)&&onlinePlayers.has(m.pid)).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,delegatedAdmins:creator&&player?.creatorId==='adilet'?structuredClone(this.state.delegatedAdmins||[]):[],...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
     if(creator)view.viewer.exitRequest=structuredClone(this.state.exitRequests?.find(r=>r.pid===player.pid&&r.status==='pending')||null);
+    if(teacher)view.restorePoints=(this.state.restorePoints||[]).map(({id,at,label})=>({id,at,label}));
+    if(!player&&!teacher&&!delegated){view.regions=frame.regions.map(r=>({...r,members:[]}));view.leaderboard=[];return view}
     if (this.state.round) {
       const { ballots, proposals, questionSnapshot, ...round } = this.state.round;
       const { id, text, options, points, topic } = questionSnapshot;
       const publicQuestion = { id, text, options, points, ...(topic ? {topic} : {}) };
-      view.round = { ...structuredClone(round), question: teacher || delegated?.permissions.questions || round.resolved ? structuredClone(questionSnapshot) : publicQuestion, remainingMs: this.remainingMs(), votes: Object.fromEntries(this.state.regions.map(r => [r.id, this.votesFor(r.id)])), myVote: player ? ballots[player.pid] ?? null : null };
+      const roundBase = {...round};
+      if(this.state.settings.universal&&this.state.settings.mode==='solo'&&!teacher){roundBase.submitted=player&&Object.hasOwn(round.submitted,player.pid)?{[player.pid]:round.submitted[player.pid]}:{};roundBase.results=round.resolved?round.results:{}}
+      view.round = { ...structuredClone(roundBase), question: teacher || delegated?.permissions.questions || round.resolved ? structuredClone(questionSnapshot) : publicQuestion, remainingMs: this.remainingMs(), votes: frame.votes, myVote: player ? ballots[player.pid] ?? null : null };
       if(this.state.settings.universal){
         view.round.proposals=Object.entries(proposals||{}).flatMap(([pid,p])=>{const team=this.state.regions.find(t=>t.members.some(m=>m.pid===pid));return team&&(teacher||team.id===player?.regionId)?[{pid,name:team.members.find(m=>m.pid===pid).name,option:p.option,remainingMs:Math.max(0,7000-(p.remainingAt-this.remainingMs()))}]:[]});
         if(this.state.settings.mode==='solo'&&!teacher){view.round.submitted=player&&Object.hasOwn(round.submitted,player.pid)?{[player.pid]:round.submitted[player.pid]}:{};view.round.results=round.resolved?round.results:{};view.round.votes={}}
       }
-      if (adminView) view.round.preview = this.state.regions.map(team => {
+      if (teacher || delegated?.permissions.questions) view.round.preview = this.state.regions.map(team => {
         const submitted = round.submitted[team.id] !== undefined;
         const result = round.resolved ? round.results[team.id] : null;
         const decision = result ? {chosen:result.chosen,reason:result.reason} : submitted ? {chosen: round.submitted[team.id], reason:"submitted"} : this.majority(team.id);
         return { teamId: team.id, submitted, ...decision, correct: decision.chosen === null ? null : decision.chosen === questionSnapshot.correct, voters: Object.values(this.votesFor(team.id)).reduce((a,b)=>a+b,0), empty: !team.members.length };
       });
-      if(teacher&&this.state.settings.mode==='solo')view.round.preview=this.ranking().map(m=>{const chosen=round.submitted[m.pid]??ballots[m.pid]??null;return {teamId:m.pid,name:m.name,chosen,correct:chosen===null?null:chosen===questionSnapshot.correct,submitted:round.submitted[m.pid]!==undefined,voters:chosen===null?0:1,empty:false}});
+      if((teacher||delegated?.permissions.questions)&&this.state.settings.mode==='solo')view.round.preview=frame.leaderboard.map(m=>{const chosen=round.submitted[m.pid]??ballots[m.pid]??null;return {teamId:m.pid,name:m.name,chosen,correct:chosen===null?null:chosen===questionSnapshot.correct,submitted:round.submitted[m.pid]!==undefined,voters:chosen===null?0:1,empty:false}});
     }
     return view;
   }
@@ -638,6 +699,6 @@ export class GameLogic {
   }
   exportSummary() {
     if(this.state.settings.mode==='solo')return this.ranking().map(m=>({region:m.name,members:m.name,points:m.capital,economy:100,development:`Серия ${m.streak} · ×${m.multiplier}`,status:'личный рейтинг'}));
-    return this.state.regions.map(r => ({ region: r.name, members: r.members.map(m => m.name).join(", "), points: r.points, economy: r.economy, development: developmentFor(r.points).name, status: r.economy < CRISIS_THRESHOLD ? "кризис" : "норма" })).sort((a, b) => b.points - a.points || b.economy - a.economy);
+    return this.teamRanking().map(row => {const r=this.region(row.teamId);return {region:r.name,members:r.members.map(m=>m.name).join(', '),points:r.points,economy:r.economy,rating:row.rating,development:row.development,status:r.economy<CRISIS_THRESHOLD?'кризис':'норма'}});
   }
 }

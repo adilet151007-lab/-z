@@ -28,7 +28,8 @@ test('сцена: камера следует высоте города, кра�
   api.camera.position.copy(api.controls.target).add(new THREE.Vector3(0,.79,.71).normalize().multiplyScalar(2.5));api.camera.lookAt(api.controls.target);api.controls.dispatchEvent({type:'change'});step();
   const label=group.children.find(o=>o.isSprite),projected=label.getWorldPosition(new THREE.Vector3()).project(api.camera);
   assert.equal(label.visible,true);assert.ok(Math.abs(projected.x)<1&&Math.abs(projected.y)<1);
-  for(let i=0;i<45;i++)step();assert.equal(frames.size,0);const settledRenders=renders;step();assert.equal(renders,settledRenders);
+  for(let i=0;i<45;i++)step();assert.equal(frames.size,0);const settledRenders=renders;step();assert.equal(renders,settledRenders);api.setVisible(true);assert.equal(frames.size,0);
+  api.setLowPower(false);assert.equal(api.renderer.pixelRatio,1.5);assert.equal(api.renderer.shadowMap.enabled,true);api.setLowPower(true);assert.equal(api.renderer.pixelRatio,1);assert.equal(api.renderer.shadowMap.enabled,false);
   api.setVisible(false);api.update({regions:[]});assert.equal(frames.size,0);api.setVisible(true);assert.ok(frames.size>0);
   document.hidden=true;events.get('visibilitychange')();assert.equal(frames.size,0);document.hidden=false;events.get('visibilitychange')();assert.ok(frames.size>0);
  }finally{api?.dispose();await unlink(fileURLToPath(temporary))}

@@ -42,7 +42,7 @@ function heightAt(id, x, z, data) {
   const d = Math.hypot(x - data.city[0], z - data.city[1]);
   return THREE.MathUtils.lerp(.71, h, smooth(data.cityRadius * .94, data.cityRadius * 1.38, d));
 }
-function reliefGeometry(polygon, id, data) {
+function reliefGeometry(polygon, id, data, maxEdge = 1.1) {
   const contour = polygon.slice(0, -1).map(([x, z]) => new THREE.Vector2(x, z));
   const faces = THREE.ShapeUtils.triangulateShape(contour, []), vertices = [], colors = [];
   const low = new THREE.Color(palettes[regionMeta.get(id).biome].low), high = new THREE.Color(palettes[regionMeta.get(id).biome].high), snow = new THREE.Color(0xe7f0ed);
@@ -55,7 +55,7 @@ function reliefGeometry(polygon, id, data) {
   }
   function subdivide(a, b, c, depth) {
     const longest = Math.max(a.distanceToSquared(b), b.distanceToSquared(c), c.distanceToSquared(a));
-    if (longest > 1.1 && depth < 7) {
+    if (longest > maxEdge && depth < 7) {
       const ab = a.clone().lerp(b, .5), bc = b.clone().lerp(c, .5), ca = c.clone().lerp(a, .5);
       subdivide(a, ab, ca, depth + 1); subdivide(ab, b, bc, depth + 1);
       subdivide(ca, bc, c, depth + 1); subdivide(ab, bc, ca, depth + 1);
@@ -113,10 +113,12 @@ export function labelScaleForDepth(depth,height,fov=40){
 }
 export function createScene(canvas, opts = {}) {
   const mobile = window.matchMedia("(max-width: 700px), (pointer: coarse)").matches;
+  let lowPower=mobile;
+  try{const value=localStorage.getItem('cq_graphics_v1');if(value==='low'||value==='standard')lowPower=value==='low'}catch{}
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: !mobile, alpha: false, powerPreference: "high-performance" });
-  renderer.setPixelRatio(Math.min(mobile ? 1 : 1.5, window.devicePixelRatio || 1));
+  renderer.setPixelRatio(Math.min(lowPower ? 1 : 1.5, window.devicePixelRatio || 1));
   renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.25;
-  renderer.shadowMap.enabled = !mobile; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.enabled = !lowPower; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x07151e); scene.fog = new THREE.FogExp2(0x07151e, .004);
   const camera = new THREE.PerspectiveCamera(40, 1, .1, 320);
   const controls = new OrbitControls(camera, canvas);
@@ -172,7 +174,7 @@ export function createScene(canvas, opts = {}) {
     const sideMat = new THREE.MeshStandardMaterial({ color: palette.wall, roughness: 1, side: THREE.DoubleSide });
     const borders = [];
     for (const polygon of data.polygons) {
-      const terrain = new THREE.Mesh(reliefGeometry(polygon, meta.id, data), topMat); terrain.castShadow = true; terrain.receiveShadow = true;
+      const terrain = new THREE.Mesh(reliefGeometry(polygon, meta.id, data, mobile ? 2.6 : 1.1), topMat); terrain.castShadow = true; terrain.receiveShadow = true;
       terrain.userData.regionId = meta.id; surfaces.push(terrain); group.add(terrain);
       group.add(new THREE.Mesh(wallGeometry(polygon, meta.id, data), sideMat));
       const border = lineFor(polygon.map(([x, z]) => new THREE.Vector3(x - data.city[0], heightAt(meta.id, x, z, data) + .045, z - data.city[1])), meta.glow, .65);
@@ -295,10 +297,14 @@ export function createScene(canvas, opts = {}) {
   const regionSelect = document.createElement("select"); regionSelect.setAttribute("aria-label","Регион карты");
   regionSelect.innerHTML = '<option value="">Найти регион…</option>' + REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join("");
   regionSelect.addEventListener("change",()=>{if(regionSelect.value)focusRegion(regionSelect.value)});
-  hud.append(homeButton,regionSelect); canvas.parentElement.append(hud);
+  const qualityButton=document.createElement('button');qualityButton.type='button';qualityButton.className='map-quality';qualityButton.setAttribute('aria-label','Экономный режим 3D-графики');
+  function paintQuality(){qualityButton.textContent=lowPower?'Экономно':'Детально';qualityButton.setAttribute('aria-pressed',String(lowPower))}
+  function setLowPower(value){lowPower=!!value;renderer.setPixelRatio(Math.min(lowPower?1:1.5,window.devicePixelRatio||1));renderer.shadowMap.enabled=!lowPower;try{localStorage.setItem('cq_graphics_v1',lowPower?'low':'standard')}catch{}paintQuality();wake()}
+  qualityButton.addEventListener('click',()=>setLowPower(!lowPower));paintQuality();
+  hud.append(homeButton,regionSelect,qualityButton); canvas.parentElement.append(hud);
   let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true,sceneVisible=true,requestedVisible=true,renderingReady=false,activeUntil=0;
   function wake(ms=180){activeUntil=performance.now()+ms;if(renderingReady&&!frame&&!disposed&&sceneVisible&&requestedVisible&&!document.hidden)frame=requestAnimationFrame(animate)}
-  function setVisible(value){requestedVisible=value;if(value)wake();else{cancelAnimationFrame(frame);frame=0}}
+  function setVisible(value){if(requestedVisible===value)return;requestedVisible=value;if(value)wake();else{cancelAnimationFrame(frame);frame=0}}
   function moveCamera(target, distance) {
     cameraTween = { target, position: target.clone().add(new THREE.Vector3(0, distance * .79, distance * .71)) };
     wake();
@@ -423,5 +429,5 @@ export function createScene(canvas, opts = {}) {
     geometries.forEach(g => g.dispose()); textures.forEach(t => t.dispose()); mats.forEach(m => m.dispose()); renderer.dispose();
     box.dispose(); cone.dispose(); cylinder.dispose(); dome.dispose();
   }
-  return { scene, camera, controls, renderer, update, focusRegion, overview, resize, setVisible,dispose };
+  return { scene, camera, controls, renderer, update, focusRegion, overview, resize, setVisible,setLowPower,dispose };
 }

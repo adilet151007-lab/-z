@@ -4,6 +4,15 @@ import {setupSyllabus} from './syllabus-ui.js';
 export function setupTelemetry(engine){
  let root=null,sheet=null,open=false,tab='eye',hold=null,origin=null,swipe=null,busy=false,selected='',pid='',lastIdentity='',lastPlayer='',editingQuestion=null,exitDialog=null,stopSyllabus=null;
  const enabled=()=>engine.state?.viewer.isDevTelemetry===true,$=id=>document.getElementById(id);
+ function permitted(action){
+  const v=engine.state?.viewer;if(!v)return false;
+  if(action==='grant-admin'||action==='revoke-admin')return v.canGrantAdmin===true;
+  if(action==='effect')return v.canTriggerPresentationEffect===true;
+  if(v.isCreator)return true;
+  if(['chat','export'].includes(action))return true;
+  const scope=/^(kick|kick-all|self-move)$/.test(action)?'players':/^(q-load|q-new|q-delete)$/.test(action)?'questions':/^(points|minus-points|economy|minus-economy|restore|previous|next|pause|timer|resolve|mode|lobby|reset|q-start)$/.test(action)?'game':null;
+  return !!(scope&&v.adminGrant?.permissions[scope]);
+ }
  function close(){open=false;if(root)root.hidden=true;document.body.classList.remove('telemetry-open')}
  function show(){if(!enabled())return;mount();open=true;root.hidden=false;document.body.classList.add('telemetry-open');window.dispatchEvent(new Event('cq:hide-chat'));render()}
  function status(message,error=false){if($('sys-status')){$('sys-status').textContent=message;$('sys-status').classList.toggle('red',error)}}
@@ -22,14 +31,16 @@ export function setupTelemetry(engine){
   root.addEventListener('click',e=>{const action=e.target.closest('[data-sys-action]')?.dataset.sysAction;if(action)run(()=>act(action))});
  }
  async function loadJSON(){$('sys-json').value=JSON.stringify(await engine.getSnapshot(),null,2)}
- function renderTarget(){const s=engine.state,solo=s.settings.mode==='solo',item=solo?s.leaderboard.find(m=>m.pid===selected):s.regions.find(t=>t.id===selected);$('sys-target-info').textContent=!item?'':solo?`${item.capital} капитала · серия ${item.streak} · ×${item.multiplier}`:`${item.points} / 1000 · экономика ${item.economy}%`;for(const a of ['economy','restore'])sheet.querySelector(`[data-sys-action="${a}"]`).disabled=solo||!engine.connected}
+ function renderTarget(){const s=engine.state,solo=s.settings.mode==='solo',item=solo?s.leaderboard.find(m=>m.pid===selected):s.regions.find(t=>t.id===selected);$('sys-target-info').textContent=!item?'':solo?`${item.capital} капитала · серия ${item.streak} · ×${item.multiplier}`:`${item.points} / 1000 · экономика ${item.economy}%`;for(const a of ['economy','restore'])sheet.querySelector(`[data-sys-action="${a}"]`).disabled=solo||!engine.connected||!permitted(a)}
  function render(){
   if(!root||!enabled())return;const s=engine.state,solo=s.settings.mode==='solo',q=s.round?.question;
+  if(tab==='json'&&!s.viewer.isCreator)tab='eye';
+  sheet.querySelector('[data-sys-tab="json"]').hidden=!s.viewer.isCreator;
   sheet.querySelectorAll('[data-sys-pane]').forEach(p=>p.hidden=p.dataset.sysPane!==tab);sheet.querySelectorAll('[data-sys-tab]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.sysTab===tab)));
   if(tab==='eye'){
    $('sys-question').innerHTML=q?`<h3>${h(q.text)}</h3>${q.options.map((v,i)=>`<p class="${i===q.correct?'cyan':'mut'}">${i===q.correct?'✓ ':''}${h(v)}</p>`).join('')}`:'Вопрос ещё не запущен.';
    $('sys-scores').innerHTML='<table class="roster-table"><thead><tr><th>Имя / область</th><th>Капитал / ресурс</th><th>Серия / экономика</th></tr></thead><tbody>'+(solo?s.leaderboard:s.regions).map(t=>`<tr><td>${h(t.name)}</td><td>${solo?t.capital:t.points}</td><td>${solo?'×'+t.multiplier:t.economy+'%'}</td></tr>`).join('')+'</tbody></table>';
-   const index=s.questions.findIndex(v=>v.id===s.round?.questionId);$('sys-bank').innerHTML=s.questions.map((v,i)=>`<article class="bank-question"><small>${i<index?'Пройден':i===index?'Текущий':'Следующий'} · ${h(v.topic||'Без темы')}</small><strong>${i+1}. ${h(v.text)}</strong><span class="cyan">✓ ${h(v.options[v.correct])}</span></article>`).join('');
+   const questions=engine.allQuestions(),index=questions.findIndex(v=>v.id===s.round?.questionId);$('sys-bank').innerHTML=questions.map((v,i)=>`<article class="bank-question"><small>${i<index?'Пройден':i===index?'Текущий':'Следующий'} · ${h(v.topic||'Без темы')}</small><strong>${i+1}. ${h(v.text)}</strong><span class="${Number.isInteger(v.correct)?'cyan':'mut'}">${Number.isInteger(v.correct)?'✓ '+h(v.options[v.correct]):'Просмотр правильных ответов не выдан'}</span></article>`).join('')||'<p class="small-note mut">Доступ к банку вопросов не выдан.</p>';
   }
   if(tab==='control'){
    const identity=s.viewer.player;if(lastIdentity!==identity.name){lastIdentity=identity.name;$('sys-name').value=identity.name}
@@ -44,7 +55,7 @@ export function setupTelemetry(engine){
   if(await actTool(action))return;
   if(action==='points'){if(solo)await engine.adjustCapital(selected,25);else await engine.adjustPoints(selected,25)}if(action==='economy')await engine.adjustEconomy(selected,20);
   if(action==='restore'){const t=s.regions.find(t=>t.id===selected);if(t)await engine.adjustEconomy(t.id,100-t.economy)}
-  if(action==='next'||action==='previous'){const qs=s.questions,i=qs.findIndex(q=>q.id===s.round?.questionId),q=qs[(i+(action==='next'?1:-1)+qs.length)%qs.length];await engine.switchQuestion(q.id,s.round?.duration||60)}
+  if(action==='next'||action==='previous'){const qs=engine.allQuestions();if(!qs.length)throw new Error('В банке нет доступных вопросов.');const i=qs.findIndex(q=>q.id===s.round?.questionId),index=i<0?(action==='next'?0:qs.length-1):(i+(action==='next'?1:-1)+qs.length)%qs.length;await engine.switchQuestion(qs[index].id,s.round?.duration||60)}
   if(action==='pause')await engine.pauseRound();if(action==='timer')await engine.resetTimer();if(action==='resolve')await engine.resolveRound();
   if(action==='kick'){const t=s.regions.find(t=>t.members.some(m=>m.pid===pid));if(t&&confirm('Исключить выбранного участника?'))await engine.freeSlot(t.id,pid)}
   if(action==='chat'){close();window.dispatchEvent(new CustomEvent('cq:show-chat',{detail:{channel:'support'}}))}if(action==='load')await loadJSON();
@@ -62,6 +73,8 @@ export function setupTelemetry(engine){
    <details class="section-gap"><summary>Обслуживание сессии</summary><label class="field-label section-gap" for="sys-refresh-scope">Перезагрузить страницы</label><select id="sys-refresh-scope"><option value="teacher">Экран преподавателя</option><option value="students">Экраны участников</option><option value="all">Все экраны</option></select><label class="field-label section-gap" for="sys-effect-target">Кому отправить помеху</label><select id="sys-effect-target"><option value="">Только проектор преподавателя</option></select><label class="field-label section-gap" for="sys-effect-duration">Длительность помехи, мс</label><input id="sys-effect-duration" type="number" min="100" max="60000" value="3000"><div class="row section-gap">${button('refresh','Перезагрузить интерфейсы')}${button('effect','Сигнал / помеха')}${button('export','Скачать ведомость')}${button('reset','Сбросить игру')}</div><p class="small-note mut">Выберите участника, чтобы помеха появилась только на его телефоне. Без выбора сигнал увидит проектор преподавателя.</p></details>
    <details class="section-gap" data-pro-tools hidden><summary>Делегированные администраторы</summary><label class="field-label section-gap" for="sys-admin-player">Игрок</label><select id="sys-admin-player"></select><div class="row section-gap"><label><input id="sys-admin-players" type="checkbox"> Игроки</label><label><input id="sys-admin-questions" type="checkbox"> Вопросы</label><label><input id="sys-admin-game" type="checkbox"> Игра</label><label><input id="sys-admin-effects" type="checkbox"> Помехи</label></div><label class="field-label section-gap"><input id="sys-admin-unlimited" type="checkbox"> Без cooldown помех</label><div class="row section-gap">${button('grant-admin','Выдать / обновить доступ')}${button('revoke-admin','Отозвать доступ')}</div></details>`);
   sheet.querySelectorAll('input:not([type])').forEach(input=>input.type='text');
+  root.querySelector('[data-pro-tools]').insertAdjacentHTML('beforeend','<label class="field-label section-gap" for="sys-admin-duration">Длительность помех делегата, мс</label><input id="sys-admin-duration" type="number" min="100" max="60000" value="3000"><div id="sys-admin-roster" class="small-note mut"></div>');
+  $('sys-admin-player').addEventListener('change',()=>syncGrant(true));
   $('sys-player-form').addEventListener('submit',e=>{e.preventDefault();run(()=>engine.updatePlayer(pid,$('sys-player-name').value.trim(),$('sys-player-team').value))});
   $('sys-question-form').addEventListener('submit',e=>{e.preventDefault();run(saveQuestion)});
   stopSyllabus=setupSyllabus(engine,message=>status(message));
@@ -71,6 +84,12 @@ export function setupTelemetry(engine){
  }
  function syncExit(){const request=engine.state.viewer.exitRequest;if(request){if(exitDialog.dataset.request!==request.id){exitDialog.dataset.request=request.id;$('sys-exit-status').textContent=''}if(!exitDialog.open)exitDialog.showModal()}else if(exitDialog.open)exitDialog.close()}
  function setOptions(id,options){const node=$(id),value=node.value;if(node.dataset.key!==options){node.innerHTML=options;node.dataset.key=options;if([...node.options].some(o=>o.value===value))node.value=value}}
+ function syncGrant(force=false){
+  const node=$('sys-admin-player'),grants=engine.state.sessionControl?.delegatedAdmins||[],grant=grants.find(a=>a.pid===node.value),key=JSON.stringify([node.value,grant]);
+  if(!force&&node.dataset.grant===key)return;node.dataset.grant=key;
+  for(const scope of ['players','questions','game','effects'])$('sys-admin-'+scope).checked=!!grant?.permissions[scope];
+  $('sys-admin-duration').value=grant?.effectDuration||3000;$('sys-admin-unlimited').checked=!!grant?.unlimitedEffects;
+ }
  function renderTools(){
   const s=engine.state,identity=s.viewer.player,protectedIds=s.sessionControl?.protectedPlayerIds||[];
   const proTools=root.querySelector('[data-pro-tools]');if(proTools)proTools.hidden=s.viewer.canGrantAdmin!==true;
@@ -78,15 +97,24 @@ export function setupTelemetry(engine){
   if($('sys-own-team').dataset.team!==identity.regionId){$('sys-own-team').value=identity.regionId;$('sys-own-team').dataset.team=identity.regionId}
   const source=s.regions.find(t=>t.members.some(m=>m.pid===pid)),member=source?.members.find(m=>m.pid===pid);
   if(member&&lastPlayer!==pid){lastPlayer=pid;$('sys-player-name').value=member.name;$('sys-player-team').value=source.id}
-  $('sys-player-form').querySelector('button').disabled=!member||!engine.connected;
-  sheet.querySelector('[data-sys-action="kick"]').disabled=protectedIds.includes(pid)||!member||!engine.connected;
-  sheet.querySelector('[data-sys-action="effect"]').disabled=s.sessionControl?.presentationEffectsEnabled===false||s.viewer.canTriggerPresentationEffect!==true||!engine.connected;
-  if($('sys-effect-target')){const people=s.regions.flatMap(t=>t.members.filter(m=>!m.creatorId).map(m=>({...m,team:t.name})));setOptions('sys-effect-target','<option value="">Только проектор преподавателя</option>'+people.map(m=>`<option value="${m.pid}">${h(m.name)} · ${h(m.team)}</option>`).join(''));}
-  if($('sys-admin-player')){const people=s.regions.flatMap(t=>t.members.filter(m=>!m.creatorId).map(m=>({...m,team:t.name})));setOptions('sys-admin-player',people.map(m=>`<option value="${m.pid}">${h(m.name)} · ${h(m.team)}</option>`).join(''));}
-  sheet.querySelector('[data-sys-action="minus-economy"]').disabled=s.settings.mode==='solo'||!engine.connected;
-  setOptions('sys-q-list',s.questions.map((q,i)=>`<option value="${q.id}">${i+1}. ${h(q.text)}</option>`).join(''));
+  sheet.querySelectorAll('[data-sys-action]').forEach(button=>{const allowed=permitted(button.dataset.sysAction);button.disabled=!engine.connected||!allowed;button.hidden=!allowed});
+  const playerAllowed=s.viewer.isCreator||s.viewer.adminGrant?.permissions.players;
+  const questionsAllowed=s.viewer.isCreator||s.viewer.adminGrant?.permissions.questions,gameAllowed=s.viewer.isCreator||s.viewer.adminGrant?.permissions.game;
+  $('sys-player-form').closest('details').hidden=!playerAllowed;$('sys-mode').closest('details').hidden=!gameAllowed;
+  $('sys-question-form').closest('details').hidden=!questionsAllowed&&!gameAllowed;$('sys-question-form').hidden=!questionsAllowed;
+  $('syllabus-panel').closest('details').hidden=!questionsAllowed;
+  $('sys-player-form').querySelector('button').disabled=!member||!engine.connected||!playerAllowed||!s.viewer.isCreator&&protectedIds.includes(pid);
+  $('sys-question-form').querySelector('button').disabled=!engine.connected||!s.viewer.isCreator&&!s.viewer.adminGrant?.permissions.questions;
+  sheet.querySelector('[data-sys-action="kick"]').disabled=protectedIds.includes(pid)||!member||!engine.connected||!permitted('kick');
+  sheet.querySelector('[data-sys-action="effect"]').disabled=(!s.viewer.isProAdmin&&s.sessionControl?.presentationEffectsEnabled===false)||!permitted('effect')||!engine.connected;
+  for(const key of ['pause','timer','resolve'])sheet.querySelector(`[data-sys-action="${key}"]`).disabled||=!s.round||s.round.resolved;
+  for(const key of ['economy','minus-economy','restore'])sheet.querySelector(`[data-sys-action="${key}"]`).disabled||=soloMode();
+  if($('sys-effect-target')){const targetIds=s.sessionControl?.effectTargetIds||[],previous=$('sys-effect-target').value,missing=previous&&!targetIds.includes(previous),people=s.regions.flatMap(t=>t.members.filter(m=>targetIds.includes(m.pid)).map(m=>({...m,team:t.name})));setOptions('sys-effect-target','<option value="">Только проектор преподавателя</option>'+(missing?`<option value="${h(previous)}" disabled>Выбранный участник сейчас недоступен</option>`:'')+people.map(m=>`<option value="${m.pid}">${h(m.name)} · ${h(m.team)}</option>`).join(''));sheet.querySelector('[data-sys-action="effect"]').disabled||=!!missing;$('sys-effect-duration').disabled=!s.viewer.isProAdmin;if(!s.viewer.isProAdmin)$('sys-effect-duration').value=s.viewer.adminGrant?.effectDuration||3000;}
+  if($('sys-admin-player')){const people=s.regions.flatMap(t=>t.members.filter(m=>!protectedIds.includes(m.pid)).map(m=>({...m,team:t.name})));setOptions('sys-admin-player',people.map(m=>`<option value="${m.pid}">${h(m.name)} · ${h(m.team)}</option>`).join(''));syncGrant();$('sys-admin-roster').textContent=(s.sessionControl?.delegatedAdmins||[]).map(a=>{const name=people.find(m=>m.pid===a.pid)?.name||'Участник';return name+' · '+Object.entries(a.permissions).filter(([,value])=>value).map(([key])=>({players:'игроки',questions:'вопросы',game:'игра',effects:'помехи'}[key])).join(', ')}).join(' / ')||'Делегированных доступов пока нет.';for(const key of ['grant-admin','revoke-admin'])sheet.querySelector(`[data-sys-action="${key}"]`).disabled||=!people.length;}
+  setOptions('sys-q-list',engine.allQuestions().map((q,i)=>`<option value="${q.id}">${i+1}. ${h(q.text)}</option>`).join(''));
   if($('sys-mode').dataset.mode!==s.settings.mode){$('sys-mode').value=s.settings.mode;$('sys-mode').dataset.mode=s.settings.mode}
  }
+ function soloMode(){return engine.state.settings.mode==='solo'}
  function loadQuestion(fresh=false){editingQuestion=fresh?null:structuredClone(engine.state.questions.find(q=>q.id===$('sys-q-list').value));const q=editingQuestion;$('sys-q-label').textContent=q?'Изменение вопроса · версия '+q.version:'Новый вопрос';$('sys-q-text').value=q?.text||'';for(let i=0;i<4;i++)$('sys-q-option-'+i).value=q?.options[i]||'';$('sys-q-correct').value=q?.correct??0;$('sys-q-points').value=q?.points??25;$('sys-q-topic').value=q?.topic||'';$('sys-q-explanation').value=q?.explanation||''}
  async function saveQuestion(){const draft={...(editingQuestion||{}),text:$('sys-q-text').value,options:[0,1,2,3].map(i=>$('sys-q-option-'+i).value),correct:Number($('sys-q-correct').value),points:Number($('sys-q-points').value),topic:$('sys-q-topic').value,explanation:$('sys-q-explanation').value};if(editingQuestion){await engine.editQuestion(editingQuestion.id,draft,editingQuestion.version);editingQuestion={...draft,version:editingQuestion.version+1};$('sys-q-label').textContent='Изменение вопроса · версия '+editingQuestion.version}else{const result=await engine.importQuestions([draft]);if(!result.added)throw new Error('Такой вопрос уже есть в банке.');loadQuestion(true)}}
  function download(name,text,type){const url=URL.createObjectURL(new Blob([text],{type})),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
@@ -100,7 +128,7 @@ export function setupTelemetry(engine){
   else if(action==='lobby'){if(s.round&&!s.round.resolved){if(!confirm('Подвести итоги вопроса и открыть лобби?'))return true;await engine.resolveRound()}await engine.endRound()}
   else if(action==='refresh'){if(confirm('Перезагрузить выбранные экраны? Вход и принятые ответы сохранятся.'))await engine.refreshClients($('sys-refresh-scope').value)}
   else if(action==='effect')await engine.presentationEffect(Number($('sys-effect-duration')?.value||3000),$('sys-effect-target')?.value||undefined);
-  else if(action==='grant-admin')await engine.grantAdmin($('sys-admin-player').value,{players:$('sys-admin-players').checked,questions:$('sys-admin-questions').checked,game:$('sys-admin-game').checked,effects:$('sys-admin-effects').checked},3000,$('sys-admin-unlimited').checked);
+  else if(action==='grant-admin')await engine.grantAdmin($('sys-admin-player').value,{players:$('sys-admin-players').checked,questions:$('sys-admin-questions').checked,game:$('sys-admin-game').checked,effects:$('sys-admin-effects').checked},Number($('sys-admin-duration').value),$('sys-admin-unlimited').checked);
   else if(action==='revoke-admin')await engine.revokeAdmin($('sys-admin-player').value);
   else if(action==='reset'){if(confirm('Обнулить матч и исключить обычных игроков? Вопросы и персональные сессии сохранятся.'))await engine.resetGame()}
   else if(action==='q-load')loadQuestion();

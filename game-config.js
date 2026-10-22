@@ -1,5 +1,8 @@
 // Только публичные настройки. Банк правильных ответов остаётся на сервере.
 export const SEAT_LIMIT = 4;
+export const PRIVACY_VERSION = '2026-10-23';
+export const DEFAULT_SUBJECT = 'Мәдениеттану';
+export const DEFAULT_BRANDING = {university:'Учебный проект',title:'Мәдениеттану 3D',subject:DEFAULT_SUBJECT,subjects:[DEFAULT_SUBJECT],accent:'#3FE0D0',gold:'#F3C25D',logo:'',operator:'',privacyContact:''};
 export const MAX_TEAMS = 50;
 export const MAX_TEAM_CAPACITY = 50;
 export const CREATOR_TEAM_ID = "creators";

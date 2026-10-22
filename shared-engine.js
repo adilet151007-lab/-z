@@ -1,11 +1,49 @@
 import { io } from "/socket.io/socket.io.esm.min.js";
+import { PRIVACY_VERSION, DEFAULT_SUBJECT } from './game-config.js';
 export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity, CREATOR_TEAM_ID, isCreatorTeam, regularTeams, MODE_NAMES, soloMultiplier } from "./game-config.js";
 
 export const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
-const getToken = key => { try { return localStorage.getItem(key)||sessionStorage.getItem(key) || undefined; } catch { return undefined; } };
-const setToken = (key, value) => { try { if (value){localStorage.setItem(key,value);sessionStorage.setItem(key,value)}else{localStorage.removeItem(key);sessionStorage.removeItem(key)} } catch {} };
-const creatorToken=()=>{try{return localStorage.getItem('cq_creator_session_v1')||undefined}catch{return undefined}};
-const saveCreatorToken=value=>{try{if(value)localStorage.setItem('cq_creator_session_v1',value);else localStorage.removeItem('cq_creator_session_v1')}catch{}};
+
+export function setupBranding(engine){
+  let key='';engine.onChange(state=>{const b=state?.branding;if(!b)return;const next=JSON.stringify(b);if(key===next)return;key=next;
+    document.documentElement.style.setProperty('--cyan',b.accent);document.documentElement.style.setProperty('--gold',b.gold);
+    document.querySelectorAll('[data-brand-title]').forEach(node=>node.textContent=b.title);document.querySelectorAll('[data-brand-university]').forEach(node=>node.textContent=b.university);document.querySelectorAll('[data-brand-subject]').forEach(node=>node.textContent=b.subject);
+    document.querySelectorAll('[data-brand-logo]').forEach(node=>{node.hidden=!b.logoUrl;if(b.logoUrl&&node.getAttribute('src')!==b.logoUrl)node.src=b.logoUrl});
+    document.title=b.subject+' · '+b.university;
+  });
+}
+const getToken = key => { for (const storage of ['localStorage','sessionStorage']) try { const value=globalThis[storage].getItem(key);if(value)return value; } catch {} };
+const setToken = (key, value) => { for (const storage of ['localStorage','sessionStorage']) try {if(value)globalThis[storage].setItem(key,value);else globalThis[storage].removeItem(key);}catch{} };
+const creatorToken=()=>getToken('cq_creator_session_v1');
+const saveCreatorToken=value=>setToken('cq_creator_session_v1',value);
+
+// A timed visual simulation only: no camera, screen capture or CPU-heavy canvas noise.
+export function setupPresentationEffects(engine) {
+  let box=null,timer=null,previousFocus=null,locked=[];
+  function stop(){
+    clearTimeout(timer);box?.remove();box=null;document.body.classList.remove('presentation-signal');
+    for(const [node,wasInert] of locked)node.inert=wasInert;locked=[];
+    if(previousFocus?.isConnected&&document.visibilityState!=='hidden')previousFocus.focus({preventScroll:true});previousFocus=null;
+  }
+  const receive=event=>{
+    const viewer=engine.state?.viewer;
+    if(!viewer||(!viewer.player&&viewer.role!=='teacher'))return;
+    if(viewer.role==='teacher'&&engine.state.sessionControl?.presentationEffectsEnabled===false)return;
+    if(event?.targetPid&&event.targetPid!==viewer.player?.pid)return;
+    const duration=Number(event?.duration);
+    if(!Number.isInteger(duration)||duration<100||duration>60000)return;
+    stop();previousFocus=document.activeElement;
+    box=document.createElement('div');box.className='presentation-blocker';box.tabIndex=-1;box.setAttribute('role','alert');
+    box.setAttribute('aria-label','Временный визуальный эффект. Запись экрана не ведётся.');
+    box.innerHTML=`<div class="recording-hud"><span class="recording-dot">● REC · SIM</span><span>FRAME LOSS</span><span>${Math.ceil(duration/1000)}s</span></div><div class="recording-noise"></div><div class="recording-center">NO SIGNAL<br><small>ВИЗУАЛЬНЫЙ ЭФФЕКТ · ЗАПИСЬ НЕ ВЕДЁТСЯ</small></div>`;
+    for(const node of document.querySelectorAll('#teacher-app,#app,#cq-chat-root,#cq-project-credits,#sys-telemetry-root')){locked.push([node,node.inert]);node.inert=true;}
+    document.body.classList.add('presentation-signal');document.body.append(box);box.focus({preventScroll:true});
+    timer=setTimeout(stop,duration);
+  };
+  engine.socket.on('ui:presentation-effect',receive);
+  const off=engine.onChange(state=>{if(box&&(!state?.viewer.player&&state?.viewer.role!=='teacher'||state?.viewer.role==='teacher'&&state.sessionControl?.presentationEffectsEnabled===false))stop()});
+  return ()=>{stop();off();engine.socket.off('ui:presentation-effect',receive)};
+}
 
 export class GameEngine {
   constructor(mode = "student") {
@@ -41,9 +79,9 @@ export class GameEngine {
     this.socket.connect();
   }
   onChange(listener) { this.listeners.add(listener); listener(this.state); return () => this.listeners.delete(listener); }
-  emit() { for (const fn of this.listeners) fn(this.state); }
+  emit() { for (const fn of this.listeners) try{fn(this.state)}catch(error){console.error('Ошибка обновления интерфейса:',error)} }
   onChat(listener){this.chatListeners.add(listener);listener(this.chatMeta,this.chatView);return()=>this.chatListeners.delete(listener)}
-  emitChat(){for(const fn of this.chatListeners)fn(this.chatMeta,this.chatView)}
+  emitChat(){for(const fn of this.chatListeners)try{fn(this.chatMeta,this.chatView)}catch(error){console.error('Ошибка обновления чата:',error)}}
   subscribeChat(room){return this.request('chatSubscribe',{room})}
   sendChat(room,text,clientId){return this.request('chatSend',{room,text,clientId})}
   deleteChatMessage(messageId){return this.request('chatDelete',{messageId})}
@@ -58,14 +96,14 @@ export class GameEngine {
       resolve(response);
     }));
   }
-  allQuestions() { return this.state?.questions || []; }
+  allQuestions() { return (this.state?.questions || []).filter(q=>(q.subject||DEFAULT_SUBJECT)===(this.state?.branding?.subject||DEFAULT_SUBJECT)); }
   remainingSeconds() {
     const round = this.state?.round;
     if (!round || round.resolved) return 0;
     return Math.max(0, Math.ceil((round.paused ? round.remainingMs : round.deadline - (Date.now() + this.offset)) / 1000));
   }
-  async joinTeam(regionId, name) {
-    const result = await this.request("joinTeam", { regionId, name });
+  async joinTeam(regionId, name, accepted = false) {
+    const result = await this.request("joinTeam", { regionId, name, privacyConsent:{accepted,version:PRIVACY_VERSION} });
     setToken("cq_player_token_v2", result.playerToken);
     saveCreatorToken(result.isCreator?result.playerToken:null);
     return result;
@@ -93,6 +131,9 @@ export class GameEngine {
   grantAdmin(pid,permissions,effectDuration,unlimitedEffects){return this.request('grantAdmin',{pid,permissions,effectDuration,unlimitedEffects})}
   revokeAdmin(pid){return this.request('revokeAdmin',{pid})}
   setPresentationEffects(enabled){return this.request('setPresentationEffects',{enabled})}
+  updateBranding(branding){return this.request('updateBranding',{branding})}
+  createBackup(){return this.request('createBackup')}
+  restoreBackup(data){return this.request('restoreBackup',{...data,revision:this.state?.revision})}
   startRound(questionId, duration) { return this.request("startRound", { questionId, duration }); }
   switchQuestion(questionId,duration) { return this.request("switchQuestion",{questionId,duration}); }
   pauseRound() { return this.request("pauseRound"); }

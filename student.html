@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07151e">
 <title>Мәдениеттану — участник</title>
 <link rel="stylesheet" href="styles.css">
 <script type="importmap">
@@ -14,13 +15,14 @@
 }
 </script>
 </head>
-<body>
+<body class="student-page">
 
 <div id="reg-screen" class="reg-screen">
   <div class="reg-card glass">
-    <h1>Мәдениеттану: Великий путь</h1>
+    <img class="brand-logo" data-brand-logo hidden alt="Логотип организации"><span class="brand-university" data-brand-university>Учебный проект</span><h1 data-brand-title>Мәдениеттану 3D</h1><p class="mut small-note" data-brand-subject>Мәдениеттану</p>
     <span id="registration-instruction" class="mut">Введите имя и выберите свободную область.</span>
-    <input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="80" autocomplete="off">
+    <label class="sr-only" for="name-input">Ваше имя</label><input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="80" autocomplete="off" enterkeyhint="go">
+    <label class="privacy-consent"><input id="privacy-consent" type="checkbox"><span>Я прочитал <a href="privacy.html" target="_blank" rel="noopener">политику конфиденциальности</a> и согласен на обработку имени, ответов и сообщений для проведения занятия. Можно использовать согласованный с преподавателем псевдоним.</span></label>
     <button id="join-session" class="pri" type="button" hidden>Присоединиться</button>
     <p id="reg-conn-status" class="mut" style="margin-top:10px"></p>
     <p id="registration-capacity" class="mut small-note"></p><input id="team-search" type="search" placeholder="Найти команду или регион" aria-label="Поиск команды" autocomplete="off"><div id="region-grid" class="region-grid"></div>
@@ -30,7 +32,7 @@
 
 <div id="app" class="app" style="display:none">
   <div class="topbar">
-    <h1 id="session-heading" style="font-size:20px">Мәдениеттану</h1>
+    <img class="brand-logo small" data-brand-logo hidden alt="Логотип организации"><h1 id="session-heading" style="font-size:20px" data-brand-subject>Мәдениеттану</h1>
     <span id="my-region-tag" class="region-tag"></span>
     <div class="spacer"></div>
     <span id="conn-status" class="pill"></span>
@@ -41,6 +43,7 @@
   <button id="map-visibility" class="ghost map-visibility" aria-expanded="true">Свернуть карту</button>
   <div class="stage-wrap">
     <canvas id="scene-canvas"></canvas>
+    <p id="map-status" class="map-status" role="status"></p>
     <div class="map-caption"><strong>ҚАЗАҚСТАН</strong><span>Культурный атлас · нажмите на регион</span></div><div class="hint">Тяните — вращение · колесо — масштаб</div><a class="map-credit" href="https://simplemaps.com/gis/country/kz" target="_blank" rel="noopener">Границы: SimpleMaps · CC BY 4.0 · рельеф стилизован</a>
   </div>
   <div class="dock">

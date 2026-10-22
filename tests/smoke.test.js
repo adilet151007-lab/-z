@@ -97,7 +97,7 @@ test("правильный ответ виден преподавателю, н�
   const teacherView = game.view({ role: "teacher" });
   const guestView = game.view();
   assert.equal(teacherView.round.question.correct, question.correct);
-  assert.equal(Object.hasOwn(guestView.round.question, "correct"), false);
+  assert.equal(guestView.round, null);
 });
 
 test("сброс обнуляет прогресс, но сохраняет банк вопросов и сессию создателя", () => {

@@ -8,7 +8,7 @@ import { io } from "socket.io-client";
 import { createGameServer } from "../server.js";
 import { FileStore } from "../storage.js";
 
-const config = { creatorCodes:{ernur:'E'.repeat(26),adilet:'A'.repeat(26)}, teacherPassword: "test-teacher-password", sessionSecret: "unit-test-session-secret-at-least-32-characters" };
+const config = { requireConsent:false, creatorCodes:{ernur:'E'.repeat(26),adilet:'A'.repeat(26)}, teacherPassword: "test-teacher-password", sessionSecret: "unit-test-session-secret-at-least-32-characters" };
 class MemoryStore {
   kind = "memory"; snapshot = null; fail = false; chatSnapshot = null; failChat = false;
   async load() { return structuredClone(this.snapshot); }

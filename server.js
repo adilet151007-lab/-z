@@ -1,14 +1,14 @@
 import "dotenv/config";
 import express from "express";
 import { createServer } from "node:http";
-import { createHash, createHmac, timingSafeEqual, randomUUID } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual, randomUUID, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import path from "node:path";
 import { Server } from "socket.io";
 import { GameLogic, GameError, hashToken } from "./game-logic.js";
 import { createStore } from "./storage.js";
 import { analyzeSyllabus, generateSyllabusQuestions } from "./syllabus-engine.js";
-import { CREATOR_TEAM_ID, CREATOR_NAMES } from "./game-config.js";
+import { CREATOR_TEAM_ID, CREATOR_NAMES, PRIVACY_VERSION } from "./game-config.js";
 import { ChatEngine, chatIdentity } from "./chat-engine.js";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -18,6 +18,7 @@ const equal = (a, b) => timingSafeEqual(digest(String(a)), digest(String(b)));
 export async function createGameServer(options = {}) {
   const password = options.teacherPassword ?? process.env.TEACHER_PASSWORD;
   const secret = options.sessionSecret ?? process.env.SESSION_SECRET;
+  const requireConsent = options.requireConsent ?? !options.legacyRules;
   const creatorCodes=options.creatorCodes ?? {ernur:process.env.CREATOR_ERNUR_CODE,adilet:process.env.CREATOR_ADILET_CODE};
   const configured=Object.keys(CREATOR_NAMES).filter(id=>typeof creatorCodes[id]==='string'&&creatorCodes[id].length===26);
   if(configured.length===2&&equal(creatorCodes.ernur,creatorCodes.adilet))throw new Error('Персональные коды создателей должны различаться.');
@@ -29,6 +30,9 @@ export async function createGameServer(options = {}) {
   if(!options.legacyRules)game.enableUniversal();
   if (!saved||game.state.revision!==saved.revision) await store.save(game.state);
   let publishedGame = new GameLogic(game.state);
+  const backupKey=digest('culture-quest/backup/v1:'+secret);
+  function sealBackup(snapshot){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',backupKey,iv);cipher.setAAD(Buffer.from('culture-quest-backup-v1'));const ciphertext=Buffer.concat([cipher.update(JSON.stringify(snapshot),'utf8'),cipher.final()]);return {format:'culture-quest-encrypted-backup',version:1,createdAt:Date.now(),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:ciphertext.toString('base64')}}
+  function openBackup(raw){try{if(raw?.format!=='culture-quest-encrypted-backup'||raw.version!==1||typeof raw.data!=='string'||raw.data.length>8000000)throw new Error();const iv=Buffer.from(raw.iv||'','base64'),tag=Buffer.from(raw.tag||'','base64');if(iv.length!==12||tag.length!==16)throw new Error();const decipher=createDecipheriv('aes-256-gcm',backupKey,iv);decipher.setAAD(Buffer.from('culture-quest-backup-v1'));decipher.setAuthTag(tag);return JSON.parse(Buffer.concat([decipher.update(Buffer.from(raw.data,'base64')),decipher.final()]).toString('utf8'))}catch{throw new GameError('Копия повреждена или создана с другим SESSION_SECRET. Игра не изменена.','BAD_BACKUP')}}
   let memoryChat=null;
   const chatStore=options.chatStore || (store.loadChat&&store.saveChat ? {kind:store.kind,load:()=>store.loadChat(),save:state=>store.saveChat(state)} : {kind:'memory',load:async()=>memoryChat,save:async state=>{memoryChat=structuredClone(state)}});
   const chat=new ChatEngine(await chatStore.load());
@@ -44,7 +48,10 @@ export async function createGameServer(options = {}) {
   });
   app.get("/", (_req, res) => res.redirect("/student.html"));
   app.get("/health", (_req, res) => res.status(closing ? 503 : 200).json({ ok: !closing, storage: store.kind, chatStorage:chatStore.kind, creatorAccessEnabled:configured.length===2 }));
-  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css"]);
+  app.get('/api/public-settings',(_req,res)=>res.json({branding:publishedGame.publicBranding(),privacyVersion:PRIVACY_VERSION,consentRequired:requireConsent}));
+  app.get('/api/logo', (req,res)=>{const logo=publishedGame.state.branding.logo;if(!logo||req.query.v!==hashToken(logo).slice(0,16))return res.sendStatus(404);const [header,data]=logo.split(',');res.setHeader('Cache-Control','public, max-age=86400, immutable');res.type(header.slice(5,header.indexOf(';'))).send(Buffer.from(data,'base64'))});
+  app.get('/license-texts/:name', (req,res)=>{const licenses={three:'three/LICENSE','socket.io':'socket.io/LICENSE',express:'express/LICENSE',pg:'pg/LICENSE',dotenv:'dotenv/LICENSE',mammoth:'mammoth/LICENSE','pdfjs-dist':'pdfjs-dist/LICENSE'};const file=licenses[req.params.name];if(!file)return res.sendStatus(404);res.type('text/plain').sendFile(path.join(directory,'node_modules',file))});
+  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
   app.use((req, res, next) => allowed.has(req.path) ? res.sendFile(path.join(directory, req.path.slice(1))) : next());
   app.get("/vendor/pdfjs/pdf.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.mjs")));
   app.get("/vendor/pdfjs/pdf.worker.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.worker.mjs")));
@@ -54,7 +61,7 @@ export async function createGameServer(options = {}) {
 
   const httpServer = createServer(app);
   const io = new Server(httpServer, {
-    maxHttpBufferSize: 1024 * 1024,
+    maxHttpBufferSize: 8 * 1024 * 1024,
     allowRequest(req, callback) {
       const origin = req.headers.origin;
       let permitted = !origin;
@@ -113,20 +120,22 @@ export async function createGameServer(options = {}) {
     if (closing || broadcastTimer) return;
     broadcastTimer = setTimeout(() => {
       broadcastTimer = null; if (closing) return;
-      const players = online(),topology=chatTopology(players);
-      for (const socket of io.sockets.sockets.values()){socket.emit("state", publishedGame.view(actor(socket), players));sendChatScope(socket,false,players,topology)}
+      const players = online(),topology=chatTopology(players),frame=publishedGame.publicFrame(players);
+      for (const socket of io.sockets.sockets.values()){socket.emit("state", publishedGame.view(actor(socket), players,frame));sendChatScope(socket,false,players,topology)}
     }, 40);
     broadcastTimer.unref();
   };
   const attempts = new Map();
   const chatAttempts=new Map();
-  let lastRefreshAt=0,lastPresentationEffectAt=0;
+  let lastRefreshAt=0;
+  const effectAttempts = new Map();
   const checkLoginLimit = socket => {
     const ip = socket.handshake.headers["x-forwarded-for"]?.split(",")[0]?.trim() || socket.handshake.address;
     const now = Date.now();
     let record = attempts.get(ip);
-    if (!record || record.until < now) { record = { count: 0, until: now + 15 * 60 * 1000 }; attempts.set(ip, record); }
-    if (++record.count > 10) throw new GameError("Слишком много попыток входа. Повторите через 15 минут.", "RATE_LIMIT");
+    if (!record || record.until < now) { record = { count: 0, until: now + 10000 }; attempts.set(ip, record); }
+    if(attempts.size>2000)for(const [key,value]of attempts)if(value.until<now||attempts.size>2000)attempts.delete(key);
+    if (++record.count > 20) throw new GameError("Слишком много неверных попыток. Проверьте пароль или персональный код.", "RATE_LIMIT");
   };
   io.use((socket, next) => {
     const auth = socket.handshake.auth || {};
@@ -153,12 +162,14 @@ export async function createGameServer(options = {}) {
           if (permission === "teacher" && !["teacher","creator"].includes(identity.role) && !delegatedAllowed) throw new GameError("Нужен вход преподавателя или создателя.", "FORBIDDEN");
           if(permission==='creator'&&!game.creatorFor(identity.playerHash)&&!delegatedAllowed)throw new GameError('Нужен персональный доступ.','FORBIDDEN');
           if(permission==='actualTeacher'&&!validTeacherToken(socket.data.teacherToken))throw new GameError('Нужен вход преподавателя.','FORBIDDEN');
+          if(identity.role==='delegate'&&['movePlayer','renamePlayer','updatePlayer'].includes(name)&&game.state.regions.some(t=>t.members.some(m=>m.pid===data?.pid&&m.creatorId)))throw new GameError('Делегированный доступ не позволяет менять персональных администраторов.','PROTECTED_SESSION');
           const player = actorPlayer;
           if (permission === "student" && !player) throw new GameError("Войдите в команду заново.", "SESSION_EXPIRED");
           if (!data || typeof data !== "object" || Array.isArray(data)) throw new GameError("Некорректные данные запроса.");
           const before = structuredClone(game.state);
           let result;
           try {
+            if(['resetGame','applyRawState'].includes(name)||name==='removeAllPlayers'&&game.state.regions.some(t=>t.members.some(m=>!m.creatorId)))game.createRestorePoint('Перед действием: '+name,false);
             result = await fn(data, player);
             for(const member of before.regions.flatMap(t=>t.members).filter(m=>m.creatorId)){
               const current=game.findPlayer(member.tokenHash);
@@ -185,27 +196,27 @@ export async function createGameServer(options = {}) {
     }
 
     handle("teacherLogin", "guest", data => {
-      checkLoginLimit(socket);
-      if (typeof data.password !== "string" || data.password.length > 256 || !equal(data.password, password)) throw new GameError("Неверный пароль преподавателя.", "BAD_PASSWORD");
+      if (typeof data.password !== "string" || data.password.length > 256 || !equal(data.password, password)) {checkLoginLimit(socket);throw new GameError("Неверный пароль преподавателя.", "BAD_PASSWORD");}
       return { teacherToken: signed({ role: "teacher", expires: Date.now() + 24 * 60 * 60 * 1000, passwordVersion: hashToken(password) }) };
     }, result => { socket.data.teacherToken = result.teacherToken; });
     handle("teacherLogout", "teacher", () => ({}), () => { socket.data.teacherToken = null; });
     handle("joinTeam", "guest", data => {
       if (socket.data.playerHash && game.findPlayer(socket.data.playerHash)) throw new GameError("Вы уже состоите в команде.");
+      if(requireConsent&&(data.privacyConsent?.accepted!==true||data.privacyConsent?.version!==PRIVACY_VERSION))throw new GameError('Прочитайте политику и подтвердите согласие перед входом.','CONSENT_REQUIRED');
       const name=typeof data.name==='string'?data.name.trim():'';
       const creatorId=configured.find(id=>equal(name.slice(0,26),creatorCodes[id])&&(name.length===26||/^\s/.test(name.slice(26))));
-      if(creatorId){checkLoginLimit(socket);return game.joinCreator(creatorId,data.regionId,name.slice(26).trim()||undefined)}
+      if(creatorId){const result=game.joinCreator(creatorId,data.regionId,name.slice(26).trim()||undefined);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;}
       if(data.regionId===CREATOR_TEAM_ID || /(?:ROOT_ACCESS|DEV_CONSOLE)/i.test(name)){
         checkLoginLimit(socket);throw new GameError('Некорректный персональный код.','BAD_CREATOR_CODE');
       }
-      return game.joinTeam(data.regionId, data.name);
+      const result=game.joinTeam(data.regionId, data.name);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;
     }, result => { socket.data.playerHash = hashToken(result.playerToken); });
     handle("leaveTeam", "student", (_data, p) => game.leaveTeam(p.regionId, p.pid), () => { socket.data.playerHash = null; });
     handle("castVote", "student", (data, p) => game.castVote(p.regionId, p.pid, data.optionIdx, data.roundId));
     handle('confirmVote','student',(data,p)=>game.confirmVote(p.regionId,p.pid,data.pid,data.roundId));
     handle('cancelVote','student',(data,p)=>game.cancelVote(p.regionId,p.pid,data.roundId));
     handle('setGameMode','teacher',data=>game.setGameMode(data.mode));
-    handle('renameSelf','teacher',(data,p)=>{if(!p||!game.creatorFor(socket.data.playerHash))throw new GameError('Недостаточно прав.','FORBIDDEN');return game.renamePlayer(p.pid,data.name)});
+    handle('renameSelf','creator',(data,p)=>game.renamePlayer(p.pid,data.name));
     handle('adjustCapital','teacher',data=>{const member=game.state.regions.flatMap(t=>t.members).find(m=>m.pid===data.pid);if(!member||!Number.isSafeInteger(data.delta)||Math.abs(data.delta)>1000)throw new GameError('Некорректное изменение рейтинга.');member.capital=Math.min(1000,Math.max(0,(member.capital||0)+data.delta));game.touch()});
     handle("teamSubmit", "student", (data, p) => game.teamSubmit(p.regionId, p.pid, data.roundId));
     handle("freeSlot", "teacher", data => {
@@ -235,15 +246,18 @@ export async function createGameServer(options = {}) {
     });
     handle('presentationEffect','creator',(data)=>{
       const creator = game.creatorFor(socket.data.playerHash);
-      const grant = !creator && game.adminGrantFor(game.findPlayer(socket.data.playerHash)?.pid);
+      const actingPlayer = game.findPlayer(socket.data.playerHash);
+      const grant = !creator && game.adminGrantFor(actingPlayer?.pid);
       const pro = creator?.creatorId === 'adilet';
       if (!pro && !grant) throw new GameError('Эта функция доступна только главному PRO-администратору или выданному делегату.','PRO_ONLY');
       if(game.state.presentationEffectsEnabled===false&&!pro)throw new GameError('Преподаватель отключил эффекты.','EFFECTS_DISABLED');
-      if(!pro && !grant?.unlimitedEffects && Date.now()-lastPresentationEffectAt<30000)throw new GameError('Эффект доступен раз в 30 секунд.','RATE_LIMIT');
-      const duration = pro ? Math.max(100,Math.min(60000,Number(data.duration)||3000)) : grant.effectDuration;
-      const targetPid=typeof data.targetPid==='string'&&data.targetPid.trim()?data.targetPid.trim():null;
-      if(targetPid){const target=game.state.regions.flatMap(t=>t.members).find(m=>m.pid===targetPid);if(!target||target.creatorId)throw new GameError('Можно выбрать только обычного участника.','INVALID_TARGET');}
-      if(!pro)lastPresentationEffectAt=Date.now();return {id:randomUUID(),duration,targetPid};
+      if(!pro && !grant?.unlimitedEffects && Date.now()-(effectAttempts.get(actingPlayer.pid)||0)<30000)throw new GameError('Эффект доступен раз в 30 секунд.','RATE_LIMIT');
+      if(data.duration!==undefined&&(!Number.isInteger(data.duration)||data.duration<100||data.duration>60000))throw new GameError('Длительность помехи: 100–60000 мс.');
+      const duration = pro ? data.duration??3000 : grant.effectDuration;
+      if(data.targetPid!==undefined&&(typeof data.targetPid!=='string'||!data.targetPid.trim()))throw new GameError('Некорректный адресат.','INVALID_TARGET');
+      const targetPid=data.targetPid?.trim()||null;
+      if(targetPid){const target=game.state.regions.flatMap(t=>t.members).find(m=>m.pid===targetPid);if(!target||target.creatorId||game.adminGrantFor(targetPid))throw new GameError('Можно выбрать только обычного участника.','INVALID_TARGET');if(![...io.sockets.sockets.values()].some(s=>publishedGame.findPlayer(s.data.playerHash)?.pid===targetPid))throw new GameError('Участник сейчас вне сети.','TARGET_OFFLINE');}
+      if(!pro)effectAttempts.set(actingPlayer.pid,Date.now());return {id:randomUUID(),duration,targetPid};
     },result=>{for(const target of io.sockets.sockets.values()){if(result.targetPid){const player=publishedGame.findPlayer(target.data.playerHash);if(player?.pid===result.targetPid)target.emit('ui:presentation-effect',result)}else if(validTeacherToken(target.data.teacherToken))target.emit('ui:presentation-effect',result)}});
     handle('grantAdmin','creator',(data,p)=>{
       const creator=game.creatorFor(socket.data.playerHash);if(creator?.creatorId!=='adilet')throw new GameError('Только Адилет может выдавать административные права.','PRO_ONLY');
@@ -280,7 +294,15 @@ export async function createGameServer(options = {}) {
     handle("removeTeam", "teacher", data => game.removeTeam(data.teamId));
     handle("editQuestion", "teacher", data => game.editQuestion(data.questionId,data.question,data.version));
     handle("deleteQuestion", "teacher", data => game.deleteQuestion(data.questionId));
-    handle("importQuestions", "teacher", data => game.importQuestions(data.questions));
+    handle("importQuestions", "teacher", data => game.importQuestions(Array.isArray(data.questions)?data.questions.map(q=>({...q,subject:q.subject||game.state.branding.subject})):data.questions));
+    handle('updateBranding','teacher',data=>game.updateBranding(data.branding));
+    handle('createBackup','teacher',()=>{const point=game.createRestorePoint();return {archive:sealBackup(point.snapshot)}});
+    handle('restoreBackup','teacher',data=>{
+      if(data.revision!==game.state.revision)throw new GameError('Состояние изменилось. Обновите страницу перед восстановлением.','REVISION_CONFLICT');
+      const snapshot=data.backupId?game.state.restorePoints?.find(p=>p.id===data.backupId)?.snapshot:openBackup(data.archive);
+      if(!snapshot)throw new GameError('Резервная копия не найдена.');
+      game.createRestorePoint('Перед восстановлением');game.restoreBackup(snapshot,game.state.revision);return {};
+    });
     handle("analyzeSyllabus", "teacher", data => analyzeSyllabus(data.text));
     handle("generateQuestions", "teacher", data => generateSyllabusQuestions(data.text,data.topics,data.count));
     handle("resetGame", "teacher", () => game.resetGame());
@@ -323,7 +345,7 @@ export async function createGameServer(options = {}) {
     }).finally(() => { timerBusy = false; });
   }, 250);
   timer.unref();
-  const cleanup = setInterval(() => { for (const [ip, value] of attempts) if (value.until < Date.now()) attempts.delete(ip);for(const [id,times] of chatAttempts)if(!times.some(t=>t>Date.now()-10000))chatAttempts.delete(id); }, 60000);
+  const cleanup = setInterval(() => { for (const [ip, value] of attempts) if (value.until < Date.now()) attempts.delete(ip);for(const [id,times] of chatAttempts)if(!times.some(t=>t>Date.now()-10000))chatAttempts.delete(id);for(const [pid,at]of effectAttempts)if(at<Date.now()-30000)effectAttempts.delete(pid); }, 60000);
   cleanup.unref();
 
   return {

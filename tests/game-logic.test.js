@@ -72,7 +72,8 @@ test("данные студента не содержат ключей, прав
   assert.equal(JSON.stringify(student).includes("ballots"), false);
   assert.equal(f.game.view({ role: "teacher" }).questions[0].correct, 0);
   f.game.resolveRound();
-  assert.equal(f.game.view().round.question.correct, 0);
+  assert.equal(f.game.view({playerHash:hashToken(f.a.playerToken)}).round.question.correct, 0);
+  assert.equal(f.game.view().round, null);
 });
 test("удаление игрока освобождает слот и удаляет его неотправленный голос", () => {
   const f = fixture(); f.game.castVote("saryarka", f.a.player.pid, 0, f.round);

@@ -1,21 +1,27 @@
-import { GameEngine, REGIONS, capacityFor, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, metadataFor, escapeHTML as h } from "./shared-engine.js";
-import { createScene } from "./scene3d.js";
+import { GameEngine, REGIONS, capacityFor, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, metadataFor, setupPresentationEffects, setupBranding, escapeHTML as h } from "./shared-engine.js";
 import { setupTelemetry } from "./creator-overlay.js";
 import { setupCommunication } from "./chat-ui.js";
 
 const engine = new GameEngine("student");
 setupTelemetry(engine);
 setupCommunication(engine);
+setupPresentationEffects(engine);
+setupBranding(engine);
 const $ = id => document.getElementById(id);
-let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null, lastUiRevision = -1;
+let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null, sceneLoading=false, mapCollapsed=false, teamKey='', questionKey='', registrationKey='';
 let sceneError = "";
-let effectTimer=null,effectBox=null;
-function stopPresentationEffect(){clearTimeout(effectTimer);effectBox?.remove();effectBox=null;document.body.classList.remove('presentation-signal')}
-engine.socket.on('ui:presentation-effect',event=>{
-  if(engine.state?.viewer.role==='guest')return;
-  const duration=Math.max(100,Math.min(60000,Number(event?.duration)||3000));
-  stopPresentationEffect();document.body.classList.add('presentation-signal');effectBox=document.createElement('div');effectBox.className='presentation-blocker';effectBox.setAttribute('role','alert');effectBox.setAttribute('aria-label','Временный системный сигнал');effectBox.innerHTML=`<div class="recording-hud"><span class="recording-dot">● REC</span><span>FRAME LOSS · SIGNAL INTERFERENCE</span><span>${Math.ceil(duration/1000)}s</span></div><div class="recording-noise"></div><div class="recording-center">NO SIGNAL<br><small>RECOVERING VIDEO STREAM</small></div>`;for(const type of ['pointerdown','pointerup','click','dblclick','touchstart','touchend','contextmenu'])effectBox.addEventListener(type,e=>{e.preventDefault();e.stopPropagation()},{capture:true});document.body.append(effectBox);effectTimer=setTimeout(stopPresentationEffect,duration);
-});
+async function ensureScene(){
+  if(scene||sceneLoading||sceneError||mapCollapsed)return;
+  sceneLoading=true;$('map-status').textContent='Загружаем 3D-карту…';
+  try{
+    const {createScene}=await import('./scene3d.js');
+    if(!engine.state?.viewer.player)return;
+    scene=createScene($('scene-canvas'));$('map-status').textContent='';
+    const state=engine.state,team=state.regions.find(t=>t.id===state.viewer.player.regionId);
+    scene.update(state,state.viewer.player.regionId);focusedRegion=metadataFor(team).baseRegionId;scene.focusRegion(focusedRegion);scene.setVisible(!mapCollapsed);
+  }catch{sceneError='3D недоступно. Вопросы и ответы продолжают работать.';$('map-status').textContent=sceneError;}
+  finally{sceneLoading=false}
+}
 function message(text = "", isError = false) {
   $("action-message").textContent = text;
   $("action-message").classList.toggle("red", isError);
@@ -23,11 +29,14 @@ function message(text = "", isError = false) {
 async function act(fn) {
   if (actionPending) return;
   actionPending = true;
+  if(engine.state?.viewer.player)renderQuestion(engine.state);
   try { await fn(); message(); }
   catch (error) { message(error.message, true); }
   finally { actionPending = false; if (engine.state?.viewer.player) renderQuestion(engine.state); }
 }
 function renderRegistration(state) {
+  const key=JSON.stringify([state.settings.mode,state.regions,engine.connected,joining,$('name-input').value,$('team-search').value]);
+  if(key===registrationKey)return;registrationKey=key;
   const solo=state.settings.mode==='solo';
   const tokenCandidate=$('name-input').value.trim().split(/\s/,1)[0].length===26;
   $('join-session').hidden=!solo;$('region-grid').hidden=solo;
@@ -45,8 +54,9 @@ function renderRegistration(state) {
 $("team-search").addEventListener("input",()=>{if(engine.state)renderRegistration(engine.state)});
 async function join(regionId) {
   if(joining||!engine.connected)return;
+  if(!$('privacy-consent').checked){$('reg-error').textContent='Подтвердите согласие на обработку данных перед входом.';$('privacy-consent').focus();return;}
   joining=true;$("reg-error").textContent="Подключение…";renderRegistration(engine.state);
-  try{await engine.joinTeam(regionId,$("name-input").value.trim());$("name-input").value="";$("reg-error").textContent=""}
+  try{await engine.joinTeam(regionId,$("name-input").value.trim(),true);$("name-input").value="";$("reg-error").textContent=""}
   catch(error){$("reg-error").textContent=error.message}
   finally{joining=false;if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state)}
 }
@@ -64,7 +74,9 @@ $("leave-btn").addEventListener("click", () => {
 
 function renderTeam(state) {
   const player = state.viewer.player;
-  const region = state.regions.find(r => r.id === player.regionId), meta = metadataFor(region);
+  const region = state.regions.find(r => r.id === player.regionId);if(!region)return;
+  const key=JSON.stringify([state.settings.mode,player,region,state.teamLeaderboard,state.leaderboard]);if(teamKey===key)return;teamKey=key;
+  const meta = metadataFor(region);
   const crisis = region.economy < CRISIS_THRESHOLD, development = developmentFor(region.points), teamRank = (state.teamLeaderboard||[]).findIndex(t=>t.teamId===region.id)+1, topTeams = (state.teamLeaderboard||[]).slice(0,5);
   $("my-name").textContent = player.name;
   if(state.settings.mode==='solo'){
@@ -78,7 +90,7 @@ function renderTeam(state) {
 
 function renderQuestion(state) {
   const panel = $("question-panel"), round = state.round;
-  if (!round) { panel.innerHTML = '<h2>Ожидайте раунд</h2><p class="mut" style="margin-top:8px">Преподаватель запустит следующий вопрос.</p>'; return; }
+  if (!round) { if(questionKey!=='lobby'){panel.innerHTML = '<h2>Ожидайте раунд</h2><p class="mut" style="margin-top:8px">Преподаватель запустит следующий вопрос.</p>';questionKey='lobby'}return; }
   const player = state.viewer.player;
   if (!player) return;
   const solo=state.settings.mode==='solo',regionId = solo?player.pid:player.regionId, question = round.question;
@@ -86,6 +98,8 @@ function renderQuestion(state) {
   const totalVotes = solo?Number(round.myVote!==null):Object.values(tally).reduce((sum, n) => sum + n, 0);
   const locked = round.resolved || round.paused || submitted !== undefined || !engine.connected || engine.remainingSeconds() <= 0 || actionPending;
   const result = round.results[regionId];
+  const key=JSON.stringify([round.id,question,round.paused,round.resolved,round.myVote,round.deadline,round.duration,tally,submitted,result,round.proposals,locked,state.viewer.isDevTelemetry,engine.connected]);
+  if(questionKey===key){updateTimer();return}questionKey=key;
   let feedback = "";
   if (round.resolved && result) {
     const text = solo?(result.correct?`Верно! +${result.awarded} капитала · ×${result.multiplier}`:'Ответ не засчитан. Серия начнётся заново.'):result.skipped ? "Команда пропустила раунд." : result.correct ? `Верно! +${result.awarded ?? question.points} культурного ресурса.${result.atCap ? " Город построен — достигнут предел 1000!" : ""}` : "Ответ не засчитан. −20% экономики, минимум 15%.";
@@ -127,26 +141,18 @@ engine.onChange(state => {
   const player = state.viewer.player;
   $("reg-screen").style.display = player ? "none" : "flex";
   $("app").style.display = player ? "flex" : "none";
-  if (!player) { renderRegistration(state); previousRound = null; lastUiRevision = -1; return; }
-  if (!scene && !sceneError) {
-    try { scene = createScene($("scene-canvas")); }
-    catch { sceneError = "3D недоступно в этом браузере. Командная игра продолжает работать."; message(sceneError, true); }
-  }
+  if (!player) { renderRegistration(state); previousRound = null;teamKey='';questionKey='';scene?.setVisible(false);return; }
+  if(!scene&&!sceneError)requestAnimationFrame(()=>ensureScene());
   if (scene) {
+    scene.setVisible(!mapCollapsed);
     const base = metadataFor(state.regions.find(t=>t.id===player.regionId)).baseRegionId;
     if (focusedRegion !== base) { scene.focusRegion(base); focusedRegion = base; }
     scene.update(state, player.regionId);
   }
   const roundChanged = previousRound !== state.round?.id;
   if (roundChanged) { previousRound = state.round?.id; message(sceneError); }
-  // Частые пакеты голосов не должны каждый раз пересобирать весь DOM телефона.
-  // Таймер обновляется отдельно, поэтому полная перерисовка нужна только при изменении состояния.
-  if (lastUiRevision !== state.revision || roundChanged) {
-    lastUiRevision = state.revision;
-    renderTeam(state);
-    renderQuestion(state);
-  }
+  renderTeam(state);
+  renderQuestion(state);
 });
-setInterval(updateTimer, 200);
-let mapCollapsed=false;
-$('map-visibility').addEventListener('click',()=>{mapCollapsed=!mapCollapsed;document.querySelector('.stage-wrap').hidden=mapCollapsed;$('map-visibility').textContent=mapCollapsed?'Развернуть карту':'Свернуть карту';$('map-visibility').setAttribute('aria-expanded',String(!mapCollapsed));scene?.setVisible(!mapCollapsed);if(!mapCollapsed)scene?.resize()});
+setInterval(()=>{if(!document.hidden)updateTimer()},250);
+$('map-visibility').addEventListener('click',()=>{mapCollapsed=!mapCollapsed;document.querySelector('.stage-wrap').hidden=mapCollapsed;$('map-visibility').textContent=mapCollapsed?'Развернуть карту':'Свернуть карту';$('map-visibility').setAttribute('aria-expanded',String(!mapCollapsed));scene?.setVisible(!mapCollapsed);if(!mapCollapsed){if(scene)scene.resize();else ensureScene()}});
