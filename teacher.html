@@ -41,6 +41,7 @@
   <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
   <section class="glass dock-panel teacher-private format-toolbar"><label for="game-format">Формат пары</label><select id="game-format"><option value="team">Аймақтық одақ · 10 областей × 4</option><option value="solo">Жеке сайыс · каждый сам за себя</option></select><button id="format-apply" class="pri">Применить формат</button><button id="return-lobby" class="ghost">Вернуться в лобби</button><p id="format-status" class="small-note mut"></p></section>
   <section id="solo-ranking" class="glass dock-panel" hidden><h2>Жеке сайыс · Лидеры</h2><div id="solo-leaders" class="solo-leaders"></div></section>
+  <section id="team-ranking" class="glass dock-panel" hidden><h2>Аймақтық одақ · Рейтинг команд</h2><div id="team-leaders" class="solo-leaders"></div></section>
   <section class="glass dock-panel teacher-private session-options"><label><input type="checkbox" id="presentation-effects" checked> Разрешать короткие визуальные сигналы от администраторов</label><p class="small-note mut">Персональный администратор выходит по запросу только после своего согласия. Массовая очистка сохраняет эти две сессии.</p><div id="session-requests" class="small-note" aria-live="polite"></div></section>
 
   <div id="dev-overlay" style="display:none;position:fixed;inset:0;background:rgba(3,7,11,0.72);z-index:50;align-items:center;justify-content:center;padding:20px">

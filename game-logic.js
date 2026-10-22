@@ -140,6 +140,7 @@ export class GameLogic {
     this.state.settings.mode=mode;this.state.phase='lobby';this.log('Формат: '+MODE_NAMES[mode]);this.touch();
   }
   ranking(){return this.state.regions.flatMap(t=>t.members.map(m=>({pid:m.pid,name:m.name,teamId:t.id,capital:m.capital??0,streak:m.streak??0,multiplier:soloMultiplier(m.streak)}))).sort((a,b)=>b.capital-a.capital||b.streak-a.streak||a.name.localeCompare(b.name,'ru'))}
+  teamRanking(){return regularTeams(this.state.regions).map(t=>({teamId:t.id,name:t.name,points:t.points,economy:t.economy,members:t.members.filter(m=>!m.creatorId).length,capacity:t.capacity,rating:t.points+t.economy*5,development:developmentFor(t.points).name})).sort((a,b)=>b.rating-a.rating||b.points-a.points||b.economy-a.economy||a.name.localeCompare(b.name,'ru'))}
   log(msg) { this.state.log.unshift({ t: this.now(), msg }); this.state.log = this.state.log.slice(0, 100); }
   region(id) { const region = this.state.regions.find(r => r.id === id); ensure(region, "Регион не найден."); return region; }
   findPlayer(tokenHash) {
@@ -605,7 +606,7 @@ export class GameLogic {
       settings: {...this.state.settings},
       viewer: { role: creator ? "creator" : teacher ? "teacher" : delegated ? "delegate" : player ? "student" : "guest", isCreator:creator,isDevTelemetry:creator||!!delegated,isProAdmin:creator&&player?.creatorId==='adilet',canGrantAdmin:creator&&player?.creatorId==='adilet',canTriggerPresentationEffect:creator&&player?.creatorId==='adilet'||!!(player&&this.adminCan(player.pid,'presentationEffect')),adminGrant:delegated, player: player ? { pid: player.pid, name: player.name, regionId: player.regionId,capital:player.capital??0,streak:player.streak??0 } : null },
       regions: this.state.regions.map(r => ({ ...r, members: r.members.map(({ pid, name,capital,streak }) => ({ pid, name, online: onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak}:{}) })),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length}:{}) })),
-      leaderboard:this.state.settings.mode==='solo'?this.ranking():[],
+      leaderboard:this.state.settings.mode==='solo'?this.ranking():[],teamLeaderboard:this.state.settings.mode==='team'?this.teamRanking():[],
       questions: teacher || delegated?.permissions.questions ? structuredClone(this.state.questions) : [],
       round: null, log: adminView ? structuredClone(this.state.log) : []
     };
