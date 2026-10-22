@@ -70,7 +70,7 @@ test('запрос на выход сохраняется после перез�
 });
 
 test('сигнал и перезагрузка: только персональные админы, нужные экраны, ограничение частоты и отключение преподавателем',async t=>{
- const f=await fixture(t,{legacyRules:false}),teacher=await f.connect(),a=await f.connect(),student=await f.connect(),guest=await f.connect();await login(teacher);await command(a,'joinTeam',{regionId:'jetisu',name:config.creatorCodes.ernur});await command(student,'joinTeam',{regionId:'saryarka',name:'Алия'});
+ const f=await fixture(t,{legacyRules:false}),teacher=await f.connect(),a=await f.connect(),student=await f.connect(),guest=await f.connect();await login(teacher);await command(a,'joinTeam',{regionId:'jetisu',name:config.creatorCodes.adilet});await command(student,'joinTeam',{regionId:'saryarka',name:'Алия'});
  const effects=[],reloads=[];for(const [name,socket]of [['teacher',teacher],['a',a],['student',student],['guest',guest]]){socket.on('ui:presentation-effect',()=>effects.push(name));socket.on('ui:refresh',()=>reloads.push(name))}
  for(const actor of [student,teacher,guest]){assert.equal((await command(actor,'presentationEffect')).code,'FORBIDDEN');assert.equal((await command(actor,'refreshClients',{scope:'all'})).code,'FORBIDDEN')}
  assert.equal((await command(a,'presentationEffect')).ok,true);await waitFor(()=>effects.length);assert.deepEqual(effects,['teacher']);assert.equal((await command(a,'presentationEffect')).code,'RATE_LIMIT');

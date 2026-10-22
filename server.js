@@ -226,6 +226,8 @@ export async function createGameServer(options = {}) {
       }
     });
     handle('presentationEffect','creator',()=>{
+      const creator = game.creatorFor(socket.data.playerHash);
+      if (creator?.creatorId !== 'adilet') throw new GameError('Эта функция доступна только главному PRO-администратору.','PRO_ONLY');
       if(game.state.presentationEffectsEnabled===false)throw new GameError('Преподаватель отключил эффекты.','EFFECTS_DISABLED');
       if(Date.now()-lastPresentationEffectAt<30000)throw new GameError('Эффект доступен раз в 30 секунд.','RATE_LIMIT');
       lastPresentationEffectAt=Date.now();return {id:randomUUID(),duration:3000};

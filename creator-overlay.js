@@ -78,7 +78,7 @@ export function setupTelemetry(engine){
   if(member&&lastPlayer!==pid){lastPlayer=pid;$('sys-player-name').value=member.name;$('sys-player-team').value=source.id}
   $('sys-player-form').querySelector('button').disabled=!member||!engine.connected;
   sheet.querySelector('[data-sys-action="kick"]').disabled=protectedIds.includes(pid)||!member||!engine.connected;
-  sheet.querySelector('[data-sys-action="effect"]').disabled=s.sessionControl?.presentationEffectsEnabled===false||!engine.connected;
+  sheet.querySelector('[data-sys-action="effect"]').disabled=s.sessionControl?.presentationEffectsEnabled===false||s.viewer.canTriggerPresentationEffect!==true||!engine.connected;
   sheet.querySelector('[data-sys-action="minus-economy"]').disabled=s.settings.mode==='solo'||!engine.connected;
   setOptions('sys-q-list',s.questions.map((q,i)=>`<option value="${q.id}">${i+1}. ${h(q.text)}</option>`).join(''));
   if($('sys-mode').dataset.mode!==s.settings.mode){$('sys-mode').value=s.settings.mode;$('sys-mode').dataset.mode=s.settings.mode}

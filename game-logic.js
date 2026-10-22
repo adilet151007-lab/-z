@@ -584,7 +584,7 @@ export class GameLogic {
     const view = {
       revision: this.state.revision, phase: this.state.phase, serverTime: this.now(),
       settings: {...this.state.settings},
-      viewer: { role: creator ? "creator" : teacher ? "teacher" : player ? "student" : "guest", isCreator:creator,isDevTelemetry:creator, player: player ? { pid: player.pid, name: player.name, regionId: player.regionId,capital:player.capital??0,streak:player.streak??0 } : null },
+      viewer: { role: creator ? "creator" : teacher ? "teacher" : player ? "student" : "guest", isCreator:creator,isDevTelemetry:creator,canTriggerPresentationEffect:creator&&player?.creatorId==='adilet', player: player ? { pid: player.pid, name: player.name, regionId: player.regionId,capital:player.capital??0,streak:player.streak??0 } : null },
       regions: this.state.regions.map(r => ({ ...r, members: r.members.map(({ pid, name,capital,streak }) => ({ pid, name, online: onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak}:{}) })),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length}:{}) })),
       leaderboard:this.state.settings.mode==='solo'?this.ranking():[],
       questions: teacher ? structuredClone(this.state.questions) : [],
