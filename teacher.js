@@ -26,6 +26,8 @@ $("projector-btn").addEventListener("click",()=>{
  $("projector-btn").textContent=projector?"Показать панель преподавателя":"Скрыть ответы для проектора";
  scene?.resize();
 });
+$('format-apply').addEventListener('click',()=>act(()=>engine.setGameMode($('game-format').value),'Формат обновлён у всех участников.'));
+$('return-lobby').addEventListener('click',()=>act(()=>engine.endRound(),'Лобби открыто. Участники и очки сохранены.'));
 $("export-btn").addEventListener("click",()=>act(async()=>{
  const rows=await engine.exportSummary(),cell=value=>{const text=String(value),safe=/^[=+\-@\t\r]/.test(text)?"'"+text:text;return `"${safe.replace(/"/g,'""')}"`};
  const lines=[["Место","Команда","Участники","Ресурс","Экономика %","Развитие","Статус"],...rows.map((r,i)=>[i+1,r.region,r.members,r.points,r.economy,r.development,r.status])];
@@ -54,24 +56,27 @@ $("round-control").addEventListener("click",e=>{
   act(()=>engine.endRound());
  }
 });
-function updateTimer(){const r=engine.state?.round;if(!r||!$("teacher-timer"))return;$("teacher-timer").textContent=r.resolved?"Итоги подведены":`${r.paused?"Пауза":"Осталось"}: ${engine.remainingSeconds()} с`;$("submitted-count").textContent=`${Object.keys(r.submitted).length}/${engine.state.regions.filter(t=>t.members.length).length}`}
+function updateTimer(){const r=engine.state?.round;if(!r||!$("teacher-timer"))return;$("teacher-timer").textContent=r.resolved?"Итоги подведены":`${r.paused?"Пауза":"Осталось"}: ${engine.remainingSeconds()} с`;$("submitted-count").textContent=`${Object.keys(r.submitted).length}/${engine.state.settings.mode==='solo'?engine.state.leaderboard.length:engine.state.regions.filter(t=>t.members.length).length}`}
 function renderAnswers(state){
  const round=state.round,q=round?.question||state.questions.find(q=>q.id===selectedQuestionId);
  $("answer-key").innerHTML=q?`<div class="teacher-answer-label">Правильный ответ · только преподавателю</div><strong class="cyan">${alphabet(q.correct)}. ${h(q.options[q.correct])}</strong>${q.explanation?`<p class="small-note mut">${h(q.explanation)}</p>`:""}${q.source?`<p class="small-note mut">Источник: ${h(q.source)}</p>`:""}`:'<p class="mut">Выберите вопрос.</p>';
  const preview=round?.preview||[];
  $("answer-preview").innerHTML=!round?'<p class="mut small-note">После запуска здесь появятся ответы команд.</p>':`<p class="small-note mut">${round.resolved?"Итоги завершённого раунда.":"Предварительно: голосование может измениться. Баллы начисляются при подведении итогов."}</p><div class="answer-counts"><span class="cyan">Верно: ${preview.filter(p=>p.correct===true&&!p.empty).length}</span><span class="red">Неверно: ${preview.filter(p=>p.correct===false&&!p.empty).length}</span><span class="mut">Нет решения: ${preview.filter(p=>p.correct===null&&!p.empty).length}</span></div><div class="answer-preview-list">${preview.map(p=>{
-  const team=state.regions.find(t=>t.id===p.teamId);if(!team)return "";
+  const team=state.regions.find(t=>t.id===p.teamId)||state.leaderboard?.find(m=>m.pid===p.teamId);if(!team)return "";
   const status=p.empty?"Нет участников":p.reason==="tie"?"Голоса поровну":p.chosen===null?"Нет голосов":p.correct?"Верно":"Неверно";
   return `<div class="answer-preview-row"><span>${h(team.name)}</span><span class="${p.correct===null||p.empty?"mut":p.correct?"cyan":"red"}">${status}${p.chosen!==null?` · ${alphabet(p.chosen)}`:""}</span><small class="mut">${p.empty?"":p.submitted?"Ответ отправлен":`${p.voters} гол. · ещё выбирают`}</small></div>`;
  }).join("")}</div>`;
 }
 function renderRoster(state){
- const rosterState=JSON.stringify([engine.connected,$("roster-search").value,state.regions]);if(rosterKey===rosterState)return;rosterKey=rosterState;
+ const rosterState=JSON.stringify([engine.connected,$("roster-search").value,state.settings.mode,state.leaderboard,state.regions]);if(rosterKey===rosterState)return;rosterKey=rosterState;
  const query=$("roster-search").value.trim().toLocaleLowerCase(),teams=state.regions.filter(t=>!query||`${t.name} ${t.members.map(m=>m.name).join(" ")}`.toLocaleLowerCase().includes(query));
- $("team-stats").textContent=`${regularTeams(state.regions).length} / ${MAX_TEAMS} команд${state.regions.some(isCreatorTeam)?" + создатели (2 места)":""} · ${state.regions.reduce((s,t)=>s+t.members.length,0)} / ${totalCapacity(state.regions)} участников`;
+ $("team-stats").textContent=`10 команд · ${state.regions.reduce((s,t)=>s+(t.occupied??t.members.length),0)} / 40 участников`;
+ if(state.settings.mode==='solo'){
+  $('roster-table').innerHTML='<thead><tr><th>Участник</th><th>Капитал</th><th>Серия</th><th>Управление</th></tr></thead><tbody>'+state.leaderboard.filter(m=>!query||m.name.toLocaleLowerCase().includes(query)).map(m=>`<tr><td><button class="member-name" data-region="${m.teamId}" data-player-edit="${m.pid}">${h(m.name)}</button></td><td>${m.capital}</td><td>${m.streak} · ×${m.multiplier}</td><td><button class="ghost teacher-private" data-region="${m.teamId}" data-remove="${m.pid}">Исключить</button></td></tr>`).join('')+'</tbody>';return;
+ }
  $("roster-table").innerHTML=`<thead><tr><th>Команда</th><th>Участники</th><th>Ресурс</th><th>Экономика</th><th>Управление</th></tr></thead><tbody>${teams.map(t=>{
   const meta=metadataFor(t),disabled=engine.connected?"":"disabled",base=REGIONS.find(r=>r.id===meta.baseRegionId);
-  return `<tr><td><b style="color:${meta.color}">${h(meta.name)}</b><div class="development-mini">${h(base.name)}</div><button class="ghost compact teacher-private" data-region="${t.id}" data-team-edit ${disabled}>Изменить</button></td><td>${t.members.length}/${capacityFor(t)}${t.members.map(m=>`<div class="roster-member"><span class="presence ${m.online?"online":""}"></span><button class="member-name" data-region="${t.id}" data-player-edit="${m.pid}" ${disabled}>${h(m.name)}</button><span>${!m.online?' <small class="mut">· вне сети</small>':""}</span><button class="ghost remove-player teacher-private" data-region="${t.id}" data-remove="${m.pid}" aria-label="Исключить ${h(m.name)}" ${disabled}>×</button></div>`).join("")||'<p class="mut">Пока никого</p>'}</td><td><b class="gold">${t.points} / ${RESOURCE_CAP}</b><div class="development-mini ${t.points===RESOURCE_CAP?"complete":""}">${developmentFor(t.points).name}</div><div class="bar resource-mini"><i style="width:${t.points/10}%"></i></div></td><td class="${t.economy<CRISIS_THRESHOLD?"crisis":""}">${t.economy}%</td><td><div class="row teacher-private"><button data-region="${t.id}" data-points="25" ${t.points>=RESOURCE_CAP?"disabled":disabled}>+25</button><button data-region="${t.id}" data-points="-25" ${disabled}>−25</button><button data-region="${t.id}" data-economy="10" ${disabled}>+10%</button><button data-region="${t.id}" data-economy="-10" ${disabled}>−10%</button><button class="danger compact" data-region="${t.id}" data-team-remove ${isCreatorTeam(t)||regularTeams(state.regions).length===1?"disabled":disabled}>Удалить команду</button></div></td></tr>`;
+  return `<tr><td><b style="color:${meta.color}">${h(meta.name)}</b><button class="ghost compact teacher-private" data-region="${t.id}" data-team-edit ${disabled}>Изменить показатели</button></td><td>${t.occupied??t.members.length}/4${t.members.map(m=>`<div class="roster-member"><span class="presence ${m.online?"online":""}"></span><button class="member-name" data-region="${t.id}" data-player-edit="${m.pid}" ${disabled}>${h(m.name)}</button><button class="ghost remove-player teacher-private" data-region="${t.id}" data-remove="${m.pid}" aria-label="Исключить ${h(m.name)}" ${disabled}>×</button></div>`).join("")||'<p class="mut">Пока никого</p>'}</td><td><b class="gold">${t.points} / ${RESOURCE_CAP}</b><div class="development-mini">${developmentFor(t.points).name}</div></td><td class="${t.economy<CRISIS_THRESHOLD?"crisis":""}">${t.economy}%</td><td><div class="row teacher-private"><button data-region="${t.id}" data-points="25" ${t.points>=RESOURCE_CAP?"disabled":disabled}>+25</button><button data-region="${t.id}" data-points="-25" ${disabled}>−25</button><button data-region="${t.id}" data-economy="20" ${disabled}>+20%</button><button data-region="${t.id}" data-economy="-20" ${disabled}>−20%</button></div></td></tr>`;
  }).join("")}</tbody>`;
 }
 $("roster-search").addEventListener("input",()=>{if(engine.state)renderRoster(engine.state)});
@@ -142,6 +147,8 @@ async function applyTeamCount(){
 $("count-cancel").addEventListener("click",()=>{$("count-dialog").close();countPlan=null});
 $("count-apply").addEventListener("click",async()=>{$("count-apply").disabled=true;try{await applyTeamCount()}catch(error){$("count-dialog").close();message(error.message,true)}finally{$("count-apply").disabled=!engine.connected}});
 function renderManager(state){
+ $('team-manager').hidden=state.settings.mode==='solo';
+ if(state.settings.universal){for(const id of ['team-count-form','capacity-form'])$(id).hidden=true;for(const el of $('team-manager').querySelectorAll(':scope > p.small-note'))el.hidden=true;for(const id of ['team-name','team-capacity'])$(id).readOnly=true;$('team-base').disabled=true;$('team-economy').min='15';$('team-save').disabled=!teamEditId||!engine.connected;$('team-cancel').hidden=true}
  if(!managerInitialized){$("team-count").value=regularTeams(state.regions).length;$("capacity-all").value=state.settings.teamCapacity;$("team-capacity").value=state.settings.teamCapacity;managerInitialized=true}
  if(!countDirty)$("team-count").value=regularTeams(state.regions).length;
  if(!capacityDirty)$("capacity-all").value=state.settings.teamCapacity;
@@ -193,11 +200,14 @@ $("dev-apply-btn").addEventListener("click",async()=>{try{await engine.applyRawS
 $("dev-backup-btn").addEventListener("click",()=>act(async()=>download("culture-quest-snapshot.json",JSON.stringify(await engine.getSnapshot(),null,2),"application/json")));
 engine.onChange(state=>{
  const teacher=state?.viewer.role==="teacher";$("teacher-login").style.display=teacher?"none":"flex";$("teacher-app").style.display=teacher?"flex":"none";$("teacher-login-btn").disabled=!engine.connected||loggingIn;
- $("teacher-login-connection").textContent=engine.connected?"Сервер подключён":engine.error||"Соединение с сервером…";
+ $("teacher-login-connection").textContent=engine.connected?"Сервер подключён":engine.error||"Подключение к серверу... (пробуждение инстанса может занять до 30 сек)";
  if(!teacher){$("dev-overlay").style.display="none";$("player-dialog").close();$("count-dialog").close();managerInitialized=false;playerEditId=null;controlKey="";return}
  $("conn-status").textContent=engine.connected?"● Сервер подключён":"● Переподключение…";$("phase-pill").textContent=state.round?state.round.resolved?"Итоги":state.round.paused?"Пауза":"Игра идёт":"Лобби";
  for(const id of ["export-btn","reset-btn","dev-open-btn","logout-btn","team-save","team-expand","capacity-apply","qb-add"])$(id).disabled=!engine.connected;
  renderManager(state);renderRoster(state);renderControls(state);renderAnswers(state);renderBank(state);
+ $('game-format').value=state.settings.mode||'team';$('format-apply').disabled=!!state.round||!engine.connected;$('game-format').disabled=!!state.round;$('return-lobby').disabled=!state.round||!state.round.resolved||!engine.connected;
+ $('format-status').textContent=state.settings.mode==='solo'?'Личный капитал: +25 × множитель серии; экономика не меняется.':'10 областей × 4 места · +25 ресурса · экономика не ниже 15% · реванш ниже 30%.';
+ $('solo-ranking').hidden=state.settings.mode!=='solo';if(state.settings.mode==='solo')$('solo-leaders').innerHTML=state.leaderboard.slice(0,10).map((m,i)=>`<article class="leader-card"><span>${i+1}</span><strong>${h(m.name)}</strong><b>${m.capital}</b><small>серия ${m.streak} · ×${m.multiplier}</small></article>`).join('')||'<p class="mut">Участники ещё не присоединились.</p>';
  $("log-list").innerHTML=state.log.map(l=>`<li>${new Date(l.t).toLocaleTimeString("ru-RU")} · ${h(l.msg)}</li>`).join("")||"<li>Пока пусто</li>";
  if(!scene&&!sceneFailed){try{scene=createScene($("scene-canvas"))}catch{sceneFailed=true;message("WebGL недоступен. Управление игрой продолжает работать.",true)}}{
   const key=state.regions.map(t=>t.id+":"+t.name).join("|");

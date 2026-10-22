@@ -19,9 +19,9 @@
 <div id="reg-screen" class="reg-screen">
   <div class="reg-card glass">
     <h1>Мәдениеттану: Великий путь</h1>
-    <span class="mut">Введите имя и выберите свободную команду.</span>
-    <input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="40" autocomplete="off">
-    <button id="creator-entry" class="ghost" type="button" hidden>Войти по персональному коду</button>
+    <span id="registration-instruction" class="mut">Введите имя и выберите свободную область.</span>
+    <input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="80" autocomplete="off">
+    <button id="join-session" class="pri" type="button" hidden>Присоединиться</button>
     <p id="reg-conn-status" class="mut" style="margin-top:10px"></p>
     <p id="registration-capacity" class="mut small-note"></p><input id="team-search" type="search" placeholder="Найти команду или регион" aria-label="Поиск команды" autocomplete="off"><div id="region-grid" class="region-grid"></div>
     <p id="reg-error" class="mut" style="margin-top:12px;min-height:18px"></p>
@@ -30,7 +30,7 @@
 
 <div id="app" class="app" style="display:none">
   <div class="topbar">
-    <h1 style="font-size:20px">Мәдениеттану</h1>
+    <h1 id="session-heading" style="font-size:20px">Мәдениеттану</h1>
     <span id="my-region-tag" class="region-tag"></span>
     <div class="spacer"></div>
     <span id="conn-status" class="pill"></span>
@@ -38,6 +38,7 @@
     <button id="leave-btn" class="ghost">Выйти из команды</button>
   </div>
   <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
+  <button id="map-visibility" class="ghost map-visibility" aria-expanded="true">Свернуть карту</button>
   <div class="stage-wrap">
     <canvas id="scene-canvas"></canvas>
     <div class="map-caption"><strong>ҚАЗАҚСТАН</strong><span>Культурный атлас · нажмите на регион</span></div><div class="hint">Тяните — вращение · колесо — масштаб</div><a class="map-credit" href="https://simplemaps.com/gis/country/kz" target="_blank" rel="noopener">Границы: SimpleMaps · CC BY 4.0 · рельеф стилизован</a>
@@ -48,8 +49,6 @@
   </div>
 </div>
 
-<button id="creative-toggle" type="button" hidden aria-controls="creative-drawer" aria-expanded="false">⚡ CREATIVE / DEV</button>
-<aside id="creative-drawer" class="creative-drawer" aria-label="Панель создателя" hidden></aside>
 <script type="module" src="student.js"></script>
 </body>
 </html>

@@ -39,6 +39,8 @@
     <button class="ghost" id="projector-btn">Скрыть ответы для проектора</button><button class="ghost" id="logout-btn">Выйти</button>
   </div>
   <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
+  <section class="glass dock-panel teacher-private format-toolbar"><label for="game-format">Формат пары</label><select id="game-format"><option value="team">Аймақтық одақ · 10 областей × 4</option><option value="solo">Жеке сайыс · каждый сам за себя</option></select><button id="format-apply" class="pri">Применить формат</button><button id="return-lobby" class="ghost">Вернуться в лобби</button><p id="format-status" class="small-note mut"></p></section>
+  <section id="solo-ranking" class="glass dock-panel" hidden><h2>Жеке сайыс · Лидеры</h2><div id="solo-leaders" class="solo-leaders"></div></section>
 
   <div id="dev-overlay" style="display:none;position:fixed;inset:0;background:rgba(3,7,11,0.72);z-index:50;align-items:center;justify-content:center;padding:20px">
     <div class="glass" style="width:min(640px,100%);max-height:86dvh;overflow:auto;padding:22px">
@@ -48,7 +50,7 @@
       </div>
 
       <div id="dev-panel">
-        <p class="mut" style="margin-top:10px">Редактор состояния. Допустимо 1–50 команд, вместимость каждой — 1–50; ресурс 0–1000. Новые участники входят через регистрацию. Правки активного вопроса выполняйте через банк вопросов.</p>
+        <p class="mut" style="margin-top:10px">Редактор состояния. Закреплены 10 областей по 4 обычных места; ресурс 0–1000, экономика 15–100%. В Solo редактируется и личный капитал. Новые участники входят через регистрацию.</p>
         <div class="row" style="margin:10px 0">
           <button id="dev-refresh-btn">Обновить из текущего состояния</button>
           <button id="dev-free-all-btn">Освободить все слоты</button>
@@ -68,7 +70,7 @@
     <div class="t-col">
       <div class="glass atlas-projector" style="min-height:440px;position:relative;overflow:hidden">
         <canvas id="scene-canvas"></canvas>
-        <div class="map-caption"><strong>ҚАЗАҚСТАН</strong><span>17 областей и 3 города · до 50 команд · предел 1000</span></div>
+        <div class="map-caption"><strong>ҚАЗАҚСТАН</strong><span>Географический атлас · 10 игровых областей · предел 1000</span></div>
         <label class="map-team-picker">Город команды<select id="map-team-select" aria-label="Команда на карте"><option value="">Среднее по регионам</option></select></label><div class="hint">Выберите команду для просмотра её города</div>
         <a class="map-credit" href="https://simplemaps.com/gis/country/kz" target="_blank" rel="noopener">Границы: SimpleMaps · CC BY 4.0 · рельеф стилизован</a>
       </div>
@@ -78,7 +80,7 @@
         <form id="team-count-form" class="admin-setting section-gap"><label for="team-count">Количество команд <small>Добавление и уменьшение</small></label><input id="team-count" type="number" min="1" max="50" value="4" required><button class="pri" id="team-expand" type="submit">Установить количество</button></form>
         <p class="small-note mut">При уменьшении сначала убираются пустые команды. Игроки из остальных переносятся в свободные места; если мест не хватает, увеличьте вместимость.</p>
         <form id="capacity-form" class="admin-setting section-gap"><label for="capacity-all">Мест в каждой команде <small>Применить ко всем и новым командам</small></label><input id="capacity-all" type="number" min="1" max="50" value="4" required><button id="capacity-apply" type="submit">Применить вместимость</button></form>
-        <details class="section-gap"><summary>Создать или настроить отдельную команду</summary><form id="team-form" class="qform section-gap"><label for="team-name" class="field-label">Название</label><input id="team-name" type="text" minlength="2" maxlength="60" placeholder="Например, Алаш" required><label for="team-base" class="field-label">Регион на карте</label><select id="team-base"></select><div class="team-edit-fields"><label>Мест<input id="team-capacity" type="number" min="1" max="50" value="4" required></label><label>Ресурс<input id="team-points" type="number" min="0" max="1000" value="0" required></label><label>Экономика, %<input id="team-economy" type="number" min="0" max="100" value="100" required></label></div><div class="row"><button id="team-save" class="pri" type="submit">Создать команду</button><button id="team-cancel" type="button" hidden>Отмена</button></div></form></details>
+        <details class="section-gap"><summary>Показатели выбранной области</summary><form id="team-form" class="qform section-gap"><label for="team-name" class="field-label">Название</label><input id="team-name" type="text" minlength="2" maxlength="60" readonly required><label for="team-base" class="field-label">Регион на карте</label><select id="team-base"></select><div class="team-edit-fields"><label>Мест<input id="team-capacity" type="number" min="4" max="4" value="4" readonly required></label><label>Ресурс<input id="team-points" type="number" min="0" max="1000" value="0" required></label><label>Экономика, %<input id="team-economy" type="number" min="15" max="100" value="100" required></label></div><div class="row"><button id="team-save" class="pri" type="submit">Сохранить показатели</button><button id="team-cancel" type="button" hidden>Отмена</button></div></form></details>
       </section>
       <section class="glass dock-panel">
         <div class="row spaced"><h2>Команды и участники</h2><input id="roster-search" type="search" placeholder="Поиск команды или участника" aria-label="Поиск команды или участника"></div>

@@ -90,6 +90,7 @@ function labelSprite() {
   const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true }));
   sprite.scale.set(7.3, 1.825, 1); sprite.renderOrder = 20;
+  sprite.center.set(.5,0);
   return { sprite, canvas, texture, key: "" };
 }
 function paintLabel(label, meta, points, economy) {
@@ -106,9 +107,13 @@ function paintLabel(label, meta, points, economy) {
   label.texture.needsUpdate = true;
 }
 
+export function labelScaleForDepth(depth,height,fov=40){
+  const pixels=clamp(210-Math.max(.1,depth)*1.15,112,200);
+  return {pixels,world:pixels*2*Math.tan(THREE.MathUtils.degToRad(fov*.5))*Math.max(.1,depth)/Math.max(1,height)};
+}
 export function createScene(canvas, opts = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
-  renderer.setPixelRatio(Math.min(1.75, window.devicePixelRatio || 1));
+  renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
   renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.25;
   renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x07151e); scene.fog = new THREE.FogExp2(0x07151e, .004);
@@ -266,8 +271,11 @@ export function createScene(canvas, opts = {}) {
       }
     }
     group.add(nature.finish());
-    const label = labelSprite(); label.sprite.position.set(0, Math.max(1.5,Math.min(3.5,townRadius+1)), -townRadius - .6); group.add(label.sprite);
-    const stem = lineFor([new THREE.Vector3(0, 1, -townRadius - 1), new THREE.Vector3(0, 2.8, -townRadius - 1)], meta.glow, .75); group.add(stem);
+    // Keep the name tied to the city centre. The previous sideways offset made
+    // the label appear to drift away from the city while the camera zoomed in.
+    const labelHeight = 1.2;
+    const label = labelSprite(); label.sprite.position.set(0, labelHeight, 0); group.add(label.sprite);
+    const stem = lineFor([new THREE.Vector3(0, .88, 0), new THREE.Vector3(0, labelHeight - .25, 0)], meta.glow, .75); group.add(stem);
     const beacon = new THREE.Mesh(new THREE.OctahedronGeometry(.2), new THREE.MeshStandardMaterial({ color: meta.glow, emissive: meta.glow, emissiveIntensity: 1.2, metalness: .5, roughness: .2 }));
     beacon.position.set(0, 2.6, -townRadius - 1); group.add(beacon);
     const victoryRing = new THREE.Mesh(new THREE.RingGeometry(townRadius * 1.12, townRadius * 1.15, 96), new THREE.MeshBasicMaterial({ color: 0xffdc8c, transparent: true, opacity: .75, side: THREE.DoubleSide }));
@@ -287,9 +295,12 @@ export function createScene(canvas, opts = {}) {
   regionSelect.innerHTML = '<option value="">Найти регион…</option>' + REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join("");
   regionSelect.addEventListener("change",()=>{if(regionSelect.value)focusRegion(regionSelect.value)});
   hud.append(homeButton,regionSelect); canvas.parentElement.append(hud);
-  let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true;
+  let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true,sceneVisible=true,requestedVisible=true,renderingReady=false,activeUntil=0;
+  function wake(ms=180){activeUntil=performance.now()+ms;if(renderingReady&&!frame&&!disposed&&sceneVisible&&requestedVisible&&!document.hidden)frame=requestAnimationFrame(animate)}
+  function setVisible(value){requestedVisible=value;if(value)wake();else{cancelAnimationFrame(frame);frame=0}}
   function moveCamera(target, distance) {
     cameraTween = { target, position: target.clone().add(new THREE.Vector3(0, distance * .79, distance * .71)) };
+    wake();
   }
   function overview() {
     selected = null; regionSelect.value="";
@@ -307,6 +318,7 @@ export function createScene(canvas, opts = {}) {
   }
   const stopTween = () => { cameraTween = null; };
   controls.addEventListener("start", stopTween);
+  controls.addEventListener('change',()=>wake());
   const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2(); let down = null;
   const onDown = e => { down = [e.clientX, e.clientY]; };
   const onUp = e => {
@@ -321,9 +333,12 @@ export function createScene(canvas, opts = {}) {
     renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
     if (selected) focusRegion(selected); else overview();
     if (initial && cameraTween) { camera.position.copy(cameraTween.position); controls.target.copy(cameraTween.target); cameraTween = null; initial = false; }
+    wake();
   }
   const observer = new ResizeObserver(resize); observer.observe(canvas); resize();
+  let stateKey='';
   function update(state, selectedRegionId) {
+    const key=JSON.stringify([selectedRegionId,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.points,r.economy,r.members.length])]);if(key===stateKey)return;stateKey=key;
     const selectedTeam = state.regions.find(t=>t.id===selectedRegionId);
     const selectedBase = selectedTeam ? metadataFor(selectedTeam).baseRegionId : null;
     for (const r of mapRegionsFor(state.regions,selectedRegionId)) {
@@ -340,17 +355,23 @@ export function createScene(canvas, opts = {}) {
       region.hasTeams = state.regions.some(t=>metadataFor(t).baseRegionId===r.id);
       paintLabel(region.label, selectedBase===r.id?{...region.meta,name:selectedTeam.name}:region.meta, region.points, r.economy);
     }
+    wake(1500);
   }
-  const projected = new THREE.Vector3();
+  const projected = new THREE.Vector3(), cameraSpace = new THREE.Vector3();
   function arrangeLabels(){
     scene.updateMatrixWorld(); camera.updateMatrixWorld();
     const width=canvas.clientWidth,height=canvas.clientHeight,placed=[];
     const ordered=[...regions].sort((a,b)=>Number(b.meta.id===selected)-Number(a.meta.id===selected)||Number(!!b.hasTeams)-Number(!!a.hasTeams));
     for(const r of ordered){
-      r.label.sprite.getWorldPosition(projected);const distance=camera.position.distanceTo(projected);
-      const size=distance*.065;r.label.sprite.scale.set(size,size/4,1);projected.project(camera);
+      r.label.sprite.getWorldPosition(projected);
+      cameraSpace.copy(projected).applyMatrix4(camera.matrixWorldInverse);
+      const depth=Math.max(.1,-cameraSpace.z);
+      // Labels remain readable in the overview and grow moderately when the
+      // user approaches a city, instead of looking farther away than the map.
+      const {pixels:pixelWidth,world:worldWidth}=labelScaleForDepth(depth,height,camera.fov);
+      r.label.sprite.scale.set(worldWidth,worldWidth/4,1);projected.project(camera);
       const x=(projected.x+1)*width/2,y=(1-projected.y)*height/2;
-      const box={x:x-63,y:y-18,w:126,h:36};
+      const box={x:x-pixelWidth/2,y:y-pixelWidth/4,w:pixelWidth,h:pixelWidth/4};
       const inView=projected.z>-1&&projected.z<1&&x>0&&x<width&&y>0&&y<height;
       const overlaps=placed.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y);
       r.label.sprite.visible=inView&&(!overlaps||r.meta.id===selected);
@@ -359,17 +380,20 @@ export function createScene(canvas, opts = {}) {
   }
   const clock = new THREE.Clock(), reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   function animate() {
-    if (disposed) return; frame = requestAnimationFrame(animate);
+    frame=0;if (disposed||!sceneVisible||!requestedVisible||document.hidden) return;
     const dt = Math.min(.05, clock.getDelta()), t = clock.elapsedTime, rate = reduceMotion ? 1 : 1 - Math.exp(-dt * 5);
     if (cameraTween) {
       camera.position.lerp(cameraTween.position, rate); controls.target.lerp(cameraTween.target, rate);
       if (camera.position.distanceTo(cameraTween.position) < .02) cameraTween = null;
     }
+    let settling=false;
     for (const region of regions) {
+      if(Math.abs(region.group.position.y-region.targetY)>.001)settling=true;
       region.group.position.y = THREE.MathUtils.lerp(region.group.position.y, region.targetY, rate);
       region.topTint.lerp(region.targetColor, rate); region.topMat.color.copy(region.topTint);
       for (let i = 0; i < region.stages.length; i++) {
         const stage = region.stages[i], target = i < region.stage ? 1 : .001;
+        if(Math.abs(stage.scale.y-target)>.001)settling=true;
         stage.scale.y = THREE.MathUtils.lerp(stage.scale.y, target, rate); stage.visible = stage.scale.y > .012;
       }
       region.beacon.rotation.y += reduceMotion ? 0 : dt * .55; region.beacon.position.y = 2.6 + (reduceMotion ? 0 : Math.sin(t * 1.7) * .12);
@@ -378,15 +402,19 @@ export function createScene(canvas, opts = {}) {
       region.fog.children.forEach((p, i) => { p.position.y = 1.5 + (reduceMotion ? 0 : Math.sin(t * .45 + i) * .12); });
     }
     controls.update(); arrangeLabels(); renderer.render(scene, camera);
+    if(!frame&&(cameraTween||settling||performance.now()<activeUntil))frame=requestAnimationFrame(animate);
   }
-  animate();
+  const onVisibility=()=>{if(document.hidden){cancelAnimationFrame(frame);frame=0}else wake()};document.addEventListener('visibilitychange',onVisibility);
+  const visibilityObserver=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{sceneVisible=entries[0]?.isIntersecting??true;if(sceneVisible)wake();else{cancelAnimationFrame(frame);frame=0}});visibilityObserver?.observe(canvas);
+  renderingReady=true;animate();
   function dispose() {
     disposed = true; cancelAnimationFrame(frame); observer.disconnect(); controls.dispose();
+    visibilityObserver?.disconnect();document.removeEventListener('visibilitychange',onVisibility);
     canvas.removeEventListener("pointerdown", onDown); canvas.removeEventListener("pointerup", onUp); hud.remove();
     const geometries = new Set(), mats = new Set(), textures = new Set();
     scene.traverse(object => { if (object.geometry) geometries.add(object.geometry); if (object.material) for (const mat of Array.isArray(object.material) ? object.material : [object.material]) { mats.add(mat); if (mat.map) textures.add(mat.map); } });
     geometries.forEach(g => g.dispose()); textures.forEach(t => t.dispose()); mats.forEach(m => m.dispose()); renderer.dispose();
     box.dispose(); cone.dispose(); cylinder.dispose(); dome.dispose();
   }
-  return { scene, camera, controls, renderer, update, focusRegion, overview, resize, dispose };
+  return { scene, camera, controls, renderer, update, focusRegion, overview, resize, setVisible,dispose };
 }

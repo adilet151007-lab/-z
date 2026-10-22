@@ -22,7 +22,7 @@ const waitFor = async condition => {
   while (!condition()) { if (Date.now() > deadline) throw new Error("Timed out waiting for state"); await new Promise(r => setTimeout(r, 10)); }
 };
 async function fixture(t, extra = {}) {
-  const server = await createGameServer({ ...config, store: new MemoryStore(), ...extra });
+  const server = await createGameServer({ ...config, legacyRules:true, store: new MemoryStore(), ...extra });
   const port = await server.listen(0, "127.0.0.1"), clients = [];
   t.after(async () => { clients.forEach(socket => socket.disconnect()); await server.close(); });
   const connect = async (auth = {}) => {
@@ -223,6 +223,37 @@ test('перезапуск сохраняет бронь создателя и �
 });
 
 const received=(socket,text)=>[...(socket.chatView?.messages||[]),...socket.chatEvents.map(e=>e.message)].some(m=>m.text===text);
+test('универсальный сервер: скрытые сессии, имя после кода, отзыв прав, защита режимов и сохранение после F5',async t=>{
+ const f=await fixture(t,{legacyRules:false}),teacher=await f.connect(),student=await f.connect(),root=await f.connect(),guest=await f.connect();await login(teacher);
+ assert.equal(guest.latest.regions.length,10);assert.equal(guest.latest.settings.mode,'team');assert.equal(guest.latest.regions.some(t=>t.id==='creators'),false);
+ const r=await command(root,'joinTeam',{regionId:'jetisu',name:config.creatorCodes.ernur+' Арман'});assert.equal(r.player.name,'Арман');
+ const a=await command(student,'joinTeam',{regionId:'jetisu',name:'Алия'});
+ for(const event of ['setGameMode','renameSelf','adjustCapital'])assert.equal((await command(student,event,{mode:'solo',name:'Подмена',pid:a.player.pid,delta:100})).code,'FORBIDDEN');
+ assert.equal((await command(root,'renameSelf',{name:'Марат'})).ok,true);await waitFor(()=>student.latest.regions.flatMap(t=>t.members).some(m=>m.name==='Марат'));
+ root.disconnect();const restored=await f.connect({playerToken:r.playerToken});assert.equal(restored.latest.viewer.isDevTelemetry,true);assert.equal(restored.latest.viewer.player.name,'Марат');
+ assert.equal((await command(guest,'joinTeam',{regionId:'jetisu',name:config.creatorCodes.ernur})).code,'CREATOR_OCCUPIED');
+ await command(teacher,'setGameMode',{mode:'solo'});await command(teacher,'startRound',{questionId:'q1',duration:30});await command(student,'castVote',{roundId:f.server.game.state.round.id,optionIdx:0});
+ await command(teacher,'resolveRound');await waitFor(()=>student.latest.round?.resolved);assert.equal(student.latest.viewer.player.capital,25);assert.equal(student.latest.leaderboard.find(m=>m.pid===a.player.pid).capital,25);
+ const snapshot=await command(restored,'getSnapshot');assert.equal(snapshot.snapshot.settings.mode,'solo');assert.equal(JSON.stringify(snapshot).includes('tokenHash'),false);
+ await command(teacher,'freeSlot',{regionId:'jetisu',pid:r.player.pid});assert.equal((await command(restored,'renameSelf',{name:'Снова'})).code,'FORBIDDEN');
+});
+test('универсальный сервер: предложения видны только своей команде и подтверждаются без штрафа',async t=>{
+ const f=await fixture(t,{legacyRules:false}),teacher=await f.connect(),a=await f.connect(),b=await f.connect(),other=await f.connect();await login(teacher);
+ const joined=await command(a,'joinTeam',{regionId:'saryarka',name:'Алия'});await command(b,'joinTeam',{regionId:'saryarka',name:'Бек'});await command(other,'joinTeam',{regionId:'jetisu',name:'Другой'});await command(teacher,'startRound',{questionId:'q1',duration:30});
+ const roundId=f.server.game.state.round.id;await command(a,'castVote',{roundId,optionIdx:1});await waitFor(()=>b.latest.round?.proposals.length===1);assert.equal(other.latest.round.proposals.length,0);
+ assert.equal((await command(other,'confirmVote',{roundId,pid:joined.player.pid})).ok,false);await command(a,'cancelVote',{roundId});assert.deepEqual(f.server.game.votesFor('saryarka'),{});
+ await command(a,'castVote',{roundId,optionIdx:0});await command(b,'confirmVote',{roundId,pid:joined.player.pid});await command(teacher,'resolveRound');assert.equal(f.server.game.region('saryarka').points,25);
+});
+test('универсальный Solo: 150 соединений получают личный результат и общий лидерборд',async t=>{
+ const f=await fixture(t,{legacyRules:false}),teacher=await f.connect();await login(teacher);await command(teacher,'setGameMode',{mode:'solo'});
+ const clients=await Promise.all(Array.from({length:150},()=>f.connect()));
+ const joined=await Promise.all(clients.map((s,i)=>command(s,'joinTeam',{name:'Участник '+i})));assert.equal(joined.filter(r=>r.ok).length,150);
+ await command(teacher,'startRound',{questionId:'q1',duration:120});const roundId=f.server.game.state.round.id;
+ const votes=await Promise.all(clients.map(s=>command(s,'castVote',{roundId,optionIdx:0})));assert.ok(votes.every(v=>v.ok));
+ await waitFor(()=>teacher.latest.round?.preview.length===150);assert.equal(clients[0].latest.round.question.correct,undefined);
+ await command(teacher,'resolveRound');await waitFor(()=>clients[149].latest.round?.resolved);
+ assert.equal(clients[149].latest.viewer.player.capital,25);assert.equal(clients[149].latest.leaderboard.length,150);assert.ok(clients[149].latest.leaderboard.every(m=>m.capital===25));assert.ok(f.server.game.state.regions.every(t=>t.economy===100));
+});
 test('чаты: гости и подмена роли запрещены, общий разговор доставляется участникам',async t=>{
  const f=await fixture(t),alice=await f.connect(),bob=await f.connect(),guest=await f.connect({isCreator:true});
  for(const event of ['chatSubscribe','chatSend','chatDelete'])assert.equal((await command(guest,event,{room:'global',text:'Спам',clientId:'guest_0001',messageId:'fake'})).code,'FORBIDDEN');

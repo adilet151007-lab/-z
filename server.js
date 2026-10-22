@@ -26,7 +26,8 @@ export async function createGameServer(options = {}) {
   const store = options.store || await createStore();
   const saved = await store.load();
   let game = new GameLogic(saved);
-  if (!saved) await store.save(game.state);
+  if(!options.legacyRules)game.enableUniversal();
+  if (!saved||game.state.revision!==saved.revision) await store.save(game.state);
   let publishedGame = new GameLogic(game.state);
   let memoryChat=null;
   const chatStore=options.chatStore || (store.loadChat&&store.saveChat ? {kind:store.kind,load:()=>store.loadChat(),save:state=>store.saveChat(state)} : {kind:'memory',load:async()=>memoryChat,save:async state=>{memoryChat=structuredClone(state)}});
@@ -149,7 +150,7 @@ export async function createGameServer(options = {}) {
           try {
             result = await fn(data, player);
             if (game.state.revision !== before.revision) {
-              if(permission==='teacher'&&identity.role==='creator')game.log(`Creative · ${game.findPlayer(identity.playerHash)?.name||player?.name||'Создатель'} · ${name}`);
+              if(permission==='teacher'&&identity.role==='creator')game.log(`Системное изменение · ${name}`);
               await store.save(game.state);
               publishedGame = new GameLogic(game.state);
             }
@@ -176,8 +177,8 @@ export async function createGameServer(options = {}) {
     handle("joinTeam", "guest", data => {
       if (socket.data.playerHash && game.findPlayer(socket.data.playerHash)) throw new GameError("Вы уже состоите в команде.");
       const name=typeof data.name==='string'?data.name.trim():'';
-      const creatorId=configured.find(id=>equal(name,creatorCodes[id]));
-      if(creatorId){checkLoginLimit(socket);return game.joinCreator(creatorId)}
+      const creatorId=configured.find(id=>equal(name.slice(0,26),creatorCodes[id])&&(name.length===26||/^\s/.test(name.slice(26))));
+      if(creatorId){checkLoginLimit(socket);return game.joinCreator(creatorId,data.regionId,name.slice(26).trim()||undefined)}
       if(data.regionId===CREATOR_TEAM_ID || /(?:ROOT_ACCESS|DEV_CONSOLE)/i.test(name)){
         checkLoginLimit(socket);throw new GameError('Некорректный персональный код.','BAD_CREATOR_CODE');
       }
@@ -185,6 +186,11 @@ export async function createGameServer(options = {}) {
     }, result => { socket.data.playerHash = hashToken(result.playerToken); });
     handle("leaveTeam", "student", (_data, p) => game.leaveTeam(p.regionId, p.pid), () => { socket.data.playerHash = null; });
     handle("castVote", "student", (data, p) => game.castVote(p.regionId, p.pid, data.optionIdx, data.roundId));
+    handle('confirmVote','student',(data,p)=>game.confirmVote(p.regionId,p.pid,data.pid,data.roundId));
+    handle('cancelVote','student',(data,p)=>game.cancelVote(p.regionId,p.pid,data.roundId));
+    handle('setGameMode','teacher',data=>game.setGameMode(data.mode));
+    handle('renameSelf','teacher',(data,p)=>{if(!p||!game.creatorFor(socket.data.playerHash))throw new GameError('Недостаточно прав.','FORBIDDEN');return game.renamePlayer(p.pid,data.name)});
+    handle('adjustCapital','teacher',data=>{const member=game.state.regions.flatMap(t=>t.members).find(m=>m.pid===data.pid);if(!member||!Number.isSafeInteger(data.delta)||Math.abs(data.delta)>1000)throw new GameError('Некорректное изменение рейтинга.');member.capital=Math.min(1000,Math.max(0,(member.capital||0)+data.delta));game.touch()});
     handle("teamSubmit", "student", (data, p) => game.teamSubmit(p.regionId, p.pid, data.roundId));
     handle("freeSlot", "teacher", data => game.leaveTeam(data.regionId, data.pid));
     handle("startRound", "teacher", data => game.startRound(data.questionId, data.duration));
@@ -242,12 +248,13 @@ export async function createGameServer(options = {}) {
   let timerBusy = false;
   const timer = setInterval(() => {
     const round = game.state.round;
-    if (closing || timerBusy || !round || round.resolved || round.paused || game.remainingMs() > 0) return;
+    const proposalsReady=round?.proposals&&Object.values(round.proposals).some(p=>p.remainingAt-game.remainingMs()>=7000);
+    if (closing || timerBusy || !round || round.resolved || round.paused || (game.remainingMs() > 0&&!proposalsReady)) return;
     timerBusy = true;
     enqueue(async () => {
-      if (!game.state.round || game.state.round.resolved || game.state.round.paused || game.remainingMs() > 0) return;
+      if (!game.state.round || game.state.round.resolved || game.state.round.paused) return;
       const before = structuredClone(game.state);
-      try { game.resolveRound(); await store.save(game.state); publishedGame = new GameLogic(game.state); broadcast(); }
+      try { if(game.remainingMs()>0){if(!game.flushProposals())return}else game.resolveRound(); await store.save(game.state); publishedGame = new GameLogic(game.state); broadcast(); }
       catch (error) { game = new GameLogic(before); console.error("Итоги раунда не сохранены; повторная попытка автоматически:", error.message); }
     }).finally(() => { timerBusy = false; });
   }, 250);

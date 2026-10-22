@@ -1,9 +1,9 @@
 import { io } from "/socket.io/socket.io.esm.min.js";
-export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity, CREATOR_TEAM_ID, isCreatorTeam, regularTeams } from "./game-config.js";
+export { REGIONS, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity, CREATOR_TEAM_ID, isCreatorTeam, regularTeams, MODE_NAMES, soloMultiplier } from "./game-config.js";
 
 export const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
-const getToken = key => { try { return sessionStorage.getItem(key) || undefined; } catch { return undefined; } };
-const setToken = (key, value) => { try { if (value) sessionStorage.setItem(key, value); else sessionStorage.removeItem(key); } catch {} };
+const getToken = key => { try { return localStorage.getItem(key)||sessionStorage.getItem(key) || undefined; } catch { return undefined; } };
+const setToken = (key, value) => { try { if (value){localStorage.setItem(key,value);sessionStorage.setItem(key,value)}else{localStorage.removeItem(key);sessionStorage.removeItem(key)} } catch {} };
 const creatorToken=()=>{try{return localStorage.getItem('cq_creator_session_v1')||undefined}catch{return undefined}};
 const saveCreatorToken=value=>{try{if(value)localStorage.setItem('cq_creator_session_v1',value);else localStorage.removeItem('cq_creator_session_v1')}catch{}};
 
@@ -16,13 +16,14 @@ export class GameEngine {
     this.offset = 0;
     this.listeners = new Set();
     this.chatListeners=new Set();this.chatMeta=null;this.chatView=null;
-    this.socket = io({ autoConnect: false, auth: callback => callback({ playerToken: mode === "student" ? creatorToken()||getToken("cq_player_token_v2") : undefined, teacherToken: mode === "teacher" ? getToken("cq_teacher_token_v2") : undefined }) });
+    this.socket = io({ autoConnect: false,reconnection:true,reconnectionDelay:2000,reconnectionDelayMax:2000,randomizationFactor:0,timeout:30000, auth: callback => callback({ playerToken: mode === "student" ? creatorToken()||getToken("cq_player_token_v2") : undefined, teacherToken: mode === "teacher" ? getToken("cq_teacher_token_v2") : undefined }) });
     this.socket.on("connect", () => { this.connected = true; this.error = ""; this.emit(); });
     this.socket.on("disconnect", () => { this.connected = false; this.emit(); });
-    this.socket.on("connect_error", () => { this.connected = false; this.error = "Не удалось подключиться к серверу. Повторяем…"; this.emit(); });
+    this.socket.on("connect_error", () => { this.connected = false; this.error = "Подключение к серверу... (пробуждение инстанса может занять до 30 сек)"; this.emit(); });
     this.socket.on("state", state => {
       const previous=this.state?.viewer,changed=previous?.role!==state.viewer.role||previous?.player?.pid!==state.viewer.player?.pid||previous?.player?.regionId!==state.viewer.player?.regionId;
       this.state = state;
+      if(mode==='student')try{if(state.viewer.player)localStorage.setItem('cq_session_v3',JSON.stringify({playerId:state.viewer.player.pid,teamId:state.viewer.player.regionId,mode:state.settings.mode||'team',name:state.viewer.player.name}));else localStorage.removeItem('cq_session_v3');if(state.viewer.isDevTelemetry)localStorage.setItem('isDevTelemetry','true');else localStorage.removeItem('isDevTelemetry')}catch{}
       if(changed){this.chatMeta=null;this.chatView=null;this.emitChat()}
       this.offset = state.serverTime - Date.now();
       if (mode === "student" && !state.viewer.player) {setToken("cq_player_token_v2", null);saveCreatorToken(null)}
@@ -72,6 +73,11 @@ export class GameEngine {
   async teacherLogout() { await this.request("teacherLogout"); setToken("cq_teacher_token_v2", null); }
   async leaveTeam() { await this.request("leaveTeam"); setToken("cq_player_token_v2", null);saveCreatorToken(null); }
   castVote(optionIdx) { return this.request("castVote", { optionIdx, roundId: this.state?.round?.id }); }
+  confirmVote(pid){return this.request('confirmVote',{pid,roundId:this.state?.round?.id})}
+  cancelVote(){return this.request('cancelVote',{roundId:this.state?.round?.id})}
+  setGameMode(mode){return this.request('setGameMode',{mode})}
+  renameSelf(name){return this.request('renameSelf',{name})}
+  adjustCapital(pid,delta){return this.request('adjustCapital',{pid,delta})}
   teamSubmit() { return this.request("teamSubmit", { roundId: this.state?.round?.id }); }
   freeSlot(regionId, pid) { return this.request("freeSlot", { regionId, pid }); }
   startRound(questionId, duration) { return this.request("startRound", { questionId, duration }); }

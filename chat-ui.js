@@ -14,7 +14,7 @@ export function setupCommunication(engine){
  let wasConnected=engine.connected;
  function allowed(){const v=engine.state?.viewer;return !!v&&(v.role==='teacher'||!!v.player)}
  function notice(text='',error=false){$('cq-chat-notice').textContent=text;$('cq-chat-notice').classList.toggle('red',error)}
- function updateCredits(){credits.hidden=creditsDismissed||open;document.body.classList.toggle('has-creative-chat',!!engine.state?.viewer.isCreator);const button=$('cq-credits-contact');button.textContent=!allowed()?'Войдите в команду, чтобы написать':engine.state.viewer.isCreator?'Открыть обращения ↗':engine.state.viewer.role==='teacher'?'Открыть общий чат ↗':'Написать создателям ↗';button.disabled=!allowed()}
+ function updateCredits(){credits.hidden=creditsDismissed||open;const button=$('cq-credits-contact');button.textContent=!allowed()?'Войдите в команду, чтобы написать':engine.state.viewer.isCreator?'Открыть обращения ↗':engine.state.viewer.role==='teacher'?'Открыть общий чат ↗':'Написать создателям ↗';button.disabled=!allowed()}
  function showCredits(){creditsDismissed=false;save('cq_credits_dismissed_v1','0');if(open)setOpen(false);updateCredits()}
  $('cq-credits-close').addEventListener('click',()=>{creditsDismissed=true;save('cq_credits_dismissed_v1','1');updateCredits()});
  $('cq-show-credits').addEventListener('click',showCredits);
@@ -91,6 +91,7 @@ export function setupCommunication(engine){
  });
  function draw(){
   const identity=meta?.identity;
+  panel.querySelector('[data-chat-kind="team"]').hidden=engine.state?.settings.mode==='solo';
   $('cq-chat-support-tab').hidden=identity?.role==='teacher';$('cq-chat-support-tab').textContent=identity?.role==='creator'?'Обращения':'Создатели';
   for(const button of panel.querySelectorAll('[data-chat-kind]')){const selected=button.dataset.chatKind===kind;button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected))}
   const options=candidates(),showPicker=options.length>1||(kind==='support'&&identity?.role==='creator');$('cq-chat-picker').hidden=!showPicker;
@@ -114,6 +115,7 @@ export function setupCommunication(engine){
   const reconnected=!wasConnected&&engine.connected;wasConnected=engine.connected;
   if(reconnected&&room&&allowed())subscribe(room);
   if(!allowed())setOpen(false);updateCredits();updateComposer();
+  if(meta?.enabled){if(engine.state?.settings.mode==='solo'&&kind==='team')chooseKind('global');else draw()}
  });
  updateCredits();
 }

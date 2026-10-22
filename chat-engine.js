@@ -36,14 +36,14 @@ export class ChatEngine{
   if(type==='support'){
    if(identity.role==='student')return identity.id===id;
    if(identity.role!=='creator')return false;
-   return game.state.regions.some(t=>!isCreatorTeam(t)&&t.members.some(m=>m.pid===id))||this.state.messages.some(m=>m.room===room);
+   return game.state.regions.some(t=>!isCreatorTeam(t)&&t.members.some(m=>m.pid===id&&!m.creatorId))||this.state.messages.some(m=>m.room===room);
   }
   return false;
  }
  requireRoom(game,identity,room){this.require(identity);ensure(this.canRead(game,identity,room),'Этот чат вам недоступен.','FORBIDDEN')}
  canSend(game,identity,room){
   if(!this.canRead(game,identity,room))return false;
-  if(room.startsWith('support:'))return game.state.regions.some(t=>!isCreatorTeam(t)&&t.members.some(m=>m.pid===room.slice(8)));
+  if(room.startsWith('support:'))return game.state.regions.some(t=>!isCreatorTeam(t)&&t.members.some(m=>m.pid===room.slice(8)&&!m.creatorId));
   return true;
  }
  descriptor(room,title){const messages=this.state.messages.filter(m=>m.room===room);return {id:room,title,lastSequence:messages.reduce((n,m)=>Math.max(n,m.updatedSequence||m.sequence),0),count:messages.filter(m=>!m.deleted).length}}
@@ -54,12 +54,12 @@ export class ChatEngine{
   if(identity.role==='student')rooms.push({...this.descriptor('support:'+identity.id,'Ернур и Адилет'),kind:'support'});
   const inbox=[];
   if(identity.role==='creator'){
-   const people=new Map(game.state.regions.filter(t=>!isCreatorTeam(t)).flatMap(t=>t.members.map(m=>[m.pid,{pid:m.pid,name:m.name,team:t.name,active:true,online:online.has(m.pid)}])));
+   const people=new Map(game.state.regions.filter(t=>!isCreatorTeam(t)).flatMap(t=>t.members.filter(m=>!m.creatorId).map(m=>[m.pid,{pid:m.pid,name:m.name,team:t.name,active:true,online:online.has(m.pid)}])));
    for(const message of this.state.messages){if(!message.room.startsWith('support:'))continue;const pid=message.room.slice(8);if(!people.has(pid)){const author=this.state.messages.find(m=>m.room===message.room&&m.author.id===pid)?.author;people.set(pid,{pid,name:author?.name||'Участник завершившейся сессии',team:author?.teamName||'',active:false,online:false})}}
    for(const p of people.values()){const room='support:'+p.pid,desc=this.descriptor(room,p.name),last=this.state.messages.filter(m=>m.room===room).at(-1);inbox.push({...p,...desc,preview:last?(last.deleted?'Сообщение удалено':last.text.slice(0,75)):'Новое обращение',at:last?.at||0})}
    inbox.sort((a,b)=>b.lastSequence-a.lastSequence||a.name.localeCompare(b.name,'ru'));
   }
-  const creators=Object.entries(CREATOR_NAMES).map(([id,name])=>{const member=game.state.regions.find(isCreatorTeam)?.members.find(m=>m.creatorId===id);return {name,online:!!member&&online.has(member.pid)}});
+  const creators=Object.entries(CREATOR_NAMES).map(([id,name])=>{const member=game.state.regions.flatMap(t=>t.members).find(m=>m.creatorId===id);return {name:game.state.settings.universal&&id==='adilet'?'Адлет':name,online:!!member&&online.has(member.pid)}});
   return {enabled:true,identity,rooms,inbox,creators,historyLimit:CHAT_HISTORY_LIMIT};
  }
  view(game,identity,room){
@@ -67,7 +67,7 @@ export class ChatEngine{
   const messages=this.state.messages.filter(m=>m.room===room).slice(-CHAT_HISTORY_LIMIT).map(m=>this.messageView(identity,m));
   return {room,messages,canSend:this.canSend(game,identity,room),latestSequence:this.descriptor(room,'').lastSequence};
  }
- messageView(identity,m){return {id:m.id,sequence:m.sequence,at:m.at,text:m.deleted?'':m.text,deleted:!!m.deleted,author:{...m.author},canDelete:!m.deleted&&(m.author.id===identity.id||identity.role==='teacher'||identity.role==='creator')}}
+ messageView(identity,m){return {id:m.id,sequence:m.sequence,at:m.at,text:m.deleted?'':m.text,deleted:!!m.deleted,author:{...m.author,...(m.author.role==='creator'&&!m.room.startsWith('support:')?{role:'student'}:{})},canDelete:!m.deleted&&(m.author.id===identity.id||identity.role==='teacher'||identity.role==='creator')}}
  prepareSend(game,identity,room,text,clientId){
   this.requireRoom(game,identity,room);ensure(this.canSend(game,identity,room),'Участник вышел из игры. История обращения доступна для просмотра.');
   ensure(typeof text==='string','Введите текст сообщения.');
