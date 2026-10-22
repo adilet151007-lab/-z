@@ -15,21 +15,32 @@ export class GameEngine {
     this.error = "";
     this.offset = 0;
     this.listeners = new Set();
+    this.chatListeners=new Set();this.chatMeta=null;this.chatView=null;
     this.socket = io({ autoConnect: false, auth: callback => callback({ playerToken: mode === "student" ? creatorToken()||getToken("cq_player_token_v2") : undefined, teacherToken: mode === "teacher" ? getToken("cq_teacher_token_v2") : undefined }) });
     this.socket.on("connect", () => { this.connected = true; this.error = ""; this.emit(); });
     this.socket.on("disconnect", () => { this.connected = false; this.emit(); });
     this.socket.on("connect_error", () => { this.connected = false; this.error = "Не удалось подключиться к серверу. Повторяем…"; this.emit(); });
     this.socket.on("state", state => {
+      const previous=this.state?.viewer,changed=previous?.role!==state.viewer.role||previous?.player?.pid!==state.viewer.player?.pid||previous?.player?.regionId!==state.viewer.player?.regionId;
       this.state = state;
+      if(changed){this.chatMeta=null;this.chatView=null;this.emitChat()}
       this.offset = state.serverTime - Date.now();
       if (mode === "student" && !state.viewer.player) {setToken("cq_player_token_v2", null);saveCreatorToken(null)}
       if (mode === "teacher" && state.viewer.role !== "teacher") setToken("cq_teacher_token_v2", null);
       this.emit();
     });
+    this.socket.on('chat:meta',meta=>{this.chatMeta=meta;this.emitChat()});
+    this.socket.on('chat:view',view=>{this.chatView=view;this.emitChat()});
+    this.socket.on('chat:message',event=>{if(this.chatView?.room!==event.room)return;const messages=this.chatView.messages.filter(m=>m.id!==event.message.id).concat(event.message).sort((a,b)=>a.sequence-b.sequence).slice(-(this.chatMeta?.historyLimit||80));this.chatView={...this.chatView,messages,latestSequence:event.latestSequence};this.emitChat()});
     this.socket.connect();
   }
   onChange(listener) { this.listeners.add(listener); listener(this.state); return () => this.listeners.delete(listener); }
   emit() { for (const fn of this.listeners) fn(this.state); }
+  onChat(listener){this.chatListeners.add(listener);listener(this.chatMeta,this.chatView);return()=>this.chatListeners.delete(listener)}
+  emitChat(){for(const fn of this.chatListeners)fn(this.chatMeta,this.chatView)}
+  subscribeChat(room){return this.request('chatSubscribe',{room})}
+  sendChat(room,text,clientId){return this.request('chatSend',{room,text,clientId})}
+  deleteChatMessage(messageId){return this.request('chatDelete',{messageId})}
   request(event, data = {}) {
     if (!this.connected) return Promise.reject(new Error("Нет связи с сервером. Дождитесь подключения."));
     return new Promise((resolve, reject) => this.socket.timeout(20000).emit(event, data, (error, response) => {

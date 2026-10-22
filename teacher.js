@@ -1,8 +1,10 @@
 import { GameEngine, REGIONS, capacityFor, totalCapacity, regularTeams, isCreatorTeam, MAX_TEAMS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, metadataFor, escapeHTML as h } from "./shared-engine.js";
 import { createScene } from "./scene3d.js";
 import { setupSyllabus } from "./syllabus-ui.js";
+import { setupCommunication } from "./chat-ui.js";
 
 const $ = id => document.getElementById(id), engine = new GameEngine("teacher");
+setupCommunication(engine);
 let scene=null,sceneFailed=false,selectedQuestionId=null,duration=30,controlKey="",loggingIn=false;
 let editId=null,editVersion=null,bankKey="",bankPage=0,teamEditId=null,projector=false,mapKey="",playerEditId=null,countPlan=null,managerInitialized=false,countDirty=false,capacityDirty=false,playerOptionsKey="",rosterKey="";
 function message(text="",error=false){$("action-message").textContent=text;$("action-message").classList.toggle("red",error)}
@@ -20,6 +22,7 @@ $("logout-btn").addEventListener("click",()=>act(()=>engine.teacherLogout()));
 $("reset-btn").addEventListener("click",()=>{if(confirm("Сбросить очки, участников и раунд? Названия команд и банк вопросов сохранятся."))act(()=>engine.resetGame(),"Новая игра начата.")});
 $("projector-btn").addEventListener("click",()=>{
  projector=!projector;document.body.classList.toggle("projector-mode",projector);
+ if(projector)window.dispatchEvent(new Event('cq:hide-chat'));
  $("projector-btn").textContent=projector?"Показать панель преподавателя":"Скрыть ответы для проектора";
  scene?.resize();
 });

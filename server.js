@@ -9,6 +9,7 @@ import { GameLogic, GameError, hashToken } from "./game-logic.js";
 import { createStore } from "./storage.js";
 import { analyzeSyllabus, generateSyllabusQuestions } from "./syllabus-engine.js";
 import { CREATOR_TEAM_ID, CREATOR_NAMES } from "./game-config.js";
+import { ChatEngine, chatIdentity } from "./chat-engine.js";
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const digest = value => createHash("sha256").update(value).digest();
@@ -27,6 +28,9 @@ export async function createGameServer(options = {}) {
   let game = new GameLogic(saved);
   if (!saved) await store.save(game.state);
   let publishedGame = new GameLogic(game.state);
+  let memoryChat=null;
+  const chatStore=options.chatStore || (store.loadChat&&store.saveChat ? {kind:store.kind,load:()=>store.loadChat(),save:state=>store.saveChat(state)} : {kind:'memory',load:async()=>memoryChat,save:async state=>{memoryChat=structuredClone(state)}});
+  const chat=new ChatEngine(await chatStore.load());
   let pending = Promise.resolve(), closing = false;
   const enqueue = fn => { const result = pending.then(fn); pending = result.catch(() => {}); return result; };
   const app = express();
@@ -38,8 +42,8 @@ export async function createGameServer(options = {}) {
     next();
   });
   app.get("/", (_req, res) => res.redirect("/student.html"));
-  app.get("/health", (_req, res) => res.status(closing ? 503 : 200).json({ ok: !closing, storage: store.kind, creatorAccessEnabled:configured.length===2 }));
-  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/styles.css"]);
+  app.get("/health", (_req, res) => res.status(closing ? 503 : 200).json({ ok: !closing, storage: store.kind, chatStorage:chatStore.kind, creatorAccessEnabled:configured.length===2 }));
+  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css"]);
   app.use((req, res, next) => allowed.has(req.path) ? res.sendFile(path.join(directory, req.path.slice(1))) : next());
   app.get("/vendor/pdfjs/pdf.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.mjs")));
   app.get("/vendor/pdfjs/pdf.worker.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.worker.mjs")));
@@ -73,19 +77,42 @@ export async function createGameServer(options = {}) {
   };
   const actor = socket => ({ role: validTeacherToken(socket.data.teacherToken) ? "teacher" : publishedGame.creatorFor(socket.data.playerHash) ? "creator" : "guest", playerHash: socket.data.playerHash });
   const online = () => new Set([...io.sockets.sockets.values()].map(s => s.data.playerHash && publishedGame.findPlayer(s.data.playerHash)?.pid).filter(Boolean));
-  const sendState = socket => socket.emit("state", publishedGame.view(actor(socket), online()));
+  const chatTopology=players=>hashToken(JSON.stringify([publishedGame.state.regions.map(t=>[t.id,t.name,t.members.map(m=>[m.pid,m.name])]),[...players].sort()]));
+  function sendChatScope(socket,force=false,players=online(),topology=chatTopology(players)){
+    const identity=chatIdentity(publishedGame,actor(socket)),key=JSON.stringify([identity,topology]);
+    const changed=socket.data.chatScope!==key;
+    if(!changed&&!force)return;
+    socket.data.chatScope=key;socket.emit('chat:meta',chat.metadata(publishedGame,identity,players));
+    if(changed){
+      if(!identity){socket.data.chatRoom=null;socket.emit('chat:view',{room:null,messages:[],canSend:false,latestSequence:0});return true}
+      if(!chat.canRead(publishedGame,identity,socket.data.chatRoom))socket.data.chatRoom='global';
+      socket.emit('chat:view',chat.view(publishedGame,identity,socket.data.chatRoom));
+    }
+    return changed;
+  }
+  const sendState = socket => {const players=online();socket.emit("state", publishedGame.view(actor(socket), players));sendChatScope(socket,false,players)};
+  function publishChat(room,messageId){
+    const players=online(),topology=chatTopology(players);
+    const message=chat.state.messages.find(m=>m.id===messageId);
+    for(const socket of io.sockets.sockets.values()){
+      const changed=sendChatScope(socket,true,players,topology);
+      const identity=chatIdentity(publishedGame,actor(socket));
+      if(!changed&&message&&socket.data.chatRoom===room&&chat.canRead(publishedGame,identity,room))socket.emit('chat:message',{room,message:chat.messageView(identity,message),latestSequence:chat.descriptor(room,'').lastSequence});
+    }
+  }
   // Сотни одновременных голосов объединяются в одну рассылку раз в 40 мс.
   let broadcastTimer = null;
   const broadcast = () => {
     if (closing || broadcastTimer) return;
     broadcastTimer = setTimeout(() => {
       broadcastTimer = null; if (closing) return;
-      const players = online();
-      for (const socket of io.sockets.sockets.values()) socket.emit("state", publishedGame.view(actor(socket), players));
+      const players = online(),topology=chatTopology(players);
+      for (const socket of io.sockets.sockets.values()){socket.emit("state", publishedGame.view(actor(socket), players));sendChatScope(socket,false,players,topology)}
     }, 40);
     broadcastTimer.unref();
   };
   const attempts = new Map();
+  const chatAttempts=new Map();
   const checkLoginLimit = socket => {
     const ip = socket.handshake.headers["x-forwarded-for"]?.split(",")[0]?.trim() || socket.handshake.address;
     const now = Date.now();
@@ -131,7 +158,7 @@ export async function createGameServer(options = {}) {
             throw error;
           }
           if (after) after(result);
-          if (game.state.revision !== before.revision || after) broadcast();
+          if (game.state.revision !== before.revision || (after&&!name.startsWith('chat'))) broadcast();
           reply({ ok: true, ...(result || {}) });
         }).catch(error => {
           if (!(error instanceof GameError)) console.error("Команда не выполнена:", error.message);
@@ -191,6 +218,24 @@ export async function createGameServer(options = {}) {
     handle("getSnapshot", "teacher", () => ({ snapshot: game.editorSnapshot() }));
     handle("getHotfixBackup", "teacher", () => game.hotfixBackupSnapshot());
     handle("exportSummary", "teacher", () => ({ rows: game.exportSummary() }));
+    handle('chatSubscribe','guest',data=>{
+      const identity=chatIdentity(publishedGame,actor(socket));
+      return {chat:chat.view(publishedGame,identity,data.room),meta:chat.metadata(publishedGame,identity,online())};
+    },result=>{socket.data.chatRoom=result.chat.room;socket.emit('chat:meta',result.meta);socket.emit('chat:view',result.chat)});
+    handle('chatSend','guest',async data=>{
+      const identity=chatIdentity(publishedGame,actor(socket)),draft=chat.prepareSend(publishedGame,identity,data.room,data.text,data.clientId);
+      if(!draft.duplicate){
+        const now=Date.now(),recent=(chatAttempts.get(identity.id)||[]).filter(t=>t>now-10000);
+        if(recent.length>=8)throw new GameError('Не больше 8 сообщений за 10 секунд. Подождите немного.','RATE_LIMIT');
+        await chatStore.save(draft.state);chat.state=draft.state;chatAttempts.set(identity.id,[...recent,now]);
+      }
+      return {messageId:draft.message.id,room:draft.message.room,duplicate:draft.duplicate};
+    },result=>{if(!result.duplicate)publishChat(result.room,result.messageId)});
+    handle('chatDelete','guest',async data=>{
+      const draft=chat.prepareDelete(publishedGame,chatIdentity(publishedGame,actor(socket)),data.messageId);
+      if(!draft.duplicate){await chatStore.save(draft.state);chat.state=draft.state}
+      return {room:draft.room,messageId:data.messageId,duplicate:draft.duplicate};
+    },result=>{if(!result.duplicate)publishChat(result.room,result.messageId)});
     socket.on("disconnect", () => broadcast());
   });
 
@@ -207,7 +252,7 @@ export async function createGameServer(options = {}) {
     }).finally(() => { timerBusy = false; });
   }, 250);
   timer.unref();
-  const cleanup = setInterval(() => { for (const [ip, value] of attempts) if (value.until < Date.now()) attempts.delete(ip); }, 60000);
+  const cleanup = setInterval(() => { for (const [ip, value] of attempts) if (value.until < Date.now()) attempts.delete(ip);for(const [id,times] of chatAttempts)if(!times.some(t=>t>Date.now()-10000))chatAttempts.delete(id); }, 60000);
   cleanup.unref();
 
   return {

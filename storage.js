@@ -18,18 +18,23 @@ export class FileStore {
     catch (error) { await unlink(temp).catch(() => {}); throw error; }
   }
   async close() {}
+  async loadChat() { return new FileStore(`${this.filename}.chat.json`).load(); }
+  async saveChat(snapshot) { return new FileStore(`${this.filename}.chat.json`).save(snapshot); }
 }
 
 export class PostgresStore {
   constructor(pool) { this.pool = pool; this.kind = "postgres"; }
   async init() {
     await this.pool.query("CREATE TABLE IF NOT EXISTS culture_quest_state (id SMALLINT PRIMARY KEY CHECK (id = 1), snapshot JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
+    await this.pool.query("CREATE TABLE IF NOT EXISTS culture_quest_chat (id SMALLINT PRIMARY KEY CHECK (id = 1), snapshot JSONB NOT NULL, updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW())");
   }
   async load() { const { rows } = await this.pool.query("SELECT snapshot FROM culture_quest_state WHERE id = 1"); return rows[0]?.snapshot || null; }
   async save(snapshot) {
     await this.pool.query("INSERT INTO culture_quest_state (id, snapshot, updated_at) VALUES (1, $1::jsonb, NOW()) ON CONFLICT (id) DO UPDATE SET snapshot = EXCLUDED.snapshot, updated_at = NOW()", [JSON.stringify(snapshot)]);
   }
   async close() { await this.pool.end(); }
+  async loadChat() { const { rows } = await this.pool.query("SELECT snapshot FROM culture_quest_chat WHERE id = 1"); return rows[0]?.snapshot || null; }
+  async saveChat(snapshot) { await this.pool.query("INSERT INTO culture_quest_chat (id, snapshot, updated_at) VALUES (1, $1::jsonb, NOW()) ON CONFLICT (id) DO UPDATE SET snapshot = EXCLUDED.snapshot, updated_at = NOW()",[JSON.stringify(snapshot)]); }
 }
 
 export async function createStore({ databaseUrl = process.env.DATABASE_URL, stateFile = process.env.STATE_FILE || "./data/game-state.json" } = {}) {

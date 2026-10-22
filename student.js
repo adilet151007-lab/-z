@@ -1,9 +1,11 @@
 import { GameEngine, REGIONS, capacityFor, totalCapacity, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, metadataFor, escapeHTML as h, CREATOR_TEAM_ID, isCreatorTeam, regularTeams } from "./shared-engine.js";
 import { createScene } from "./scene3d.js";
 import { setupCreatorOverlay } from "./creator-overlay.js";
+import { setupCommunication } from "./chat-ui.js";
 
 const engine = new GameEngine("student");
 setupCreatorOverlay(engine);
+setupCommunication(engine);
 const $ = id => document.getElementById(id);
 let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null;
 let sceneError = "";

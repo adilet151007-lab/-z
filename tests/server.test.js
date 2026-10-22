@@ -10,9 +10,11 @@ import { FileStore } from "../storage.js";
 
 const config = { creatorCodes:{ernur:'E'.repeat(26),adilet:'A'.repeat(26)}, teacherPassword: "test-teacher-password", sessionSecret: "unit-test-session-secret-at-least-32-characters" };
 class MemoryStore {
-  kind = "memory"; snapshot = null; fail = false;
+  kind = "memory"; snapshot = null; fail = false; chatSnapshot = null; failChat = false;
   async load() { return structuredClone(this.snapshot); }
   async save(state) { if (this.fail) throw new Error("simulated-storage-error"); this.snapshot = structuredClone(state); }
+  async loadChat() { return structuredClone(this.chatSnapshot); }
+  async saveChat(state) { if (this.failChat) throw new Error('simulated-chat-storage-error'); this.chatSnapshot=structuredClone(state); }
   async close() {}
 }
 const waitFor = async condition => {
@@ -26,6 +28,9 @@ async function fixture(t, extra = {}) {
   const connect = async (auth = {}) => {
     const socket = io(`http://127.0.0.1:${port}`, { auth, autoConnect: false, reconnection: false, transports: ["websocket"] });
     clients.push(socket); socket.on("state", state => { socket.latest = state; });
+    socket.on('chat:meta',meta=>{socket.chatMeta=meta});
+    socket.on('chat:view',view=>{socket.chatView=view});
+    socket.chatEvents=[];socket.on('chat:message',event=>{socket.chatEvents.push(event)});
     const ready = once(socket, "state"); socket.connect(); await ready; return socket;
   };
   return { server, connect, base: `http://127.0.0.1:${port}` };
@@ -105,8 +110,8 @@ test("ошибка сохранения отменяет изменение; у�
 });
 test("HTTP раздаёт обе страницы и локальные библиотеки, но не сервер и секреты", async t => {
   const f = await fixture(t);
-  for (const resource of ["/student.html", "/teacher.html", "/shared-engine.js", "/creator-overlay.js", "/region-geography.js", "/scene3d.js", "/syllabus-ui.js", "/vendor/pdfjs/pdf.mjs", "/vendor/pdfjs/pdf.worker.mjs", "/vendor/mammoth/mammoth.browser.min.js", "/vendor/three/examples/jsm/utils/BufferGeometryUtils.js", "/vendor/three/build/three.module.js", "/vendor/three/examples/jsm/controls/OrbitControls.js", "/socket.io/socket.io.esm.min.js", "/health"]) assert.equal((await fetch(f.base + resource)).status, 200, resource);
-  for (const resource of ["/server.js", "/game-logic.js", "/question-bank.js", "/.env", "/data/game-state.json", "/storage.js", "/syllabus-engine.js", "/syllabus-bank.js"]) assert.equal((await fetch(f.base + resource)).status, 404, resource);
+  for (const resource of ["/student.html", "/teacher.html", "/shared-engine.js", "/creator-overlay.js", "/chat-ui.js", "/region-geography.js", "/scene3d.js", "/syllabus-ui.js", "/vendor/pdfjs/pdf.mjs", "/vendor/pdfjs/pdf.worker.mjs", "/vendor/mammoth/mammoth.browser.min.js", "/vendor/three/examples/jsm/utils/BufferGeometryUtils.js", "/vendor/three/build/three.module.js", "/vendor/three/examples/jsm/controls/OrbitControls.js", "/socket.io/socket.io.esm.min.js", "/health"]) assert.equal((await fetch(f.base + resource)).status, 200, resource);
+  for (const resource of ["/server.js", "/game-logic.js", "/chat-engine.js", "/question-bank.js", "/.env", "/data/game-state.json", "/data/game-state.json.chat.json", "/storage.js", "/syllabus-engine.js", "/syllabus-bank.js"]) assert.equal((await fetch(f.base + resource)).status, 404, resource);
 });
 test("новое соединение получает только сохранённое состояние во время медленной записи", async t => {
   const f = await fixture(t), teacher = await f.connect(); await login(teacher);
@@ -130,11 +135,15 @@ test("перезапуск сервера восстанавливает сос�
   const joined = await command(student, "joinTeam", { regionId: "mangystau", name: "Сохранённый" });
   await command(teacher, "adjustPoints", { regionId: "mangystau", delta: 75 });
   await command(teacher, "addCustomQuestion", { text: "Сохранённый вопрос?", options: ["a","b","c","d"], correctIdx: 1, points: 25 });
+  await command(student,'chatSend',{room:'support:'+joined.player.pid,text:'Сохранённое обращение',clientId:'restart_0001'});
   student.disconnect(); teacher.disconnect(); await first.server.close();
   const second = await fixture(t, { store: new FileStore(filename) });
   const restored = await second.connect({ playerToken: joined.playerToken });
   assert.equal(restored.latest.viewer.player.name, "Сохранённый");
   assert.equal(restored.latest.regions[2].points, 75);
+  const history=await command(restored,'chatSubscribe',{room:'support:'+joined.player.pid});
+  assert.equal(history.chat.messages[0].text,'Сохранённое обращение');
+  assert.equal(JSON.stringify(second.server.game.state).includes('Сохранённое обращение'),false);
   const teacherRestored = await second.connect({ teacherToken: teacherAuth.teacherToken });
   assert.equal(teacherRestored.latest.viewer.role, "teacher");
   assert.equal(teacherRestored.latest.questions.length, 11);
@@ -211,4 +220,66 @@ test('перезапуск сохраняет бронь создателя и �
  const second=await fixture(t,{store}),newClient=await second.connect();assert.equal((await command(newClient,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur})).code,'CREATOR_OCCUPIED');
  const resumed=await second.connect({playerToken:joined.playerToken});assert.equal(resumed.latest.viewer.role,'creator');assert.equal((await command(resumed,'adjustPoints',{regionId:'creators',delta:25})).ok,true);
  assert.equal(second.server.game.region('creators').points,25);
+});
+
+const received=(socket,text)=>[...(socket.chatView?.messages||[]),...socket.chatEvents.map(e=>e.message)].some(m=>m.text===text);
+test('чаты: гости и подмена роли запрещены, общий разговор доставляется участникам',async t=>{
+ const f=await fixture(t),alice=await f.connect(),bob=await f.connect(),guest=await f.connect({isCreator:true});
+ for(const event of ['chatSubscribe','chatSend','chatDelete'])assert.equal((await command(guest,event,{room:'global',text:'Спам',clientId:'guest_0001',messageId:'fake'})).code,'FORBIDDEN');
+ await command(alice,'joinTeam',{regionId:'saryarka',name:'Алия'});await command(bob,'joinTeam',{regionId:'jetisu',name:'Бек'});
+ await command(alice,'chatSubscribe',{room:'global'});await command(bob,'chatSubscribe',{room:'global'});
+ const result=await command(alice,'chatSend',{room:'global',text:'Привет аудитории',clientId:'global_0001',author:{name:'Ернур',role:'creator'}});assert.equal(result.ok,true);
+ await waitFor(()=>received(bob,'Привет аудитории'));
+ assert.equal(f.server.store.chatSnapshot.messages[0].author.name,'Алия');assert.equal(f.server.store.chatSnapshot.messages[0].author.role,'student');
+ assert.equal(received(guest,'Привет аудитории'),false);assert.equal(guest.chatMeta.enabled,false);
+ assert.equal(JSON.stringify(f.server.game.state).includes('Привет аудитории'),false);
+});
+test('чаты: личное обращение видят оба создателя, чужие студенты и преподаватель не получают текст',async t=>{
+ const f=await fixture(t),alice=await f.connect(),bob=await f.connect(),teacher=await f.connect(),ernur=await f.connect(),adilet=await f.connect();
+ await login(teacher);const a=await command(alice,'joinTeam',{regionId:'saryarka',name:'Алия'});await command(bob,'joinTeam',{regionId:'saryarka',name:'Бек'});
+ await command(ernur,'joinTeam',{regionId:'creators',name:config.creatorCodes.ernur});await command(adilet,'joinTeam',{regionId:'creators',name:config.creatorCodes.adilet});
+ const room='support:'+a.player.pid;
+ for(const socket of [alice,ernur,adilet])assert.equal((await command(socket,'chatSubscribe',{room})).ok,true);
+ for(const socket of [teacher,bob])assert.equal((await command(socket,'chatSubscribe',{room})).code,'FORBIDDEN');
+ const sent=await command(alice,'chatSend',{room,text:'Закрытая просьба проверить вопрос',clientId:'private_0001'});
+ await waitFor(()=>received(ernur,'Закрытая просьба проверить вопрос')&&received(adilet,'Закрытая просьба проверить вопрос'));
+ for(const socket of [teacher,bob]){assert.equal(received(socket,'Закрытая просьба проверить вопрос'),false);assert.deepEqual(socket.chatMeta.inbox,[]);assert.equal(JSON.stringify(socket.chatMeta).includes('Закрытая просьба'),false);assert.equal((await command(socket,'chatDelete',{messageId:sent.messageId})).code,'FORBIDDEN')}
+ await command(adilet,'chatSend',{room,text:'Проверили, спасибо!',clientId:'reply_0001'});await waitFor(()=>received(alice,'Проверили, спасибо!'));
+ const message=[...alice.chatEvents.map(e=>e.message),...(alice.chatView?.messages||[])].find(m=>m.text==='Проверили, спасибо!');assert.equal(message.author.name,'Адилет');assert.equal(message.author.role,'creator');
+ assert.equal((await command(teacher,'chatSubscribe',{room:'team:creators'})).code,'FORBIDDEN');
+});
+test('чаты: перенос и исключение отзывают доступ до следующего сообщения',async t=>{
+ const f=await fixture(t),alice=await f.connect(),dana=await f.connect(),teacher=await f.connect();await login(teacher);
+ const a=await command(alice,'joinTeam',{regionId:'saryarka',name:'Алия'});await command(dana,'joinTeam',{regionId:'saryarka',name:'Дана'});
+ await command(alice,'chatSubscribe',{room:'team:saryarka'});await command(dana,'chatSubscribe',{room:'team:saryarka'});
+ await command(teacher,'movePlayer',{pid:a.player.pid,toTeamId:'jetisu'});
+ await command(dana,'chatSend',{room:'team:saryarka',text:'Старой команде',clientId:'team_old_0001'});
+ await waitFor(()=>alice.chatMeta.identity?.teamId==='jetisu');assert.equal(received(alice,'Старой команде'),false);
+ assert.equal((await command(alice,'chatSubscribe',{room:'team:saryarka'})).code,'FORBIDDEN');
+ assert.equal((await command(alice,'chatSubscribe',{room:'team:jetisu'})).ok,true);
+ await command(teacher,'freeSlot',{regionId:'jetisu',pid:a.player.pid});
+ assert.equal((await command(alice,'chatSend',{room:'global',text:'Исключённый',clientId:'revoked_0001'})).code,'FORBIDDEN');
+ await waitFor(()=>alice.chatMeta.enabled===false);assert.equal(alice.chatView.messages.length,0);
+});
+test('чаты: ошибка БД отменяет отправку, повтор не дублирует, удаление рассылает пустой текст',async t=>{
+ const f=await fixture(t),alice=await f.connect(),bob=await f.connect();
+ await command(alice,'joinTeam',{regionId:'jetisu',name:'Алия'});await command(bob,'joinTeam',{regionId:'jetisu',name:'Бек'});await command(alice,'chatSubscribe',{room:'global'});await command(bob,'chatSubscribe',{room:'global'});
+ const payload={room:'global',text:'Надёжная доставка',clientId:'delivery_0001'};
+ f.server.store.failChat=true;assert.equal((await command(alice,'chatSend',payload)).code,'STORAGE_ERROR');assert.equal(f.server.store.chatSnapshot,null);assert.equal(received(bob,payload.text),false);
+ f.server.store.failChat=false;const first=await command(alice,'chatSend',payload),duplicate=await command(alice,'chatSend',payload);
+ assert.equal(first.ok,true);assert.equal(duplicate.duplicate,true);assert.equal(duplicate.messageId,first.messageId);assert.equal(f.server.store.chatSnapshot.messages.length,1);
+ await waitFor(()=>received(bob,payload.text));
+ assert.equal((await command(bob,'chatDelete',{messageId:first.messageId})).code,'FORBIDDEN');
+ f.server.store.failChat=true;assert.equal((await command(alice,'chatDelete',{messageId:first.messageId})).code,'STORAGE_ERROR');assert.equal(f.server.store.chatSnapshot.messages[0].text,payload.text);
+ f.server.store.failChat=false;await command(alice,'chatDelete',{messageId:first.messageId});await waitFor(()=>bob.chatEvents.some(e=>e.message.id===first.messageId&&e.message.deleted));
+ assert.equal(f.server.store.chatSnapshot.messages[0].text,'');
+});
+test('чаты: антиспам привязан к игроку и не сбрасывается переподключением',async t=>{
+ const f=await fixture(t),alice=await f.connect();const joined=await command(alice,'joinTeam',{regionId:'saryarka',name:'Алия'});
+ for(let i=0;i<8;i++)assert.equal((await command(alice,'chatSend',{room:'global',text:'Сообщение '+i,clientId:'rate_000'+i})).ok,true);
+ assert.equal((await command(alice,'chatSend',{room:'global',text:'Сообщение 7',clientId:'rate_0007'})).duplicate,true);
+ assert.equal((await command(alice,'chatSend',{room:'global',text:'Лишнее',clientId:'rate_0008'})).code,'RATE_LIMIT');
+ alice.disconnect();const resumed=await f.connect({playerToken:joined.playerToken});
+ assert.equal((await command(resumed,'chatSend',{room:'global',text:'Снова лишнее',clientId:'rate_0009'})).code,'RATE_LIMIT');
+ assert.equal((await command(resumed,'chatSubscribe',{room:'global'})).chat.messages.length,8);
 });
