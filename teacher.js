@@ -28,7 +28,6 @@ engine.socket.on('ui:presentation-effect',event=>{
  const duration=Math.max(100,Math.min(60000,Number(event?.duration)||3000));
  stopPresentationEffect();document.body.classList.add('presentation-signal');effectBox=document.createElement('div');effectBox.className='presentation-blocker';effectBox.setAttribute('role','alert');effectBox.setAttribute('aria-label','Системная помеха');effectBox.innerHTML=`<div class="recording-hud"><span class="recording-dot">● REC</span><span>FRAME LOSS · SIGNAL INTERFERENCE</span><span>${Math.ceil(duration/1000)}s</span></div><div class="recording-noise"></div><div class="recording-center">NO SIGNAL<br><small>RECOVERING VIDEO STREAM</small></div>`;for(const type of ['pointerdown','pointerup','click','dblclick','touchstart','touchend','contextmenu'])effectBox.addEventListener(type,e=>{e.preventDefault();e.stopPropagation()},{capture:true});document.body.append(effectBox);effectTimer=setTimeout(stopPresentationEffect,duration);
 });
-$("presentation-effects").addEventListener('change',()=>act(()=>engine.setPresentationEffects($("presentation-effects").checked)));
 async function removeParticipant(regionId,pid){const result=await engine.freeSlot(regionId,pid);message(result.exitRequested?'Запрос на выход отправлен. Участник должен принять или отклонить его.':'Участник исключён, место освобождено.')}
 $("projector-btn").addEventListener("click",()=>{
  projector=!projector;document.body.classList.toggle("projector-mode",projector);
@@ -213,8 +212,7 @@ engine.onChange(state=>{
  const teacher=state?.viewer.role==="teacher";$("teacher-login").style.display=teacher?"none":"flex";$("teacher-app").style.display=teacher?"flex":"none";$("teacher-login-btn").disabled=!engine.connected||loggingIn;
  $("teacher-login-connection").textContent=engine.connected?"Сервер подключён":engine.error||"Подключение к серверу... (пробуждение инстанса может занять до 30 сек)";
  if(!teacher){stopPresentationEffect();$("dev-overlay").style.display="none";$("player-dialog").close();$("count-dialog").close();managerInitialized=false;playerEditId=null;controlKey="";return}
- $('presentation-effects').checked=state.sessionControl?.presentationEffectsEnabled!==false;$('presentation-effects').disabled=!engine.connected;if(!$('presentation-effects').checked)stopPresentationEffect();
- $('session-requests').innerHTML=(state.sessionControl?.exitRequests||[]).slice(-5).reverse().map(r=>`<p>${h(r.name)} · ${r.status==='pending'?'ожидаем согласия на выход':r.status==='accepted'?'выход подтверждён':'участник отклонил выход'}</p>`).join('');
+ if(state.sessionControl?.presentationEffectsEnabled===false)stopPresentationEffect();
  $("conn-status").textContent=engine.connected?"● Сервер подключён":"● Переподключение…";$("phase-pill").textContent=state.round?state.round.resolved?"Итоги":state.round.paused?"Пауза":"Игра идёт":"Лобби";
  for(const id of ["export-btn","reset-btn","dev-open-btn","logout-btn","team-save","team-expand","capacity-apply","qb-add"])$(id).disabled=!engine.connected;
  renderManager(state);renderRoster(state);renderControls(state);renderAnswers(state);renderBank(state);

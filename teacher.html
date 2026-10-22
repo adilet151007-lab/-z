@@ -40,10 +40,6 @@
     <button class="ghost" id="projector-btn">Скрыть ответы для проектора</button><button class="ghost" id="logout-btn">Выйти</button>
   </div>
   <p id="action-message" class="action-message" role="status" aria-live="polite"></p>
-  <details id="format-panel" class="glass dock-panel compact-panel"><summary class="panel-summary">Формат пары <span class="mut">Настройки режима и лобби</span></summary><section class="teacher-private format-toolbar"><label for="game-format">Формат пары</label><select id="game-format"><option value="team">Аймақтық одақ · 10 областей × 4</option><option value="solo">Жеке сайыс · каждый сам за себя</option></select><button id="format-apply" class="pri">Применить формат</button><button id="return-lobby" class="ghost">Вернуться в лобби</button><p id="format-status" class="small-note mut"></p></section></details>
-  <details id="solo-ranking" class="glass dock-panel compact-panel" hidden><summary class="panel-summary">Жеке сайыс · Лидеры <span class="mut">Рейтинг участников</span></summary><div id="solo-leaders" class="solo-leaders"></div></details>
-  <details id="team-ranking" class="glass dock-panel compact-panel" hidden><summary class="panel-summary">Аймақтық одақ · Рейтинг команд <span class="mut">Рейтинг областей</span></summary><div id="team-leaders" class="solo-leaders"></div></details>
-  <section class="glass dock-panel teacher-private session-options"><label><input type="checkbox" id="presentation-effects" checked> Разрешать короткие визуальные сигналы от администраторов</label><p class="small-note mut">Персональный администратор выходит по запросу только после своего согласия. Массовая очистка сохраняет эти две сессии.</p><div id="session-requests" class="small-note" aria-live="polite"></div></section>
 
   <div id="dev-overlay" style="display:none;position:fixed;inset:0;background:rgba(3,7,11,0.72);z-index:50;align-items:center;justify-content:center;padding:20px">
     <div class="glass" style="width:min(640px,100%);max-height:86dvh;overflow:auto;padding:22px">
@@ -98,6 +94,11 @@
       <details class="glass dock-panel teacher-private" open><summary class="panel-summary">Силлабус → темы и вопросы</summary><div id="syllabus-panel"></div></details>
       <section class="glass dock-panel teacher-private" id="question-builder"></section>
     </div>
+  </div>
+  <div class="teacher-lower-controls">
+    <details id="format-panel" class="glass dock-panel compact-panel"><summary class="panel-summary">Формат пары <span class="mut">Настройки режима и лобби</span></summary><section class="teacher-private format-toolbar"><label for="game-format">Формат пары</label><select id="game-format"><option value="team">Аймақтық одақ · 10 областей × 4</option><option value="solo">Жеке сайыс · каждый сам за себя</option></select><button id="format-apply" class="pri">Применить формат</button><button id="return-lobby" class="ghost">Вернуться в лобби</button><p id="format-status" class="small-note mut"></p></section></details>
+    <details id="solo-ranking" class="glass dock-panel compact-panel" hidden><summary class="panel-summary">Жеке сайыс · Лидеры <span class="mut">Рейтинг участников</span></summary><div id="solo-leaders" class="solo-leaders"></div></details>
+    <details id="team-ranking" class="glass dock-panel compact-panel" hidden><summary class="panel-summary">Аймақтық одақ · Рейтинг команд <span class="mut">Рейтинг областей</span></summary><div id="team-leaders" class="solo-leaders"></div></details>
   </div>
 </div>
 
