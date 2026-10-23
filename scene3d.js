@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { REGIONS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, mapRegionsFor, metadataFor } from "./game-config.js";
+import { REGIONS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, mapRegionsFor, metadataFor, createDrillGeometryData } from "./game-config.js";
 import { GEOGRAPHY } from "./region-geography.js";
 
 const clamp = THREE.MathUtils.clamp;
@@ -111,6 +111,53 @@ export function labelScaleForDepth(depth,height,fov=40){
   const pixels=clamp(210-Math.max(.1,depth)*1.15,112,200);
   return {pixels,world:pixels*2*Math.tan(THREE.MathUtils.degToRad(fov*.5))*Math.max(.1,depth)/Math.max(1,height)};
 }
+function mapAchievement(award,quiet=false){
+  const group=new THREE.Group();group.name='match-achievement';group.userData.achievementId=award.id;
+  const geometries=new Set(),materials=new Set();
+  const geometry=g=>{geometries.add(g);return g},material=m=>{materials.add(m);return m};
+  const metals=[0x526d71,0xc9b582,0x6f837b,0x66efbc].map((color,i)=>material(new THREE.MeshStandardMaterial({color,metalness:i===3?.2:.82,roughness:.27,side:THREE.DoubleSide,transparent:true,...(i===3?{emissive:color,emissiveIntensity:1.7}:{})})));
+  const data=createDrillGeometryData(),positions=[],drillGeometry=geometry(new THREE.BufferGeometry());
+  for(let metal=0;metal<4;metal++){const start=positions.length/3;for(const face of data.faces)if(face.metal===metal)for(const index of face.indices){const [x,y,z]=data.vertices[index];positions.push(x,-y,z)}drillGeometry.addGroup(start,positions.length/3-start,metal)}
+  drillGeometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));drillGeometry.computeVertexNormals();
+  const drill=new THREE.Group();drill.add(new THREE.Mesh(drillGeometry,metals));group.add(drill);
+  const plumeMaterial=material(new THREE.MeshBasicMaterial({color:0x8aefbc,transparent:true,opacity:.35,depthWrite:false}));
+  const plume=new THREE.Mesh(geometry(new THREE.CylinderGeometry(.5,.015,4,12)),plumeMaterial);plume.position.y=-5.8;drill.add(plume);
+  const rift=new THREE.Group();rift.position.y=9;group.add(rift);
+  const random=rng([...award.teamId].reduce((n,c)=>Math.imul(n,31)+c.charCodeAt(0),73)),lines=[];
+  for(let ray=0;ray<8;ray++){
+    const angle=ray*Math.PI/4+(random()-.5)*.28;let previous=new THREE.Vector3();
+    for(let step=1;step<=6;step++){
+      const radius=step*(.72+random()*.17),a=angle+(random()-.5)*.21,next=new THREE.Vector3(Math.cos(a)*radius,Math.sin(a)*radius,0);lines.push(previous,next);
+      if(step>1&&step<6){const branch=next.clone().add(new THREE.Vector3(Math.cos(a+.6)*(.5+random()),Math.sin(a+.6)*(.5+random()),0));lines.push(next.clone(),branch)}previous=next;
+    }
+  }
+  const crackGeometry=geometry(new THREE.BufferGeometry().setFromPoints(lines)),crackMaterial=material(new THREE.LineBasicMaterial({color:0xc9f6df,transparent:true,opacity:0}));
+  const cracks=new THREE.LineSegments(crackGeometry,crackMaterial);rift.add(cracks);
+  const apertureShape=new THREE.Shape();for(let i=0;i<14;i++){const a=i*Math.PI/7,r=i%2?1.18:1.7,x=Math.cos(a)*r,y=Math.sin(a)*r;if(i)apertureShape.lineTo(x,y);else apertureShape.moveTo(x,y)}apertureShape.closePath();
+  const apertureMaterial=material(new THREE.MeshBasicMaterial({color:0x020914,side:THREE.DoubleSide,transparent:true,opacity:0,depthWrite:false}));
+  const aperture=new THREE.Mesh(geometry(new THREE.ShapeGeometry(apertureShape)),apertureMaterial);aperture.position.z=.02;rift.add(aperture);
+  const shardGeometry=geometry(new THREE.BufferGeometry());shardGeometry.setAttribute('position',new THREE.Float32BufferAttribute([-.25,-.1,0,.35,0,0,.05,.65,0],3));shardGeometry.computeVertexNormals();
+  const shardMaterial=material(new THREE.MeshBasicMaterial({color:0xb4e6d8,side:THREE.DoubleSide,transparent:true,opacity:0,depthWrite:false})),shards=new THREE.InstancedMesh(shardGeometry,shardMaterial,7),dummy=new THREE.Object3D();rift.add(shards);
+  const starsGeometry=geometry(new THREE.BufferGeometry().setFromPoints(Array.from({length:12},()=>new THREE.Vector3((random()-.5)*1.5,(random()-.5)*1.5,.04))));
+  const starsMaterial=material(new THREE.PointsMaterial({color:0xe3fff0,size:.065,transparent:true,opacity:0,depthWrite:false})),stars=new THREE.Points(starsGeometry,starsMaterial);aperture.add(stars);
+  const shockMaterial=material(new THREE.MeshBasicMaterial({color:0xa9efcd,side:THREE.DoubleSide,transparent:true,opacity:0,depthWrite:false}));
+  const shock=new THREE.Mesh(geometry(new THREE.RingGeometry(.94,1,48)),shockMaterial);shock.rotation.x=-Math.PI/2;shock.position.y=9;group.add(shock);
+  const label=labelSprite(),ctx=label.canvas.getContext('2d');ctx.clearRect(0,0,768,192);ctx.fillStyle='#09202ded';ctx.strokeStyle='#dbc58d';ctx.lineWidth=3;ctx.beginPath();ctx.roundRect(4,4,760,180,22);ctx.fill();ctx.stroke();ctx.textAlign='center';ctx.fillStyle='#f0dfb0';ctx.font='700 43px sans-serif';ctx.fillText('Ты смог, братец',384,76);ctx.fillStyle='#ace7ca';ctx.font='29px sans-serif';ctx.fillText(award.teamName,384,133);label.texture.needsUpdate=true;label.sprite.position.set(0,12,0);label.sprite.renderOrder=30;group.add(label.sprite);
+  let released=false;
+  return {group,update(seconds,camera,viewportHeight){
+    const fade=1-smooth(5.8,7.8,seconds),flight=seconds<2.48?1+8*smooth(0,2.48,seconds):seconds<3.05?9+Math.sin(seconds*70)*.025:9+20*smooth(3.05,4.7,seconds);
+    drill.position.y=flight;drill.rotation.y=seconds*8.5;drill.visible=!quiet&&seconds<4.9;
+    for(const metal of metals){metal.opacity=1-smooth(4.2,4.9,seconds);metal.depthWrite=seconds<4.2}plumeMaterial.opacity=(.25+Math.sin(seconds*38)*.08)*(1-smooth(4.2,4.9,seconds));
+    const opening=smooth(2.65,3.6,seconds);rift.visible=!quiet&&seconds>2.46;rift.quaternion.copy(camera.quaternion);aperture.scale.setScalar(Math.max(.001,opening*1.6));apertureMaterial.opacity=opening*fade;starsMaterial.opacity=opening*fade;
+    crackGeometry.setDrawRange(0,Math.floor(smooth(2.48,3.5,seconds)*lines.length/2)*2);crackMaterial.opacity=fade*.9;
+    const scatter=Math.max(0,seconds-2.8);shardMaterial.opacity=smooth(0,.18,scatter)*(1-smooth(.4,2.6,scatter));
+    for(let i=0;i<7;i++){const a=i*Math.PI*2/7;dummy.position.set(Math.cos(a)*(1+scatter*2.2),Math.sin(a)*(1+scatter*1.8)-scatter*scatter*.2,.2+scatter*.3);dummy.rotation.set(scatter*(i%2?1:-1),scatter*.7,a+scatter);dummy.scale.setScalar(.7);dummy.updateMatrix();shards.setMatrixAt(i,dummy.matrix)}shards.instanceMatrix.needsUpdate=true;
+    shock.visible=quiet||seconds>2.48;shock.scale.setScalar(quiet?2.6:.4+smooth(2.48,4.1,seconds)*6);shockMaterial.opacity=quiet?.6*fade:(1-smooth(2.6,4.1,seconds))*.65;
+    label.sprite.visible=quiet||seconds>4.1;label.sprite.material.opacity=fade;const worldPosition=label.sprite.getWorldPosition(new THREE.Vector3()),depth=camera.position.distanceTo(worldPosition),labelWidth=labelScaleForDepth(depth,viewportHeight,camera.fov).world/group.scale.x;label.sprite.scale.set(labelWidth,labelWidth/4,1);
+    return seconds<7.8;
+  },dispose(){if(released)return;released=true;group.removeFromParent();shards.dispose();for(const g of geometries)g.dispose();for(const m of materials)m.dispose();label.texture.dispose();label.sprite.material.dispose()}};
+}
+
 export function createScene(canvas, opts = {}) {
   const mobile = window.matchMedia("(max-width: 700px), (pointer: coarse)").matches;
   let lowPower=mobile;
@@ -302,7 +349,22 @@ export function createScene(canvas, opts = {}) {
   function setLowPower(value){lowPower=!!value;renderer.setPixelRatio(Math.min(lowPower?1:1.5,window.devicePixelRatio||1));renderer.shadowMap.enabled=!lowPower;try{localStorage.setItem('cq_graphics_v1',lowPower?'low':'standard')}catch{}paintQuality();wake()}
   qualityButton.addEventListener('click',()=>setLowPower(!lowPower));paintQuality();
   hud.append(homeButton,regionSelect,qualityButton); canvas.parentElement.append(hud);
-  let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true,sceneVisible=true,requestedVisible=true,renderingReady=false,activeUntil=0,latestState=null,mapPreview=null,lastFocusId;
+  let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true,sceneVisible=true,requestedVisible=true,renderingReady=false,activeUntil=0,latestState=null,mapPreview=null,lastFocusId,lastWorldPaint=0,worldMatch=null;
+  const worldEffects=new Map(),seenWorld=new Set();
+  function clearWorld(){for(const effect of worldEffects.values())effect.dispose();worldEffects.clear()}
+  function syncWorldAchievements(state){
+    if(worldMatch!==state.match?.id){clearWorld();seenWorld.clear();worldMatch=state.match?.id}
+    if(state.viewer&&!state.viewer.player&&!['teacher','creator'].includes(state.viewer.role)){clearWorld();return}
+    let created=false;for(const award of state.worldAchievements||[]){
+      if(seenWorld.has(award.id))continue;seenWorld.add(award.id);if(seenWorld.size>1000)seenWorld.delete(seenWorld.values().next().value);
+      const elapsed=Math.max(0,(state.serverTime||Date.now())-award.startedAt+Math.max(0,Date.now()-(state.clientReceivedAt||Date.now())));if(elapsed>=7800)continue;
+      const team=state.regions.find(t=>t.id===award.teamId),base=team&&metadataFor(team).baseRegionId,region=regions.find(r=>r.meta.id===base);if(!region)continue;
+      const effect=mapAchievement(award,window.matchMedia('(prefers-reduced-motion: reduce)').matches);effect.started=performance.now()-elapsed;effect.group.scale.setScalar(clamp(region.data.cityRadius*.5,1.25,1.8));effect.group.position.y=.7;
+      const peers=state.regions.filter(t=>metadataFor(t).baseRegionId===base);if(peers.length>1){const angle=peers.findIndex(t=>t.id===team.id)*Math.PI*2/peers.length,radius=Math.min(2.2,region.data.cityRadius*.65);effect.group.position.x=Math.cos(angle)*radius;effect.group.position.z=Math.sin(angle)*radius}
+      region.group.add(effect.group);worldEffects.set(award.id,effect);created=true;wake(7800-elapsed);
+    }
+    if(created){selected=null;mapPreview=null;regionSelect.value='';const distance=Math.max(44,44/(Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect));moveCamera(new THREE.Vector3(0,4,0),Math.min(138,distance))}
+  }
   function wake(ms=180){activeUntil=performance.now()+ms;if(renderingReady&&!frame&&!disposed&&sceneVisible&&requestedVisible&&!document.hidden)frame=requestAnimationFrame(animate)}
   function setVisible(value){if(requestedVisible===value)return;requestedVisible=value;if(value)wake();else{cancelAnimationFrame(frame);frame=0}}
   function moveCamera(target, distance) {
@@ -346,6 +408,7 @@ export function createScene(canvas, opts = {}) {
   const observer = new ResizeObserver(resize); observer.observe(canvas); resize();
   let stateKey='';
   function update(state, selectedRegionId) {
+    syncWorldAchievements(state);
     latestState=state;if(selectedRegionId!==lastFocusId){mapPreview=selectedRegionId||null;lastFocusId=selectedRegionId}const previewId=mapPreview,key=JSON.stringify([previewId,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.cityId,r.points,r.economy,r.occupied??r.members.length])]);if(key===stateKey)return;stateKey=key;
     const cityOptions=state.regions.filter(t=>t.cityId).map(t=>`<option value="${t.id}">${String(t.name).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</option>`).join('');if(regionSelect.dataset?.cities!==cityOptions){const value=regionSelect.value;regionSelect.innerHTML='<option value="">Найти регион…</option>'+REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')+(cityOptions?'<optgroup label="Команды городов · территория области">'+cityOptions+'</optgroup>':'');if(regionSelect.dataset)regionSelect.dataset.cities=cityOptions;regionSelect.value=value;regionSelect.title='Города команд показываются на территории своей области.';}
     const selectedTeam = state.regions.find(t=>t.id===previewId);
@@ -390,6 +453,7 @@ export function createScene(canvas, opts = {}) {
   const clock = new THREE.Clock(), reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   function animate() {
     frame=0;if (disposed||!sceneVisible||!requestedVisible||document.hidden) return;
+    if(worldEffects.size&&lowPower&&performance.now()-lastWorldPaint<1000/30){frame=requestAnimationFrame(animate);return}lastWorldPaint=performance.now();
     const dt = Math.min(.05, clock.getDelta()), t = clock.elapsedTime, rate = reduceMotion ? 1 : 1 - Math.exp(-dt * 5);
     if (cameraTween) {
       camera.position.lerp(cameraTween.position, rate); controls.target.lerp(cameraTween.target, rate);
@@ -416,14 +480,16 @@ export function createScene(canvas, opts = {}) {
       region.fogMat.opacity = THREE.MathUtils.lerp(region.fogMat.opacity, opacity, rate); region.fog.visible = region.fogMat.opacity > .01;
       region.fog.children.forEach((p, i) => { p.position.y = 1.5 + (reduceMotion ? 0 : Math.sin(t * .45 + i) * .12); });
     }
-    controls.update(); arrangeLabels(); renderer.render(scene, camera);
-    if(!frame&&(cameraTween||settling||performance.now()<activeUntil))frame=requestAnimationFrame(animate);
+    controls.update();arrangeLabels();
+    for(const [id,effect]of worldEffects)if(!effect.update((performance.now()-effect.started)/1000,camera,canvas.clientHeight)){effect.dispose();worldEffects.delete(id)}
+    renderer.render(scene, camera);
+    if(!frame&&(cameraTween||settling||worldEffects.size||performance.now()<activeUntil))frame=requestAnimationFrame(animate);
   }
   const onVisibility=()=>{if(document.hidden){cancelAnimationFrame(frame);frame=0}else wake()};document.addEventListener('visibilitychange',onVisibility);
   const visibilityObserver=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{sceneVisible=entries[0]?.isIntersecting??true;if(sceneVisible)wake();else{cancelAnimationFrame(frame);frame=0}});visibilityObserver?.observe(canvas);
   renderingReady=true;animate();
   function dispose() {
-    disposed = true; cancelAnimationFrame(frame); observer.disconnect(); controls.dispose();
+    disposed = true;clearWorld();cancelAnimationFrame(frame); observer.disconnect(); controls.dispose();
     visibilityObserver?.disconnect();document.removeEventListener('visibilitychange',onVisibility);
     canvas.removeEventListener("pointerdown", onDown); canvas.removeEventListener("pointerup", onUp); hud.remove();
     const geometries = new Set(), mats = new Set(), textures = new Set();

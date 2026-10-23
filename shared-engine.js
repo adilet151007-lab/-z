@@ -1,5 +1,5 @@
 import { io } from "/socket.io/socket.io.esm.min.js";
-import { PRIVACY_VERSION, DEFAULT_SUBJECT } from './game-config.js';
+import { PRIVACY_VERSION, DEFAULT_SUBJECT, ACHIEVEMENTS, createDrillGeometryData } from './game-config.js';
 export { REGIONS, CITIES, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity, CREATOR_TEAM_ID, isCreatorTeam, regularTeams, MODE_NAMES, soloMultiplier } from "./game-config.js";
 
 export const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
@@ -60,7 +60,7 @@ export function setupAmbientAudio(){
 
 export function setupAchievementControls(engine,host){
   host.classList.add('achievement-tools');
-  host.innerHTML='<h3>Ты смог, братец</h3><p class="small-note mut">15% → 100% ответами и первое место по итогам матча. Предпросмотр работает без игровых условий.</p><div class="row section-gap"><button type="button" data-award-preview>▶ Предпросмотр анимации</button><button type="button" data-award-finish>Завершить матч</button></div><label class="field-label section-gap">Получатель<select data-award-target aria-label="Получатель достижения"></select></label><button type="button" data-award-grant class="pri section-gap">Вручить достижение</button><p data-award-status class="small-note" role="status"></p>';
+  host.innerHTML='<h3>Ты смог, братец</h3><p class="small-note mut">'+escapeHTML(ACHIEVEMENTS[0].description)+'</p><p class="small-note mut">Предпросмотр — только в этом окне. Первое вручение видно всем на карте.</p><div class="row section-gap"><button type="button" data-award-preview>▶ Предпросмотр анимации</button><button type="button" data-award-finish>Завершить матч</button></div><label class="field-label section-gap">Получатель<select data-award-target aria-label="Получатель достижения"></select></label><button type="button" data-award-grant class="pri section-gap">Вручить достижение</button><p data-award-status class="small-note" role="status"></p>';
   let busy=false;
   const target=host.querySelector('[data-award-target]'),status=host.querySelector('[data-award-status]');
   const render=state=>{
@@ -76,42 +76,11 @@ export function setupAchievementControls(engine,host){
   const click=async event=>{const button=event.target.closest('button');if(!button||busy||button.disabled)return;busy=true;render(engine.state);status.textContent='';try{
     if(button.hasAttribute('data-award-preview')){await engine.previewAchievement();status.textContent='Предпросмотр запущен. Награды и очки не изменены.'}
     else if(button.hasAttribute('data-award-grant')){const [scope,targetId]=target.value.split(':');const result=await engine.grantAchievement('sky-breaker',scope,targetId);status.textContent=result.duplicate?'У получателя уже есть эта награда за текущий матч.':'Достижение вручено.'}
-    else if(button.hasAttribute('data-award-finish')){if(confirm('Завершить матч и определить победителей? Итоги текущего вопроса уже должны быть подведены.'))await engine.finishMatch()}
+    else if(button.hasAttribute('data-award-finish')){if(confirm('Досрочно завершить матч? Награда за рейтинг выдаётся автоматически после последнего вопроса; раннее завершение её не даёт.'))await engine.finishMatch()}
   }catch(error){status.textContent=error.message}finally{busy=false;render(engine.state)}};
   host.addEventListener('click',click);const off=engine.onChange(render);return()=>{off();host.removeEventListener('click',click)};
 }
 
-// The drill is a small projected mesh, not a second WebGL scene competing with the map.
-function skyDrillMesh(){
-  const vertices=[],faces=[];let component=0;
-  const vertex=(radius,y,angle)=>{vertices.push([Math.cos(angle)*radius,y,Math.sin(angle)*radius]);return vertices.length-1};
-  const triangle=(a,b,c,metal)=>{
-    const p=vertices[a],q=vertices[b],r=vertices[c],u=q.map((v,i)=>v-p[i]),v=r.map((x,i)=>x-p[i]);
-    const normal=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],length=Math.hypot(...normal)||1;
-    faces.push({indices:[a,b,c],normal:normal.map(n=>n/length),metal,component});
-  };
-  const quad=(a,b,c,d,metal)=>{triangle(a,b,c,metal);triangle(a,c,d,metal)};
-  const ring=(radius,y)=>Array.from({length:32},(_,i)=>vertex(radius,y,i*Math.PI/16));
-  let previous=ring(.008,0);
-  for(let row=1;row<=8;row++){
-    const next=ring(1.07*row/8,3.6*row/8);
-    for(let i=0;i<32;i++)quad(previous[i],next[i],next[(i+1)%32],previous[(i+1)%32],0);
-    previous=next;
-  }
-  // A continuous triangular flight winds around the cone; its edges and undersides catch different light.
-  let last=null;component=1;
-  for(let step=0;step<=180;step++){
-    const t=.035+.965*step/180,y=3.6*t,r=1.07*t,angle=t*Math.PI*9.2;
-    const next=[vertex(Math.max(.008,r-.083*t),y-.21*t,angle),vertex(r+.025+.28*t,y,angle),vertex(r+.025*t,y+.16*t,angle)];
-    if(last){quad(last[0],next[0],next[1],last[1],1);quad(last[1],next[1],next[2],last[2],2)}
-    last=next;
-  }
-  previous=ring(1.07,3.6);component=2;
-  for(const [radius,y,metal]of [[1.19,3.68,2],[1.19,3.8,0],[1.16,3.83,3],[1.16,3.89,3],[1.08,3.94,0],[1.08,4.12,0],[.94,4.21,2]]){
-    const next=ring(radius,y);for(let i=0;i<32;i++)quad(previous[i],next[i],next[(i+1)%32],previous[(i+1)%32],metal);previous=next;
-  }
-  return {vertices,faces};
-}
 
 function paintSkyDrill(context,mesh,width,height,rotation){
   context.clearRect(0,0,width,height);
@@ -143,7 +112,7 @@ function startAchievementDrill(canvas){
   if(!canvas?.getContext||reduced?.matches||!globalThis.requestAnimationFrame)return null;
   let context;try{context=canvas.getContext('2d',{alpha:true,desynchronized:true})}catch{return null}
   if(!context)return null;
-  let mesh=skyDrillMesh(),frame=0,start=null,last=-Infinity,stopped=false,width=0,height=0;
+  let mesh=createDrillGeometryData(),frame=0,start=null,last=-Infinity,stopped=false,width=0,height=0;
   const resize=()=>{width=canvas.clientWidth||260;height=canvas.clientHeight||390;const ratio=Math.min(globalThis.devicePixelRatio||1,1.25);canvas.width=Math.round(width*ratio);canvas.height=Math.round(height*ratio);context.setTransform(ratio,0,0,ratio,0,0)};
   const stop=()=>{if(stopped)return;stopped=true;globalThis.cancelAnimationFrame(frame);globalThis.removeEventListener?.('resize',resize);mesh=null};
   const tick=now=>{
@@ -193,34 +162,47 @@ function skyFractureMarkup(){
 }
 
 export function setupAchievements(engine){
-  let layer=null,timer=null,stopDrill=()=>{},identity='',ready=false,shelfKey='';const seen=new Set();
+  let layer=null,timer=null,worldTimer=null,worldMatchId=null,stopDrill=()=>{},identity='',ready=false,shelfKey='';const seen=new Set(),worldSeen=new Set();
   try{for(const id of JSON.parse(localStorage.getItem('cq_awards_seen_v1')||'[]'))if(typeof id==='string')seen.add(id)}catch{}
-  const close=()=>{clearTimeout(timer);stopDrill();stopDrill=()=>{};layer?.remove();layer=null;document.body.classList.remove('achievement-playing')};
-  function play(award,preview=false){
+  const close=()=>{clearTimeout(timer);stopDrill();stopDrill=()=>{};layer?.remove();layer=null;document.body.classList.remove('achievement-playing','achievement-notice')};
+  const clearWorld=()=>{clearTimeout(worldTimer);document.body.classList.remove('map-celebrating')};
+  const closeExtras=()=>globalThis.dispatchEvent?.(new CustomEvent('cq:close-extras'));
+  function play(award,preview=false,toastOnly=false){
     if(document.hidden)return;close();
+    closeExtras();
     layer=document.createElement('div');layer.className='achievement-cinema';layer.setAttribute('aria-label','Достижение: '+(award.title||'Ты смог, братец'));
     layer.innerHTML=`<div class="sky-atmosphere" aria-hidden="true"></div><div class="sky-speed-lines" aria-hidden="true">${Array.from({length:10},(_,i)=>`<i style="--line:${i}"></i>`).join('')}</div>${skyFractureMarkup()}<div class="sky-contact" aria-hidden="true"><div class="sky-impact"></div><div class="sky-shockwave"></div><div class="sky-shockwave secondary"></div>${Array.from({length:16},(_,i)=>`<i class="sky-spark" style="--spark:${i};--spark-distance:${65+(i*37)%100}px"></i>`).join('')}</div><div class="sky-drill" aria-hidden="true"><div class="sky-drill-aura"></div><div class="sky-exhaust"><i></i><i></i><i></i></div><canvas class="sky-drill-art"></canvas><svg class="sky-drill-fallback" viewBox="0 0 260 390"><defs><linearGradient id="cq-drill-metal"><stop stop-color="#142f38"/><stop offset=".34" stop-color="#b9bb9c"/><stop offset=".45" stop-color="#f0deb4"/><stop offset=".63" stop-color="#556c66"/><stop offset="1" stop-color="#162f38"/></linearGradient></defs><path fill="url(#cq-drill-metal)" d="m130 22 98 311-17 34H49l-17-34Z"/><path d="m124 47 17 12-27 21 40 20-51 27 65 25-78 32 91 31-103 35 118 33-130 39" fill="none" stroke="#c8b888" stroke-width="12" stroke-linejoin="round"/><path d="M45 341h170" stroke="#6de4bd" stroke-width="5"/></svg></div><aside class="achievement-toast" role="status" aria-live="polite"><span class="achievement-emblem"><svg viewBox="0 0 48 56" aria-hidden="true"><path d="M24 3 42 43 36 51H12L6 43Z" fill="#203c3b" stroke="#d4c18d" stroke-width="1.5"/><path d="m22 10 6 5-11 8 16 6-20 9 25 7" fill="none" stroke="#e8d6a0" stroke-width="3"/><path d="M13 49h22" stroke="#70e5bd" stroke-width="2"/></svg></span><div><small>${preview?'ПРЕДПРОСМОТР · ПРОРЫВ':'ДОСТИЖЕНИЕ ПОЛУЧЕНО'}</small><strong>${escapeHTML(award.title||'Ты смог, братец')}</strong><span>${escapeHTML(preview?'Небо — не предел':award.recipientName||'Путь от кризиса к победе')}</span></div></aside><button class="achievement-skip" type="button">Пропустить анимацию ×</button>`;
-    layer.querySelector('button').addEventListener('click',close);document.body.append(layer);document.body.classList.add('achievement-playing');
-    const animate=startAchievementDrill(layer.querySelector('canvas'));stopDrill=animate||(()=>{});if(animate)layer.classList.add('has-drill-mesh');timer=setTimeout(close,7800);
+    layer.querySelector('button').addEventListener('click',()=>{close();if(toastOnly)clearWorld()});document.body.append(layer);document.body.classList.add(toastOnly?'achievement-notice':'achievement-playing');
+    if(toastOnly){layer.classList.add('achievement-toast-only');layer.querySelector('button').textContent='Закрыть уведомление ×'}
+    const animate=toastOnly?null:startAchievementDrill(layer.querySelector('canvas'));stopDrill=animate||(()=>{});if(animate)layer.classList.add('has-drill-mesh');timer=setTimeout(close,7800);
   }
   const render=state=>{
     if(!state)return;
     const viewer=state.viewer,current=viewer.player?.pid||(viewer.role==='teacher'?'teacher':'guest');
-    if(current!==identity){identity=current;ready=false;shelfKey='';close()}
+    if(current!==identity){identity=current;ready=false;shelfKey='';close();clearWorld();worldSeen.clear()}
+    if(worldMatchId!==state.match?.id){worldMatchId=state.match?.id;close();clearWorld();worldSeen.clear()}
+    const active=(state.worldAchievements||[]).filter(a=>a.durationMs-(state.serverTime-a.startedAt)-Math.max(0,Date.now()-(state.clientReceivedAt||Date.now()))>0);
+    if(!document.hidden&&active.some(a=>!worldSeen.has(a.id))){
+      for(const a of active)worldSeen.add(a.id);closeExtras();document.body.classList.add('map-celebrating');clearTimeout(worldTimer);
+      const remaining=Math.max(...active.map(a=>a.durationMs-(state.serverTime-a.startedAt)-Math.max(0,Date.now()-(state.clientReceivedAt||Date.now()))));worldTimer=setTimeout(clearWorld,remaining);
+      globalThis.dispatchEvent?.(new CustomEvent('cq:world-achievement',{detail:{teamIds:active.map(a=>a.teamId)}}));
+    }
+    document.querySelectorAll('[data-achievement-rules]').forEach(node=>node.textContent=ACHIEVEMENTS[0].description);
+    const progress=state.achievementProgress;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;node.textContent=progress?`${progress.hitFloor?'✓':'○'} Экономика достигала 15% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} Восстановлена ответами до 100% · ${progress.resources}/1000 ресурсов · место ${rank||'—'}. ${state.match?.milestoneWinnerTeamIds?.length?'Досрочная награда уже определена; остаётся итоговый рейтинг.':'Первый выполнивший путь получает досрочную награду.'}`:''});
     const awards=engine.mode==='teacher'?(state.match?.awards||[]):state.achievements||[],key=JSON.stringify([awards,state.match?.id]);
     if(key!==shelfKey){shelfKey=key;
       document.querySelectorAll('[data-achievement-count]').forEach(node=>node.textContent=String(awards.length));
-      document.querySelectorAll('[data-achievement-shelf]').forEach(node=>{node.innerHTML=awards.length?awards.slice(-20).reverse().map(a=>`<button type="button" class="achievement-card" data-award-replay="${escapeHTML(a.id)}"><span class="achievement-emblem">⟐</span><span><strong>${escapeHTML(a.title)}</strong><small>${escapeHTML(a.recipientName)} · ${a.source==='manual'?'Специальное вручение':'Камбэк · первое место'}</small></span><span class="achievement-replay">▶</span></button>`).join(''):'<div class="achievement-empty"><span>⟐</span><div><strong>Место для прорыва</strong><p>Награды за матч появятся здесь. «Ты смог, братец»: восстановитесь с 15% до 100% и завершите матч первыми.</p></div></div>'});
+      document.querySelectorAll('[data-achievement-shelf]').forEach(node=>{node.innerHTML=awards.length?awards.slice(-20).reverse().map(a=>`<button type="button" class="achievement-card" data-award-replay="${escapeHTML(a.id)}"><span class="achievement-emblem">⟐</span><span><strong>${escapeHTML(a.title)}</strong><small>${escapeHTML(a.recipientName)} · ${a.source==='manual'?'Специальное вручение':'Камбэк · '+(a.reason==='milestone'?'первый до 1000':'итоговый рейтинг')+''}</small></span><span class="achievement-replay">▶</span></button>`).join(''):'<div class="achievement-empty"><span>⟐</span><div><strong>Место для прорыва</strong><p>'+escapeHTML(ACHIEVEMENTS[0].description)+'</p></div></div>'});
     }
     const fresh=awards.filter(award=>!seen.has(award.id));for(const award of awards)seen.add(award.id);
     try{localStorage.setItem('cq_awards_seen_v1',JSON.stringify([...seen].slice(-1000)))}catch{}
-    if(ready&&fresh.length)play(fresh[fresh.length-1]);ready=current!=='guest';
+    if(ready&&fresh.length)play(fresh[fresh.length-1],false,true);ready=current!=='guest';
   };
   const preview=()=>play({title:'Ты смог, братец'},true),replay=event=>{const id=event.target.closest('[data-award-replay]')?.dataset.awardReplay;if(!id)return;const state=engine.state,award=(engine.mode==='teacher'?state?.match?.awards:state?.achievements)?.find(a=>a.id===id);if(award)play(award)};
-  const keydown=event=>{if(event.key==='Escape')close()},visibility=()=>{if(document.hidden)close()};
+  const keydown=event=>{if(event.key==='Escape')close()},visibility=()=>{if(document.hidden){close();clearWorld()}};
   document.addEventListener('click',replay);document.addEventListener('keydown',keydown);document.addEventListener('visibilitychange',visibility);engine.socket.on('achievement:preview',preview);
   const off=engine.onChange(render),tools=document.getElementById('achievement-tools'),stopTools=tools?setupAchievementControls(engine,tools):null;
-  return()=>{close();off();stopTools?.();document.removeEventListener('click',replay);document.removeEventListener('keydown',keydown);document.removeEventListener('visibilitychange',visibility);engine.socket.off('achievement:preview',preview)};
+  return()=>{close();clearWorld();off();stopTools?.();document.removeEventListener('click',replay);document.removeEventListener('keydown',keydown);document.removeEventListener('visibilitychange',visibility);engine.socket.off('achievement:preview',preview)};
 }
 
 export class GameEngine {
@@ -249,6 +231,7 @@ export class GameEngine {
     this.socket.on("state", state => {
       const previous=this.state?.viewer,changed=previous?.role!==state.viewer.role||previous?.player?.pid!==state.viewer.player?.pid||previous?.player?.regionId!==state.viewer.player?.regionId;
       this.state = state;
+      Object.defineProperty(state,'clientReceivedAt',{value:Date.now(),enumerable:false});
       if(mode==='student')try{if(state.viewer.player)localStorage.setItem('cq_session_v3',JSON.stringify({playerId:state.viewer.player.pid,teamId:state.viewer.player.regionId,mode:state.settings.mode||'team',name:state.viewer.player.name}));else localStorage.removeItem('cq_session_v3');localStorage.removeItem('isDevTelemetry')}catch{}
       if(changed){this.chatMeta=null;this.chatView=null;this.emitChat()}
       this.offset = state.serverTime - Date.now();

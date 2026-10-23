@@ -8,25 +8,33 @@ export function setupCommunication(engine){
  host.innerHTML=`<button id="cq-chat-toggle" class="chat-launcher" aria-expanded="false" aria-controls="cq-chat-panel"><span aria-hidden="true">✉</span> Чат <span id="cq-chat-unread" class="chat-unread" hidden>●</span></button><section id="cq-chat-panel" class="chat-panel" hidden aria-label="Игровой чат"><header class="chat-header"><div><small>LIVE · CULTURE QUEST</small><h2>Общение</h2></div><button id="cq-chat-close" class="ghost" aria-label="Закрыть чат">×</button></header><nav class="chat-tabs" role="tablist" aria-label="Каналы чата"><button data-chat-kind="global" role="tab">Общий</button><button data-chat-kind="team" role="tab">Команда</button><button data-chat-kind="support" role="tab" id="cq-chat-support-tab">Создатели</button></nav><div id="cq-chat-picker" class="chat-picker" hidden><label id="cq-chat-picker-label" for="cq-chat-target">Выберите собеседника</label><select id="cq-chat-target"></select></div><p id="cq-chat-description" class="chat-description"></p><div id="cq-chat-messages" class="chat-messages" role="log" aria-live="polite" aria-relevant="additions text"></div><p id="cq-chat-notice" class="chat-notice" role="status"></p><form id="cq-chat-form" class="chat-compose"><label for="cq-chat-input" class="sr-only">Сообщение</label><textarea id="cq-chat-input" maxlength="600" rows="2" placeholder="Напишите сообщение…"></textarea><div class="row spaced"><small id="cq-chat-counter" class="mut">0 / 600</small><button id="cq-chat-send" class="pri" type="submit">Отправить ↗</button></div></form><footer class="chat-footer"><button id="cq-chat-refresh" class="ghost">Обновить</button><button id="cq-show-credits" class="ghost">Авторы проекта</button></footer></section>`;
  const credits=document.createElement('aside');credits.id='cq-project-credits';credits.className='project-credits';credits.setAttribute('aria-label','Создатели проекта');
  credits.innerHTML=`<button id="cq-credits-close" class="credits-close" aria-label="Скрыть карточку создателей">×</button><div class="credits-mark" aria-hidden="true"><span>A</span><span>E</span></div><div class="credits-copy"><small>CULTURE QUEST · MADE IN KZ</small><p>Сделано <strong>Адлетом и Ернуром</strong></p><span>Играем. Учимся. Строим Казахстан.</span></div><button id="cq-credits-contact" type="button">Написать создателям ↗</button>`;
- document.body.append(host,credits);
- const signature=document.createElement('button');signature.type='button';signature.className='product-signature';signature.textContent='CULTURE QUEST · Адилет × Ернур';signature.setAttribute('aria-label','Авторы Culture Quest: Адилет и Ернур');document.body.append(signature);
+ const utilities=document.getElementById('session-utilities')||document.body;utilities.append(host);document.body.append(credits);
+ const signature=document.createElement('button');signature.type='button';signature.className='product-signature';signature.textContent='Адилет × Ернур';signature.setAttribute('aria-label','Авторы Culture Quest: Адилет и Ернур');utilities.append(signature);
+ const awardButton=document.createElement('button');awardButton.type='button';awardButton.className='utility-button';awardButton.innerHTML='⟐ Достижения <span data-achievement-count>0</span>';
+ const mapButton=document.createElement('button');mapButton.type='button';mapButton.className='utility-button';mapButton.dataset.mapReview='';mapButton.textContent='↗ Обзор карты';mapButton.setAttribute('aria-pressed','false');utilities.append(awardButton,mapButton);
  const $=id=>document.getElementById(id),panel=$('cq-chat-panel'),list=$('cq-chat-messages'),input=$('cq-chat-input');
  let open=false,kind='global',room=null,meta=null,view=null,identityKey='',scopeKey='',epoch=0,requestId=0,sending=false,loading=false,renderedRoom=null,renderKey='',pickerKey='',pendingDraft=null,readMarks={},creditsDismissed=false;
  const drafts=new Map(),nodes=new Map();
  let wasConnected=engine.connected,creditsTouched=false;
  function allowed(){const v=engine.state?.viewer;return !!v&&(v.role==='teacher'||!!v.player)}
  function notice(text='',error=false){$('cq-chat-notice').textContent=text;$('cq-chat-notice').classList.toggle('red',error)}
- function updateCredits(){credits.hidden=creditsDismissed||open;const button=$('cq-credits-contact');button.textContent=!allowed()?'Войдите в команду, чтобы написать':engine.state.viewer.isCreator?'Открыть обращения ↗':engine.state.viewer.role==='teacher'?'Открыть общий чат ↗':'Написать создателям ↗';button.disabled=!allowed()}
- function showCredits(){creditsTouched=true;creditsDismissed=false;save('cq_credits_dismissed_v1','0');if(open)setOpen(false);updateCredits()}
+ function updateCredits(){credits.hidden=creditsDismissed||open||allowed()&&!creditsTouched||document.body.classList.contains('map-review-mode');const button=$('cq-credits-contact');button.textContent=!allowed()?'Войдите в команду, чтобы написать':engine.state.viewer.isCreator?'Открыть обращения ↗':engine.state.viewer.role==='teacher'?'Открыть общий чат ↗':'Написать создателям ↗';button.disabled=!allowed()}
+ function closeShelves(){for(const shelf of document.querySelectorAll('.achievement-panel'))shelf.open=false}
+ function closeExtras(closeShelf=true){creditsDismissed=true;if(open)setOpen(false);updateCredits();if(closeShelf)closeShelves()}
+ function showCredits(){closeShelves();if(open)setOpen(false);creditsTouched=true;creditsDismissed=false;save('cq_credits_dismissed_v1','0');updateCredits()}
  $('cq-credits-close').addEventListener('click',()=>{creditsDismissed=true;save('cq_credits_dismissed_v1','1');updateCredits()});
  $('cq-show-credits').addEventListener('click',showCredits);
  signature.addEventListener('click',showCredits);setTimeout(()=>{if(!creditsTouched){creditsDismissed=true;updateCredits()}},12000);
  $('cq-credits-contact').addEventListener('click',()=>requestOpen(engine.state?.viewer.role==='teacher'?'global':'support'));
  function requestOpen(channel=kind){window.dispatchEvent(new CustomEvent('cq:show-chat',{detail:{channel}}))}
- function setOpen(value){if(value&&!allowed())return;open=value;panel.hidden=!open;$('cq-chat-toggle').setAttribute('aria-expanded',String(open));updateCredits();if(open){draw();if(room&&view?.room===room)markRead();input.focus()}}
+ function setOpen(value){if(value&&!allowed())return;if(value){creditsDismissed=true;closeShelves()}open=value;panel.hidden=!open;$('cq-chat-toggle').setAttribute('aria-expanded',String(open));updateCredits();if(open){draw();if(room&&view?.room===room)markRead();input.focus()}}
  $('cq-chat-toggle').addEventListener('click',()=>{if(open)setOpen(false);else requestOpen()});$('cq-chat-close').addEventListener('click',()=>setOpen(false));
  window.addEventListener('cq:show-chat',e=>{if(!allowed())return;setOpen(true);chooseKind(e.detail?.channel||kind)});
  window.addEventListener('cq:hide-chat',()=>setOpen(false));
+ window.addEventListener('cq:close-extras',()=>closeExtras());
+ for(const shelf of document.querySelectorAll('.achievement-panel'))shelf.addEventListener('toggle',()=>{if(shelf.open)closeExtras(false)});
+ awardButton.addEventListener('click',()=>{closeExtras();const shelf=document.querySelector('.achievement-panel');if(shelf){shelf.open=true;shelf.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}});
+ mapButton.addEventListener('click',()=>{closeExtras();const active=document.body.classList.toggle('map-review-mode');mapButton.textContent=active?'← Вернуться к игре':'↗ Обзор карты';mapButton.setAttribute('aria-pressed',String(active));window.dispatchEvent(new Event('cq:map-review-change'));if(active)document.querySelector('.stage-wrap,.atlas-projector')?.scrollIntoView({block:'start'})});
  panel.addEventListener('keydown',e=>{if(e.key==='Escape'){e.stopPropagation();setOpen(false);$('cq-chat-toggle').focus()}});
  function persistRead(){if(meta?.identity)save('cq_chat_read_'+meta.identity.id,JSON.stringify(readMarks))}
  function markRead(){if(!room||view?.room!==room)return;readMarks[room]=Math.max(readMarks[room]||0,view.latestSequence||0);persistRead();drawBadges()}
@@ -117,7 +125,7 @@ export function setupCommunication(engine){
   if(wasConnected&&!engine.connected){epoch++;requestId++;loading=false}
   const reconnected=!wasConnected&&engine.connected;wasConnected=engine.connected;
   if(reconnected&&room&&allowed())subscribe(room);
-  if(!allowed())setOpen(false);updateCredits();updateComposer();
+  if(!allowed()){setOpen(false);document.body.classList.remove('map-review-mode');mapButton.textContent='↗ Обзор карты';mapButton.setAttribute('aria-pressed','false')}updateCredits();updateComposer();
   if(meta?.enabled){if(engine.state?.settings.mode==='solo'&&kind==='team')chooseKind('global');else draw()}
  });
  updateCredits();

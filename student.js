@@ -12,6 +12,8 @@ const $ = id => document.getElementById(id);
 let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null, sceneLoading=false, mapCollapsed=false, teamKey='', questionKey='', registrationKey='';
 let sceneError = "";
 let selectedArea=null,pendingInvite='',marketKey='';
+window.addEventListener('cq:map-review-change',()=>{if(mapCollapsed){mapCollapsed=false;document.querySelector('.stage-wrap').hidden=false;$('map-visibility').textContent='Свернуть карту';$('map-visibility').setAttribute('aria-expanded','true')}if(scene){scene.setVisible(true);scene.resize()}else ensureScene()});
+window.addEventListener('cq:world-achievement',()=>{if(!engine.state?.viewer.player||document.hidden)return;window.dispatchEvent(new Event('cq:map-review-change'));if(!/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName))document.querySelector('.stage-wrap').scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})});
 async function ensureScene(){
   if(scene||sceneLoading||sceneError||mapCollapsed)return;
   sceneLoading=true;$('map-status').textContent='Загружаем 3D-карту…';
@@ -20,7 +22,7 @@ async function ensureScene(){
     if(!engine.state?.viewer.player)return;
     scene=createScene($('scene-canvas'));$('map-status').textContent='';
     const state=engine.state,team=state.regions.find(t=>t.id===state.viewer.player.regionId);
-    scene.update(state,state.viewer.player.regionId);focusedRegion=metadataFor(team).baseRegionId;scene.focusRegion(state.viewer.player.regionId);scene.setVisible(!mapCollapsed);
+    scene.update(state,state.viewer.player.regionId);focusedRegion=metadataFor(team).baseRegionId;if(!state.worldAchievements?.length)scene.focusRegion(state.viewer.player.regionId);scene.setVisible(!mapCollapsed);
   }catch{sceneError='3D недоступно. Вопросы и ответы продолжают работать.';$('map-status').textContent=sceneError;}
   finally{sceneLoading=false}
 }
@@ -88,7 +90,7 @@ function renderTeam(state) {
   const region = state.regions.find(r => r.id === player.regionId);if(!region)return;
   const key=JSON.stringify([state.settings.mode,player,region,state.teamLeaderboard,state.leaderboard]);if(teamKey===key)return;teamKey=key;
   const meta = metadataFor(region);
-  const crisis = region.economy < CRISIS_THRESHOLD, development = developmentFor(region.points), teamRank = (state.teamLeaderboard||[]).findIndex(t=>t.teamId===region.id)+1, topTeams = (state.teamLeaderboard||[]).slice(0,5);
+  const crisis = region.economy < CRISIS_THRESHOLD, development = developmentFor(region.points), teamRank = (state.teamLeaderboard||[]).find(t=>t.teamId===region.id)?.rank||0, topTeams = (state.teamLeaderboard||[]).filter(t=>t.rank).slice(0,5);
   $("my-name").textContent = player.name;
   if(state.settings.mode==='solo'){
     const rank=player.rank??state.leaderboard.findIndex(m=>m.pid===player.pid)+1,me=state.leaderboard.find(m=>m.pid===player.pid),total=player.rankingTotal??state.leaderboard.length;

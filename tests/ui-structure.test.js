@@ -19,6 +19,8 @@ test('интерфейс: студенческий вход имеет отде�
  assert.ok([...Array.from(doc.getElementsByTagName('a'))].some(a=>a.getAttribute('href')==='privacy.html'));
  assert.equal(Array.from(doc.getElementsByTagName('a')).some(a=>/teacher|root/i.test(a.getAttribute('href')||'')),false);
  assert.ok(doc.getElementById('map-status'));assert.ok(doc.getElementById('question-panel'));
+ const utilities=doc.getElementById('session-utilities');assert.ok(utilities);assert.equal(ancestor(utilities,'stage-wrap'),null);assert.equal(ancestor(utilities,'dock'),null);
+ assert.ok(Array.from(doc.getElementsByTagName('p')).some(p=>p.hasAttribute('data-achievement-rules')));
 });
 
 test('интерфейс: нет повторных статических ID и потерянных обязательных элементов преподавателя',async()=>{

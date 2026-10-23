@@ -72,6 +72,7 @@
         <label class="map-team-picker">Город команды<select id="map-team-select" aria-label="Команда на карте"><option value="">Среднее по регионам</option></select></label><div class="hint">Выберите команду для просмотра её города</div>
         <a class="map-credit" href="https://simplemaps.com/gis/country/kz" target="_blank" rel="noopener">Границы: SimpleMaps · CC BY 4.0 · рельеф стилизован</a>
       </div>
+      <div id="session-utilities" class="session-utilities" aria-label="Общение и награды"></div>
       <details class="glass dock-panel teacher-private" id="team-manager">
         <summary class="panel-summary">Настройки команд</summary><p id="team-stats" class="mut small-note"></p>
         <p class="small-note mut">Задайте точное число команд и мест. Например: 38 × 4 = 152 места, 30 × 5 = 150 мест. Для каждой команды вместимость можно настроить отдельно.</p>
@@ -95,7 +96,7 @@
         <details id="solo-ranking" class="glass dock-panel compact-panel" hidden><summary class="panel-summary">Рейтинг участников</summary><div id="solo-leaders" class="solo-leaders"></div></details>
         <details id="team-ranking" class="glass dock-panel compact-panel" hidden><summary class="panel-summary">Рейтинг команд</summary><p class="small-note mut">Рейтинг = культурный ресурс + экономика × 5. Ведомость использует тот же порядок.</p><div id="team-leaders" class="solo-leaders"></div></details>
       </div>
-      <details class="glass dock-panel teacher-private achievement-panel"><summary class="panel-summary">⟐ Достижения матча <span data-achievement-count>0</span></summary><div data-achievement-shelf class="achievement-shelf"></div><div id="achievement-tools"></div></details>
+      <details class="glass dock-panel teacher-private achievement-panel"><summary class="panel-summary">⟐ Достижения матча <span data-achievement-count>0</span></summary><p class="small-note section-gap" data-achievement-rules></p><p class="small-note section-gap" data-achievement-progress></p><div data-achievement-shelf class="achievement-shelf"></div><div id="achievement-tools"></div></details>
       <details class="glass dock-panel teacher-private" id="event-log-panel"><summary class="panel-summary">Журнал событий</summary><ul class="log-list" id="log-list"></ul></details>
     </div>
     <div class="t-col">

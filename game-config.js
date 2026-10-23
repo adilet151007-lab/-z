@@ -14,7 +14,7 @@ export const soloMultiplier = streak => 1 + Math.min(8, Math.max(0, streak || 0)
 export const isCreatorTeam = team => team?.id === CREATOR_TEAM_ID;
 export const regularTeams = teams => teams.filter(team => !isCreatorTeam(team));
 export const ECONOMY_PENALTY = 20;
-export const ACHIEVEMENTS = [{id:'sky-breaker',title:'Ты смог, братец',description:'Дойти до 15% экономики, восстановить её ответами до 100% и завершить матч на первом месте.',icon:'⟐'}];
+export const ACHIEVEMENTS = [{id:'sky-breaker',title:'Ты смог, братец',description:'Обязательно: упасть до 15% экономики и восстановить её ответами до 100%. Затем либо первым достичь 1000 ресурсов при 100% экономики, либо занять первое место в рейтинге после последнего вопроса. При равенстве условий награду получают все лидеры.',icon:'⟐'}];
 export const CRISIS_THRESHOLD = 30;
 export const RESOURCE_CAP = 1000;
 export const DEVELOPMENT_STAGES = [
@@ -29,6 +29,38 @@ export function developmentFor(points) {
   const resource = Math.max(0, Math.min(RESOURCE_CAP, Number(points) || 0));
   const index = DEVELOPMENT_STAGES.findLastIndex(stage => resource >= stage.at);
   return { ...DEVELOPMENT_STAGES[index], index, next: DEVELOPMENT_STAGES[index + 1] || null, complete: resource >= RESOURCE_CAP, progress: resource / RESOURCE_CAP };
+}
+
+// One original drill mesh is shared by the local replay and the existing 3D map.
+export function createDrillGeometryData(){
+  const vertices=[],faces=[];let component=0;
+  const vertex=(radius,y,angle)=>{vertices.push([Math.cos(angle)*radius,y,Math.sin(angle)*radius]);return vertices.length-1};
+  const triangle=(a,b,c,metal)=>{
+    const p=vertices[a],q=vertices[b],r=vertices[c],u=q.map((v,i)=>v-p[i]),v=r.map((x,i)=>x-p[i]);
+    const normal=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],length=Math.hypot(...normal)||1;
+    faces.push({indices:[a,b,c],normal:normal.map(n=>n/length),metal,component});
+  };
+  const quad=(a,b,c,d,metal)=>{triangle(a,b,c,metal);triangle(a,c,d,metal)};
+  const ring=(radius,y)=>Array.from({length:32},(_,i)=>vertex(radius,y,i*Math.PI/16));
+  let previous=ring(.008,0);
+  for(let row=1;row<=8;row++){
+    const next=ring(1.07*row/8,3.6*row/8);
+    for(let i=0;i<32;i++)quad(previous[i],next[i],next[(i+1)%32],previous[(i+1)%32],0);
+    previous=next;
+  }
+  // A continuous triangular flight winds around the cone; its edges and undersides catch different light.
+  let last=null;component=1;
+  for(let step=0;step<=180;step++){
+    const t=.035+.965*step/180,y=3.6*t,r=1.07*t,angle=t*Math.PI*9.2;
+    const next=[vertex(Math.max(.008,r-.083*t),y-.21*t,angle),vertex(r+.025+.28*t,y,angle),vertex(r+.025*t,y+.16*t,angle)];
+    if(last){quad(last[0],next[0],next[1],last[1],1);quad(last[1],next[1],next[2],last[2],2)}
+    last=next;
+  }
+  previous=ring(1.07,3.6);component=2;
+  for(const [radius,y,metal]of [[1.19,3.68,2],[1.19,3.8,0],[1.16,3.83,3],[1.16,3.89,3],[1.08,3.94,0],[1.08,4.12,0],[.94,4.21,2]]){
+    const next=ring(radius,y);for(let i=0;i<32;i++)quad(previous[i],next[i],next[(i+1)%32],previous[(i+1)%32],metal);previous=next;
+  }
+  return {vertices,faces};
 }
 export const REGIONS = [
   { id: "karaganda", name: "Қарағанды облысы", geoId: "KZ35", biome: "steppe", color: "#D9A441", glow: "#F6D27A" },

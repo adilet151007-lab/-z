@@ -12,6 +12,7 @@ function answer(g,correct=true,questionId='q1'){
  g.castVote(team.id,p.pid,option,g.state.round.id);g.confirmVote(team.id,(team.members[1]||p).pid,p.pid,g.state.round.id);g.resolveRound();return g.state.round.results.saryarka;
 }
 function comeback(g){for(let i=0;i<5;i++)answer(g,false);assert.equal(g.region('saryarka').economy,15);for(let i=0;i<10;i++)answer(g,true);assert.equal(g.region('saryarka').economy,100)}
+function answerBoth(g,correct=true){g.startRound('q1',60);const round=g.state.round;for(const id of ['saryarka','jetisu']){const p=g.region(id).members[0],option=correct?round.questionSnapshot.correct:(round.questionSnapshot.correct+1)%4;g.castVote(id,p.pid,option,round.id);g.confirmVote(id,p.pid,p.pid,round.id)}g.resolveRound()}
 
 test('восстановление: оба правильных ответа идут только на экономику, ошибка не стирает накопленный ответ',()=>{
  const g=game();answer(g,false);assert.equal(g.region('saryarka').economy,80);let r=answer(g);assert.equal(r.awarded,0);assert.equal(r.recoveryAnswers,1);assert.equal(r.economyRecovered,0);
@@ -22,23 +23,29 @@ test('восстановление: оба правильных ответа и�
 test('восстановление: предел ресурса не мешает ремонту, последний шаг ограничен 100%, прогресс сохраняется',()=>{
  let g=game();g.adjustPoints('saryarka',1000);g.adjustEconomy('saryarka',-5);answer(g);g=new GameLogic(g.state);assert.equal(g.region('saryarka').recoveryAnswers,1);const r=answer(g);assert.equal(r.economyRecovered,5);assert.equal(g.region('saryarka').economy,100);assert.equal(g.region('saryarka').points,1000);assert.equal(r.awarded,0);
  const raw=g.editorSnapshot();assert.throws(()=>g.applyRawState({...raw,achievements:[{achievementId:'sky-breaker'}]}),/Редактор/);
+ const race=game();race.joinTeam('jetisu','Бек');for(let i=0;i<5;i++)answerBoth(race,false);for(let i=0;i<10;i++)answerBoth(race);for(let i=0;i<40;i++)answerBoth(race);
+ assert.equal(race.state.match.finishedAt,null);assert.equal(race.state.achievements.length,2);assert.ok(race.state.achievements.every(a=>a.reason==='milestone'));assert.deepEqual(race.state.match.milestoneWinnerTeamIds,['saryarka','jetisu']);answerBoth(race);assert.equal(race.state.achievements.length,2);
+ const restored=new GameLogic(race.state);assert.deepEqual(restored.state.match.milestoneWinnerTeamIds,['saryarka','jetisu']);
 });
 
-test('камбэк: награда выдаётся всей победившей команде только после 15% → 100% и завершения матча',()=>{
- const g=game(),ally=g.joinTeam('saryarka','Бек'),other=g.joinTeam('jetisu','Данияр');comeback(g);assert.equal(g.state.achievements.length,0);g.finishMatch();
+test('камбэк: после последнего вопроса награда выдаётся всей команде лидера, общий эффект не раскрывает чужую витрину',()=>{
+ const g=game(),ally=g.joinTeam('saryarka','Бек'),other=g.joinTeam('jetisu','Данияр');comeback(g);assert.equal(g.state.achievements.length,0);answer(g,true,g.state.questions.at(-1).id);
  assert.deepEqual(g.state.match.winnerTeamIds,['saryarka']);assert.equal(g.state.achievements.length,1);const award=g.state.achievements[0];assert.equal(award.source,'comeback');assert.ok(award.recipientIds.includes(ally.player.pid));
  const own=g.view({playerHash:hashToken(ally.playerToken)}),foreign=g.view({playerHash:hashToken(other.playerToken)});assert.equal(own.achievements[0].title,'Ты смог, братец');assert.equal(own.achievements[0].id,award.id);assert.equal(foreign.achievements.length,0);assert.equal(Object.hasOwn(own.achievements[0],'recipientIds'),false);
+ assert.equal(award.reason,'ranking');assert.ok(g.region('saryarka').points<1000);assert.equal(foreign.worldAchievements[0].teamId,'saryarka');assert.equal(JSON.stringify(foreign.worldAchievements).includes(ally.player.pid),false);assert.equal(foreign.questions.length,0);assert.equal(g.view().worldAchievements.length,0);
  g.finishMatch();assert.equal(g.state.achievements.length,1);const restored=new GameLogic(g.state);assert.equal(restored.state.achievements[0].id,award.id);
+ const clock=g.now;g.now=()=>clock()+8000;assert.equal(g.view({playerHash:hashToken(ally.playerToken)}).worldAchievements.length,0);assert.equal(g.state.achievements.length,1);
 });
 
 test('камбэк: неполное восстановление, ручная правка и второе место не дают автоматическую награду',()=>{
- const partial=game();for(let i=0;i<5;i++)answer(partial,false);for(let i=0;i<8;i++)answer(partial);partial.finishMatch();assert.equal(partial.region('saryarka').economy,95);assert.equal(partial.state.achievements.length,0);
- const edited=game();for(let i=0;i<5;i++)answer(edited,false);edited.adjustEconomy('saryarka',100);edited.finishMatch();assert.equal(edited.state.achievements.length,0);
- const second=game();second.joinTeam('jetisu','Данияр');second.adjustPoints('jetisu',1000);comeback(second);second.finishMatch();assert.deepEqual(second.state.match.winnerTeamIds,['jetisu']);assert.equal(second.state.achievements.length,0);
+ const partial=game();for(let i=0;i<5;i++)answer(partial,false);for(let i=0;i<8;i++)answer(partial);answer(partial,true,partial.state.questions.at(-1).id);assert.equal(partial.region('saryarka').economy,95);assert.equal(partial.state.achievements.length,0);
+ const edited=game();for(let i=0;i<5;i++)answer(edited,false);edited.adjustEconomy('saryarka',100);answer(edited,true,edited.state.questions.at(-1).id);assert.equal(edited.state.achievements.length,0);
+ const second=game();second.joinTeam('jetisu','Данияр');second.adjustPoints('jetisu',1000);comeback(second);answer(second,true,second.state.questions.at(-1).id);assert.deepEqual(second.state.match.winnerTeamIds,['jetisu']);assert.equal(second.state.achievements.length,0);
 });
 
-test('матч: победители фиксируются при завершении преподавателем; новая игра очищает награды и историю',()=>{
- const g=game();g.state.questions=g.state.questions.slice(0,2);comeback(g);assert.equal(g.state.match.finishedAt,null);answer(g,true,'q2');assert.equal(g.state.match.finishedAt,null);g.finishMatch();assert.ok(g.state.match.finishedAt);assert.equal(g.state.achievements.length,1);
+test('матч: ранняя кнопка не даёт награду за рейтинг; последний вопрос завершает автоматически, новая игра очищает историю',()=>{
+ const early=game();comeback(early);early.finishMatch();assert.equal(early.state.achievements.length,0);
+ const g=game();g.state.questions=g.state.questions.slice(0,2);comeback(g);assert.equal(g.state.match.finishedAt,null);answer(g,true,'q2');assert.ok(g.state.match.finishedAt);assert.equal(g.state.achievements.length,1);g.finishMatch();assert.equal(g.state.achievements.length,1);
  const award=g.state.achievements[0];answer(g,true);assert.equal(g.state.achievements[0].id,award.id);assert.notEqual(g.state.match.id,award.matchId);assert.deepEqual(g.state.match.stats.saryarka,{hitFloor:false,recoveredByQuiz:false});g.resetGame();assert.equal(g.state.match,null);assert.equal(g.state.achievements.length,0);
 });
 
@@ -63,6 +70,7 @@ test('админ: вручение себе, другому владельцу �
  const f=await fixture(t),a=await f.join(config.creatorCodes.adilet+' Адилет'),e=await f.join(config.creatorCodes.ernur+' Ернур','jetisu'),student=await f.join('Алия','mangystau');
  for(const [scope,targetId]of [['player',a.player.pid],['player',e.player.pid],['team','mangystau']])assert.equal((await cmd(a.socket,'grantAchievement',{achievementId:'sky-breaker',scope,targetId})).ok,true);
  const again=await cmd(a.socket,'grantAchievement',{achievementId:'sky-breaker',scope:'player',targetId:a.player.pid});assert.equal(again.duplicate,true);assert.equal(f.server.game.state.achievements.length,3);assert.equal(f.store.snapshot.achievements.length,3);assert.equal(f.server.game.view({playerHash:hashToken(student.playerToken)}).achievements.length,1);
+ await new Promise(resolve=>setTimeout(resolve,60));assert.equal(student.socket.latest.worldAchievements.length,3);assert.ok(student.socket.latest.worldAchievements.some(event=>event.teamId==='mangystau'));assert.equal(student.socket.latest.worldAchievements.some(event=>'recipientIds'in event||'targetId'in event),false);
  assert.equal(f.server.game.region('saryarka').points,0);assert.equal(f.server.game.region('saryarka').economy,100);
 });
 
@@ -75,15 +83,16 @@ test('права: студент и гость не выдают награды;
 
 test('сохранение и журнал: ошибка БД откатывает награду, административные операции скрыты, игровые события остаются',async t=>{
  const f=await fixture(t),owner=await f.join(config.creatorCodes.adilet+' Адилет'),p=await f.join();f.store.fail=true;assert.equal((await cmd(owner.socket,'grantAchievement',{achievementId:'sky-breaker',scope:'player',targetId:p.player.pid})).code,'STORAGE_ERROR');assert.equal(f.server.game.state.achievements.length,0);f.store.fail=false;
+ assert.equal(f.server.game.view({playerHash:hashToken(p.playerToken)}).worldAchievements.length,0);
  await cmd(owner.socket,'adjustPoints',{regionId:'saryarka',delta:25});await cmd(owner.socket,'renamePlayer',{pid:p.player.pid,name:'Арман'});await cmd(owner.socket,'startRound',{questionId:'q1',duration:30});
  const view=f.server.game.view({role:'creator',playerHash:hashToken(owner.playerToken)});assert.ok(f.server.game.state.log.some(entry=>entry.kind==='admin'));assert.equal(view.log.some(entry=>/Ресурс «|имя исправлено|Системное изменение/.test(entry.msg)),false);assert.ok(view.log.some(entry=>entry.msg.startsWith('Начат вопрос')));
  f.server.game.state.log.push({t:1,msg:'Адилет: имя исправлено на «Новое имя».'},{t:2,msg:'Игрок: перенос из «А» в «Б».'},{t:3,msg:'Алия: место в команде освобождено.',kind:'game'});const migrated=f.server.game.view({role:'creator',playerHash:hashToken(owner.playerToken)}).log;assert.equal(migrated.some(entry=>entry.t===1||entry.t===2),false);assert.ok(migrated.some(entry=>entry.t===3));
 });
 
 test('анимация: безопасная выдача и предпросмотр, лимит кадров, остановка, reduced-motion и SVG при недоступном Canvas',async t=>{
- const keys=['document','localStorage','requestAnimationFrame','cancelAnimationFrame','matchMedia','devicePixelRatio','addEventListener','removeEventListener'];
+ const keys=['document','localStorage','requestAnimationFrame','cancelAnimationFrame','matchMedia','devicePixelRatio','addEventListener','removeEventListener','dispatchEvent'];
  const old=Object.fromEntries(keys.map(key=>[key,globalThis[key]])),handlers=new Map(),windowHandlers=new Map(),socketHandlers=new Map(),layers=[],listeners=new Set(),values=new Map(),frames=new Map(),shelf={innerHTML:''};
- let stop,nextFrame=0,paints=0,finite=true,reduced=false,canvasAvailable=true,canvasQueries=0;
+ let stop,nextFrame=0,paints=0,finite=true,reduced=false,canvasAvailable=true,canvasQueries=0;const uiEvents=[],bodyClasses=new Set();globalThis.dispatchEvent=event=>uiEvents.push(event.type);
  t.after(()=>{stop?.();for(const key of keys)if(old[key]===undefined)delete globalThis[key];else globalThis[key]=old[key]});
  globalThis.localStorage={getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)};
  globalThis.requestAnimationFrame=fn=>{frames.set(++nextFrame,fn);return nextFrame};globalThis.cancelAnimationFrame=id=>frames.delete(id);
@@ -91,21 +100,25 @@ test('анимация: безопасная выдача и предпросм�
  globalThis.addEventListener=(name,fn)=>windowHandlers.set(name,fn);globalThis.removeEventListener=name=>windowHandlers.delete(name);
  const step=now=>{const pending=[...frames.values()];frames.clear();for(const fn of pending)fn(now)};
  const context={clearRect(){paints++},setTransform(){},beginPath(){},moveTo(x,y){finite&&=Number.isFinite(x)&&Number.isFinite(y)},lineTo(x,y){finite&&=Number.isFinite(x)&&Number.isFinite(y)},closePath(){},fill(){},stroke(){}};
- globalThis.document={hidden:false,body:{classList:{add(){},remove(){}},append(node){layers.push(node)}},querySelectorAll(selector){return selector==='[data-achievement-shelf]'?[shelf]:[]},getElementById(){return null},addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name),createElement(){
+ globalThis.document={hidden:false,body:{classList:{add(...names){names.forEach(n=>bodyClasses.add(n))},remove(...names){names.forEach(n=>bodyClasses.delete(n))}},append(node){layers.push(node)}},querySelectorAll(selector){return selector==='[data-achievement-shelf]'?[shelf]:[]},getElementById(){return null},addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name),createElement(){
   const classes=new Set(),canvas={clientWidth:220,clientHeight:330,getContext(){canvasQueries++;return canvasAvailable?context:null}};
   return {canvas,classes,classList:{add:name=>classes.add(name)},setAttribute(){},querySelector(selector){return selector==='canvas'?canvas:{addEventListener(){}}},remove(){this.removed=true}};
  }};
- let source=await readFile(new URL('../shared-engine.js',import.meta.url),'utf8');source=source.replace(/^import .*\n/gm,'').replace(/^export \{ .*from .*\n/gm,'');const {setupAchievements}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+ let source=await readFile(new URL('../shared-engine.js',import.meta.url),'utf8');source=source.replace(/^import .*\n/gm,'').replace(/^export \{ .*from .*\n/gm,'');source='import {ACHIEVEMENTS,createDrillGeometryData} from '+JSON.stringify(new URL('../game-config.js',import.meta.url).href)+';\n'+source;const {setupAchievements}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
  const engine={mode:'student',socket:{on:(name,fn)=>socketHandlers.set(name,fn),off:name=>socketHandlers.delete(name)},onChange(fn){listeners.add(fn);return()=>listeners.delete(fn)}};stop=setupAchievements(engine);
- const state={viewer:{role:'student',player:{pid:'alice'}},achievements:[],match:null};for(const fn of listeners)fn(state);state.achievements=[{id:'award-1" onclick="alert(1)',title:'Ты смог, братец',recipientName:'<img src=x onerror=alert(1)>'}];for(const fn of listeners)fn(state);
+ const state={viewer:{role:'student',player:{pid:'alice'}},achievements:[],match:null};for(const fn of listeners)fn(state);
+ state.match={id:'match-1'};state.serverTime=1000;state.worldAchievements=[{id:'world-1',teamId:'jetisu',startedAt:1000,durationMs:7800}];for(const fn of listeners)fn(state);for(const fn of listeners)fn(state);assert.equal(uiEvents.filter(n=>n==='cq:world-achievement').length,1);assert.equal(bodyClasses.has('map-celebrating'),true);
+ state.achievements=[{id:'award-1" onclick="alert(1)',title:'Ты смог, братец',recipientName:'<img src=x onerror=alert(1)>'}];for(const fn of listeners)fn(state);
  assert.equal(layers.length,1);assert.ok(layers[0].innerHTML.includes('&lt;img'));assert.equal(shelf.innerHTML.includes('" onclick='),false);assert.ok(shelf.innerHTML.includes('&quot;'));for(const fn of listeners)fn(state);assert.equal(layers.length,1);
- assert.equal(layers[0].canvas.width,275);assert.equal(layers[0].canvas.height,413);assert.equal(finite,true);assert.equal(frames.size,1);
+ assert.equal(frames.size,0);assert.equal(canvasQueries,0);assert.ok(layers[0].classes.has('achievement-toast-only'));
+ socketHandlers.get('achievement:preview')();assert.equal(layers[0].removed,true);assert.equal(state.achievements.length,1);
+ assert.equal(layers[1].canvas.width,275);assert.equal(layers[1].canvas.height,413);assert.equal(finite,true);assert.equal(frames.size,1);
  step(0);const first=paints;step(10);assert.equal(paints,first);step(34);assert.equal(paints,first+1);
- layers[0].canvas.clientWidth=170;layers[0].canvas.clientHeight=255;windowHandlers.get('resize')();assert.equal(layers[0].canvas.width,213);
- socketHandlers.get('achievement:preview')();assert.equal(layers.length,2);assert.equal(layers[0].removed,true);assert.equal(frames.size,1);assert.equal(state.achievements.length,1);
- globalThis.document.hidden=true;handlers.get('visibilitychange')();assert.equal(layers[1].removed,true);assert.equal(frames.size,0);assert.equal(windowHandlers.size,0);
- globalThis.document.hidden=false;reduced=true;const before=canvasQueries;socketHandlers.get('achievement:preview')();assert.equal(frames.size,0);assert.equal(canvasQueries,before);assert.equal(layers[2].classes.has('has-drill-mesh'),false);
- reduced=false;canvasAvailable=false;socketHandlers.get('achievement:preview')();assert.equal(frames.size,0);assert.equal(layers[3].classes.has('has-drill-mesh'),false);assert.ok(layers[3].innerHTML.includes('sky-drill-fallback'));
+ layers[1].canvas.clientWidth=170;layers[1].canvas.clientHeight=255;windowHandlers.get('resize')();assert.equal(layers[1].canvas.width,213);
+ socketHandlers.get('achievement:preview')();assert.equal(layers.length,3);assert.equal(layers[1].removed,true);assert.equal(frames.size,1);assert.equal(state.achievements.length,1);
+ globalThis.document.hidden=true;handlers.get('visibilitychange')();assert.equal(layers[2].removed,true);assert.equal(frames.size,0);assert.equal(windowHandlers.size,0);
+ globalThis.document.hidden=false;reduced=true;const before=canvasQueries;socketHandlers.get('achievement:preview')();assert.equal(frames.size,0);assert.equal(canvasQueries,before);assert.equal(layers[3].classes.has('has-drill-mesh'),false);
+ reduced=false;canvasAvailable=false;socketHandlers.get('achievement:preview')();assert.equal(frames.size,0);assert.equal(layers[4].classes.has('has-drill-mesh'),false);assert.ok(layers[4].innerHTML.includes('sky-drill-fallback'));
  canvasAvailable=true;socketHandlers.get('achievement:preview')();step(0);step(5001);assert.equal(frames.size,0);assert.equal(windowHandlers.size,0);assert.equal(finite,true);
- handlers.get('keydown')({key:'Escape'});assert.equal(layers[4].removed,true);stop();assert.equal(listeners.size,0);assert.equal(socketHandlers.size,0);
+ handlers.get('keydown')({key:'Escape'});assert.equal(layers[5].removed,true);assert.equal(uiEvents.filter(n=>n==='cq:world-achievement').length,1);state.match=null;state.worldAchievements=[];for(const fn of listeners)fn(state);assert.equal(bodyClasses.has('map-celebrating'),false);stop();assert.equal(listeners.size,0);assert.equal(socketHandlers.size,0);
 });

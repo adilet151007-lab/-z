@@ -362,3 +362,26 @@ body.telemetry-open,body.presentation-signal{overflow:hidden}
 @media(prefers-reduced-motion:reduce){
  .achievement-cinema,.achievement-cinema *{animation:none!important}.sky-atmosphere,.sky-speed-lines,.sky-fracture,.sky-contact,.sky-drill{display:none}.achievement-toast{opacity:1;transform:none}
 }
+
+/* Utilities occupy their own row below the atlas; only an explicitly opened panel floats. */
+.session-utilities{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px 14px;flex:none;min-width:0;border-bottom:1px solid var(--panel-brd);background:#081923}
+.session-utilities #cq-chat-root{display:contents}
+.session-utilities .chat-launcher,.session-utilities .product-signature,.session-utilities .utility-button{position:static;inset:auto;z-index:auto;transform:none;margin:0;min-height:38px;padding:8px 11px;font-size:11px;box-shadow:none;backdrop-filter:none;max-width:100%;border-radius:9px;white-space:nowrap}
+.session-utilities .product-signature{margin-left:auto;font-size:10px;letter-spacing:.02em;order:4;color:#9cb4b6}
+.session-utilities .utility-button{background:#0d2531;color:#b8d6cf;border:1px solid #4b8d8555}
+.session-utilities [data-achievement-count]{color:var(--gold);margin-left:3px}
+.chat-panel{bottom:max(16px,env(safe-area-inset-bottom));height:min(590px,calc(100dvh - 32px))}
+.project-credits{bottom:max(16px,env(safe-area-inset-bottom));animation:none}
+.achievement-playing .session-utilities,.achievement-notice .session-utilities,.map-celebrating .session-utilities{visibility:hidden}
+.achievement-playing .chat-panel,.achievement-playing .project-credits,.achievement-notice .chat-panel,.achievement-notice .project-credits,.map-celebrating .chat-panel,.map-celebrating .project-credits{display:none!important}
+.achievement-toast-only{animation:none;background:none}
+.achievement-toast-only>:not(.achievement-toast):not(.achievement-skip){display:none}
+.projector-mode .session-utilities{display:none}
+.map-review-mode .dock,.map-review-mode #map-visibility,.map-review-mode .action-message,.map-review-mode .chat-panel,.map-review-mode .project-credits{display:none!important}
+.map-review-mode .app{height:100dvh;min-height:0;overflow:hidden}
+.map-review-mode .t-grid{display:block;overflow:visible!important;flex:1;min-height:0}
+.map-review-mode .t-col{display:contents}
+.map-review-mode .t-col>:not(.atlas-projector):not(.session-utilities){display:none!important}
+.map-review-mode .atlas-projector,.map-review-mode .stage-wrap{height:calc(100dvh - 155px)!important;min-height:220px!important;max-height:none!important;flex:1 1 auto!important}
+.map-review-mode .session-utilities>:not([data-map-review]){display:none!important}
+@media(max-width:600px){.session-utilities{padding:8px 10px;gap:6px}.session-utilities .chat-launcher,.session-utilities .utility-button{font-size:10px;padding:7px 9px}.session-utilities .product-signature{font-size:9px}.chat-panel{left:12px;width:calc(100vw - 24px)}.teacher-page .session-utilities{order:1!important}}

@@ -32,5 +32,9 @@ test('сцена: камера следует высоте города, кра�
   api.setLowPower(false);assert.equal(api.renderer.pixelRatio,1.5);assert.equal(api.renderer.shadowMap.enabled,true);api.setLowPower(true);assert.equal(api.renderer.pixelRatio,1);assert.equal(api.renderer.shadowMap.enabled,false);
   api.setVisible(false);api.update({regions:[]});assert.equal(frames.size,0);api.setVisible(true);assert.ok(frames.size>0);
   document.hidden=true;events.get('visibilitychange')();assert.equal(frames.size,0);document.hidden=false;events.get('visibilitychange')();assert.ok(frames.size>0);
+  const state={regions:[{id:'astana',baseRegionId:'astana',name:'Астана',points:1000,economy:100,members:[]}],match:{id:'match-1'},serverTime:1000,clientReceivedAt:Date.now(),worldAchievements:[{id:'award-1',achievementId:'sky-breaker',teamId:'astana',teamName:'Астана',startedAt:1000,durationMs:7800}]};
+  window.matchMedia=query=>({matches:!query.includes('prefers-reduced-motion')});api.update(state);step();const effect=group.children.find(o=>o.name==='match-achievement');assert.ok(effect);assert.equal(effect.userData.achievementId,'award-1');assert.ok(effect.getWorldPosition(new THREE.Vector3()).y>group.position.y);
+  api.update(state);assert.equal(group.children.filter(o=>o.name==='match-achievement').length,1);let released=0;effect.traverse(o=>{if(o.geometry)o.geometry.addEventListener('dispose',()=>released++)});
+  for(let i=0;i<60;i++)step();assert.ok(effect.children.some(o=>o.children.some(c=>c.isLineSegments&&c.geometry.drawRange.count>0)));for(let i=0;i<110;i++)step();assert.equal(group.children.includes(effect),false);assert.ok(released>0);assert.equal(frames.size,0);api.update(state);assert.equal(group.children.some(o=>o.name==='match-achievement'),false);
  }finally{api?.dispose();await unlink(fileURLToPath(temporary))}
 });
