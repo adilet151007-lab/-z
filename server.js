@@ -28,6 +28,8 @@ export async function createGameServer(options = {}) {
   if(configured.length===2&&equal(creatorCodes.ernur,creatorCodes.adilet))throw new Error('Персональные коды создателей должны различаться.');
   if (typeof password !== "string" || password.length < 8 || password.length > 256 || password.includes("replace-with")) throw new Error("Задайте TEACHER_PASSWORD (от 8 до 256 символов). Локально: npm run setup.");
   if (typeof secret !== "string" || secret.length < 32 || secret.includes("replace-with")) throw new Error("Задайте SESSION_SECRET (минимум 32 случайных символа). Локально: npm run setup.");
+  const revokeCreatorSessionIds=options.revokeCreatorSessionIds??(process.env.REVOKE_CREATOR_SESSION_IDS||'').split(',').map(value=>value.trim()).filter(Boolean);
+  if(!Array.isArray(revokeCreatorSessionIds)||revokeCreatorSessionIds.length>2||!revokeCreatorSessionIds.every(id=>typeof id==='string'&&/^[\w-]{1,80}$/.test(id)))throw new Error('REVOKE_CREATOR_SESSION_IDS принимает не больше двух идентификаторов персональных сессий.');
   const store = options.store || await createStore();
   const saved = await store.load();
   let game = new GameLogic(saved);
@@ -38,6 +40,9 @@ export async function createGameServer(options = {}) {
   if(!game.state.accessControl.activity){game.state.accessControl.activity={startedAt:sessionNow(),players:Object.fromEntries(game.state.regions.flatMap(t=>t.members.map(m=>[m.pid,sessionNow()]))),teachers:{}};game.touch()}
   const initialActivity=game.state.accessControl.activity;
   if(!Number.isSafeInteger(initialActivity.startedAt)||!initialActivity.players||!initialActivity.teachers||Array.isArray(initialActivity.players)||Array.isArray(initialActivity.teachers)||!Object.values(initialActivity.players).every(Number.isSafeInteger)||!Object.entries(initialActivity.teachers).every(([hash,r])=>/^[a-f0-9]{64}$/.test(hash)&&Number.isSafeInteger(r?.at)&&Number.isSafeInteger(r?.expiresAt)))throw new Error('Повреждено сохранение активности сессий.');
+  const revokedCreators=game.state.regions.flatMap(team=>team.members.filter(member=>member.creatorId&&revokeCreatorSessionIds.includes(member.pid)).map(member=>({teamId:team.id,pid:member.pid})));
+  for(const session of revokedCreators){game.leaveTeam(session.teamId,session.pid);delete initialActivity.players[session.pid]}
+  if(revokedCreators.length){game.state.exitRequests=(game.state.exitRequests||[]).filter(request=>!revokedCreators.some(session=>session.pid===request.pid));game.log(`Оператор инфраструктуры завершил персональные сессии: ${revokedCreators.length}.`)}
   if (!saved||game.state.revision!==saved.revision) await store.save(game.state);
   let publishedGame = new GameLogic(game.state);
   let lastActivityFlush=sessionNow();

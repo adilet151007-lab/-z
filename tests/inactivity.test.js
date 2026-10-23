@@ -10,8 +10,8 @@ const credentials={teacherPassword:'idle-test-teacher-password',sessionSecret:'i
 class Store{kind='memory';snapshot=null;fail=false;async load(){return structuredClone(this.snapshot)}async save(state){if(this.fail)throw new Error('simulated-idle-storage-failure');this.snapshot=structuredClone(state)}async close(){}}
 const command=(socket,event,data={})=>new Promise((resolve,reject)=>socket.timeout(5000).emit(event,data,(error,result)=>error?reject(error):resolve(result)));
 async function fixture(t){
- let clock=Date.now(),server,base;const store=new Store(),clients=[];
- const start=async()=>{server=await createGameServer({...credentials,store,sessionNow:()=>clock,requireConsent:false,secureCookies:false});base=`http://127.0.0.1:${await server.listen(0,'127.0.0.1')}`};
+ let clock=Date.now(),server,base,serverOptions={};const store=new Store(),clients=[];
+ const start=async(overrides={})=>{serverOptions={...serverOptions,...overrides};server=await createGameServer({...credentials,store,sessionNow:()=>clock,requireConsent:false,secureCookies:false,...serverOptions});base=`http://127.0.0.1:${await server.listen(0,'127.0.0.1')}`};
  await start();t.after(async()=>{clients.forEach(s=>s.disconnect());await server.close()});
  async function connect(cookie='',surface='student'){
   const socket=io(base,{auth:{surface,activityVersion:1},extraHeaders:cookie?{Cookie:cookie}:{},transports:['websocket'],reconnection:false,autoConnect:false});clients.push(socket);
@@ -21,8 +21,19 @@ async function fixture(t){
  async function bind(socket,role,token){const response=await fetch(base+'/api/session',{method:'POST',headers:{Origin:base,'Content-Type':'application/json','X-CQ-Client':'1','X-CQ-Socket':socket.id,'X-CQ-Proof':socket.proof,'X-CQ-Surface':socket.surface},body:JSON.stringify({role,token})});const result=await response.json();return {response,result,cookie:response.headers.getSetCookie()[0]?.split(';')[0]}}
  async function join(name='Алия',regionId='jetisu'){const socket=await connect(),result=await command(socket,'joinTeam',{name,regionId});assert.equal(result.ok,true,result.error);const bound=await bind(socket,'player',result.playerToken);assert.equal(bound.result.ok,true);return {socket,...result,cookie:bound.cookie}}
  async function teacher(){const socket=await connect('','teacher'),result=await command(socket,'teacherLogin',{password:credentials.teacherPassword});assert.equal(result.ok,true);const bound=await bind(socket,'teacher',result.teacherToken);assert.equal(bound.result.ok,true);return {socket,cookie:bound.cookie}}
- return {store,connect,bind,join,teacher,get server(){return server},advance:ms=>clock+=ms,restart:async()=>{clients.forEach(s=>s.disconnect());await server.close();await start()}};
+ return {store,connect,bind,join,teacher,get server(){return server},advance:ms=>clock+=ms,restart:async options=>{clients.forEach(s=>s.disconnect());await server.close();await start(options)}};
 }
+
+test('восстановление оператором: отзываются только указанные персональные сессии, новые входы сохраняются при повторном запуске',async t=>{
+ const f=await fixture(t),a=await f.join(credentials.creatorCodes.adilet+' Адилет'),e=await f.join(credentials.creatorCodes.ernur+' Ернур'),student=await f.join('Алия');
+ await command(a.socket,'adjustPoints',{regionId:'jetisu',delta:250});const bank=JSON.stringify(f.server.game.state.questions);
+ await f.restart({revokeCreatorSessionIds:[a.player.pid,e.player.pid]});
+ assert.deepEqual(f.server.game.region('jetisu').members.map(m=>m.pid),[student.player.pid]);assert.equal(f.server.game.region('jetisu').points,250);assert.equal(JSON.stringify(f.server.game.state.questions),bank);
+ assert.equal((await f.connect(a.cookie)).latest.viewer.role,'guest');assert.equal((await f.connect(e.cookie)).latest.viewer.role,'guest');assert.equal((await f.connect(student.cookie)).latest.viewer.player.pid,student.player.pid);
+ const nextA=await f.join(credentials.creatorCodes.adilet+' Адилет'),nextE=await f.join(credentials.creatorCodes.ernur+' Ернур');assert.equal(nextA.isCreator,true);assert.equal(nextE.isCreator,true);
+ await f.restart();assert.equal((await f.connect(nextA.cookie)).latest.viewer.isCreator,true);assert.equal((await f.connect(nextE.cookie)).latest.viewer.isCreator,true);
+ await f.restart({revokeCreatorSessionIds:[student.player.pid]});assert.equal((await f.connect(student.cookie)).latest.viewer.player.pid,student.player.pid);
+});
 
 test('бездействие: ровно 30 минут освобождают места обоих владельцев и обычного игрока, активный игрок остаётся',async t=>{
  const f=await fixture(t),a=await f.join(credentials.creatorCodes.adilet+' Адилет'),e=await f.join(credentials.creatorCodes.ernur+' Ернур'),inactive=await f.join('Данияр'),active=await f.join('Алия');
