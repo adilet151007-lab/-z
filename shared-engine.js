@@ -64,13 +64,21 @@ export class GameEngine {
     this.state = null;
     this.connected = false;
     this.error = "";
+    this.sessionNotice = "";
     this.offset = 0;
     this.listeners = new Set();
     this.chatListeners=new Set();this.chatMeta=null;this.chatView=null;
     this.cookieSessions=typeof document!=='undefined';this.legacyToken=this.cookieSessions?(mode==='student'?creatorToken()||getToken('cq_player_token_v2'):getToken('cq_teacher_token_v2')):null;
-    this.socket = io({ autoConnect: false,reconnection:true,reconnectionDelay:2000,reconnectionDelayMax:2000,randomizationFactor:0,timeout:30000, auth: callback => callback({surface:mode,...(!this.cookieSessions?{playerToken:mode==='student'?creatorToken()||getToken('cq_player_token_v2'):undefined,teacherToken:mode==='teacher'?getToken('cq_teacher_token_v2'):undefined}:{})}) });
+    this.socket = io({ autoConnect: false,reconnection:true,reconnectionDelay:2000,reconnectionDelayMax:2000,randomizationFactor:0,timeout:30000, auth: callback => callback({surface:mode,activityVersion:1,...(!this.cookieSessions?{playerToken:mode==='student'?creatorToken()||getToken('cq_player_token_v2'):undefined,teacherToken:mode==='teacher'?getToken('cq_teacher_token_v2'):undefined}:{})}) });
     this.socket.on('connect',async()=>{this.httpProof=null;this.connected=!this.legacyToken;this.error=this.legacyToken?'Восстанавливаем вашу сессию…':'';this.emit();if(this.legacyToken&&!this.migrationTried){this.migrationTried=true;try{await this.bindSession(mode==='teacher'?'teacher':'player',this.legacyToken);this.legacyToken=null;this.clearLegacyTokens();this.socket.disconnect().connect()}catch(error){if(error.code==='SESSION_EXPIRED'){this.legacyToken=null;this.clearLegacyTokens();this.connected=true;this.error=''}else this.error='Не удалось восстановить прежний вход. Обновите страницу после подключения.';this.emit()}}});
     this.socket.on('session:ready',data=>{this.httpProof=data.proof});
+    this.socket.on('session:expired',data=>{
+      this.sessionNotice='Сессия завершена после 30 минут бездействия. Войдите заново.';
+      this.legacyToken=null;
+      if(data?.roles?.includes('player')){setToken('cq_player_token_v2',null);saveCreatorToken(null);setToken('cq_session_v3',null);setToken('isDevTelemetry',null)}
+      if(data?.roles?.includes('teacher'))setToken('cq_teacher_token_v2',null);
+      this.emit();
+    });
     this.socket.on("disconnect", () => {this.httpProof=null;this.connected = false; this.emit(); });
     this.socket.on("connect_error", () => { this.connected = false; this.error = "Подключение к серверу... (пробуждение инстанса может занять до 30 сек)"; this.emit(); });
     this.socket.on("state", state => {
@@ -90,7 +98,19 @@ export class GameEngine {
     });
     this.socket.on('chat:view',view=>{this.chatView=view;this.emitChat()});
     this.socket.on('chat:message',event=>{if(this.chatView?.room!==event.room)return;const messages=this.chatView.messages.filter(m=>m.id!==event.message.id).concat(event.message).sort((a,b)=>a.sequence-b.sequence).slice(-(this.chatMeta?.historyLimit||80));this.chatView={...this.chatView,messages,latestSequence:event.latestSequence};this.emitChat()});
+    this.stopActivityTracking=this.trackUserActivity();
     this.socket.connect();
+  }
+  trackUserActivity(){
+    if(typeof document==='undefined'||typeof document.addEventListener!=='function')return ()=>{};
+    let lastSent=-Infinity,pending=false,timer=null;
+    const authenticated=()=>!!(this.state?.viewer.player||this.state?.viewer.role==='teacher');
+    const send=()=>{timer=null;if(!pending||document.hidden||!this.connected||this.legacyToken||!authenticated())return;pending=false;lastSent=Date.now();this.socket.emit('session:activity',{})};
+    const observe=event=>{if(event.isTrusted!==true||document.hidden||!this.connected||!authenticated())return;pending=true;const delay=15000-(Date.now()-lastSent);if(delay<=0)send();else if(!timer){timer=setTimeout(send,delay);timer.unref?.()}};
+    const events=['pointerdown','keydown','input','scroll','wheel'];
+    for(const event of events)document.addEventListener(event,observe,{capture:true,passive:true});
+    const off=this.onChange(()=>{if(!authenticated()){pending=false;clearTimeout(timer);timer=null}});
+    return ()=>{clearTimeout(timer);off();for(const event of events)document.removeEventListener(event,observe,true)};
   }
   onChange(listener) { this.listeners.add(listener); listener(this.state); return () => this.listeners.delete(listener); }
   emit() { for (const fn of this.listeners) try{fn(this.state)}catch(error){console.error('Ошибка обновления интерфейса:',error)} }
@@ -123,11 +143,13 @@ export class GameEngine {
   async joinTeam(regionId, name, accepted = false) {
     const result = await this.request("joinTeam", { regionId, name, privacyConsent:{accepted,version:PRIVACY_VERSION} });
     if(result.sessionMethod==='cookie'){await this.bindSession('player',result.playerToken);this.clearLegacyTokens();this.socket.disconnect().connect()}else{setToken('cq_player_token_v2',result.playerToken);saveCreatorToken(result.isCreator?result.playerToken:null)}
+    this.sessionNotice='';
     return result;
   }
   async teacherLogin(password) {
     const result = await this.request("teacherLogin", { password });
     if(result.sessionMethod==='cookie'){await this.bindSession('teacher',result.teacherToken);this.clearLegacyTokens();this.socket.disconnect().connect()}else setToken('cq_teacher_token_v2',result.teacherToken);
+    this.sessionNotice='';
     return result;
   }
   async teacherLogout() {if(this.state?.viewer.isCreator){window.location.href='./student.html';return}if(this.cookieSessions)await this.httpRequest('/api/session',{role:'teacher',action:'clear'});await this.request('teacherLogout');setToken('cq_teacher_token_v2',null)}

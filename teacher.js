@@ -240,6 +240,7 @@ $("dev-apply-btn").addEventListener("click",async()=>{try{await engine.applyRawS
 $("dev-backup-btn").addEventListener("click",()=>act(async()=>download("culture-quest-snapshot.json",JSON.stringify(await engine.getSnapshot(),null,2),"application/json")));
 engine.onChange(state=>{
  const teacher=state?.viewer.role==='teacher'||state?.viewer.isCreator;$("teacher-login").style.display=teacher?"none":"flex";$("teacher-app").style.display=teacher?"flex":"none";$("teacher-login-btn").disabled=!engine.connected||loggingIn;$('logout-btn').textContent=state?.viewer.isCreator?'Вернуться к игре':'Выйти';
+ if(!teacher&&engine.sessionNotice)$('teacher-login-error').textContent=engine.sessionNotice;
  $("teacher-login-connection").textContent=engine.connected?"Сервер подключён":engine.error||"Подключение к серверу... (пробуждение инстанса может занять до 30 сек)";
  if(!teacher){scene?.setVisible(false);$("dev-overlay").style.display="none";$("player-dialog").close();$("count-dialog").close();managerInitialized=false;playerEditId=null;controlKey="";return}
  $("conn-status").textContent=engine.connected?"● Сервер подключён":"● Переподключение…";$("phase-pill").textContent=state.round?state.round.resolved?"Итоги":state.round.paused?"Пауза":"Игра идёт":"Лобби";

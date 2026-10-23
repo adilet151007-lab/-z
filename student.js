@@ -163,7 +163,7 @@ engine.onChange(state => {
   const player = state.viewer.player;
   $("reg-screen").style.display = player ? "none" : "flex";
   $("app").style.display = player ? "flex" : "none";
-  if (!player) { renderRegistration(state); previousRound = null;teamKey='';questionKey='';scene?.setVisible(false);return; }
+  if (!player) { if(engine.sessionNotice)$('reg-error').textContent=engine.sessionNotice;renderRegistration(state); previousRound = null;teamKey='';questionKey='';scene?.setVisible(false);return; }
   if(!scene&&!sceneError)requestAnimationFrame(()=>ensureScene());
   if (scene) {
     scene.setVisible(!mapCollapsed);

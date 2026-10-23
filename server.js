@@ -15,6 +15,7 @@ import { ChatEngine, chatIdentity } from "./chat-engine.js";
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const digest = value => createHash("sha256").update(value).digest();
 const equal = (a, b) => timingSafeEqual(digest(String(a)), digest(String(b)));
+export const SESSION_IDLE_MS = 30 * 60 * 1000;
 
 export async function createGameServer(options = {}) {
   const password = options.teacherPassword ?? process.env.TEACHER_PASSWORD;
@@ -30,10 +31,18 @@ export async function createGameServer(options = {}) {
   const store = options.store || await createStore();
   const saved = await store.load();
   let game = new GameLogic(saved);
+  const sessionNow=options.sessionNow||Date.now;
+  const pendingPlayerActivity=new Map(),pendingTeacherActivity=new Map();
   if(!options.legacyRules)game.enableUniversal();
   if(!options.legacyRules&&options.flexibleTeams!==false)game.enableFlexibleTeams();
+  if(!game.state.accessControl.activity){game.state.accessControl.activity={startedAt:sessionNow(),players:Object.fromEntries(game.state.regions.flatMap(t=>t.members.map(m=>[m.pid,sessionNow()]))),teachers:{}};game.touch()}
+  const initialActivity=game.state.accessControl.activity;
+  if(!Number.isSafeInteger(initialActivity.startedAt)||!initialActivity.players||!initialActivity.teachers||Array.isArray(initialActivity.players)||Array.isArray(initialActivity.teachers)||!Object.values(initialActivity.players).every(Number.isSafeInteger)||!Object.entries(initialActivity.teachers).every(([hash,r])=>/^[a-f0-9]{64}$/.test(hash)&&Number.isSafeInteger(r?.at)&&Number.isSafeInteger(r?.expiresAt)))throw new Error('Повреждено сохранение активности сессий.');
   if (!saved||game.state.revision!==saved.revision) await store.save(game.state);
   let publishedGame = new GameLogic(game.state);
+  let lastActivityFlush=sessionNow();
+  const playerActive=member=>!!member&&sessionNow()-Math.max(publishedGame.state.accessControl.activity.players[member.pid]??publishedGame.state.accessControl.activity.startedAt,pendingPlayerActivity.get(member.pid)||0)<SESSION_IDLE_MS;
+  const teacherActivity=token=>{const hash=hashToken(token);return pendingTeacherActivity.get(hash)||publishedGame.state.accessControl.activity.teachers[hash]};
   const backupKey=digest('culture-quest/backup/v1:'+secret);
   function sealBackup(snapshot){const iv=randomBytes(12),cipher=createCipheriv('aes-256-gcm',backupKey,iv);cipher.setAAD(Buffer.from('culture-quest-backup-v1'));const ciphertext=Buffer.concat([cipher.update(JSON.stringify(snapshot),'utf8'),cipher.final()]);return {format:'culture-quest-encrypted-backup',version:1,createdAt:Date.now(),iv:iv.toString('base64'),tag:cipher.getAuthTag().toString('base64'),data:ciphertext.toString('base64')}}
   function openBackup(raw){try{if(raw?.format!=='culture-quest-encrypted-backup'||raw.version!==1||typeof raw.data!=='string'||raw.data.length>8000000)throw new Error();const iv=Buffer.from(raw.iv||'','base64'),tag=Buffer.from(raw.tag||'','base64');if(iv.length!==12||tag.length!==16)throw new Error();const decipher=createDecipheriv('aes-256-gcm',backupKey,iv);decipher.setAAD(Buffer.from('culture-quest-backup-v1'));decipher.setAuthTag(tag);return JSON.parse(Buffer.concat([decipher.update(Buffer.from(raw.data,'base64')),decipher.final()]).toString('utf8'))}catch{throw new GameError('Копия повреждена или создана с другим SESSION_SECRET. Игра не изменена.','BAD_BACKUP')}}
@@ -93,16 +102,49 @@ export async function createGameServer(options = {}) {
     if (!equal(signature, createHmac("sha256", secret).update(payload).digest("base64url"))) return false;
     try {
       const data = JSON.parse(Buffer.from(payload, "base64url").toString());
-      return data.role === 'teacher'&&data.expires>Date.now()&&(data.epoch||0)===(publishedGame.state.accessControl.teacherEpoch||0)&&(equal(data.passwordVersion,createHmac('sha256',secret).update(password).digest('hex'))||equal(data.passwordVersion,hashToken(password)));
+      const active=teacherActivity(token)?.at??publishedGame.state.accessControl.activity.startedAt;
+      return sessionNow()-active<SESSION_IDLE_MS&&data.role === 'teacher'&&data.expires>Date.now()&&(data.epoch||0)===(publishedGame.state.accessControl.teacherEpoch||0)&&(equal(data.passwordVersion,createHmac('sha256',secret).update(password).digest('hex'))||equal(data.passwordVersion,hashToken(password)));
     } catch { return false; }
   };
   const actor = socket => {
-    if (validTeacherToken(socket.data.teacherToken)) return { role: "teacher", playerHash: socket.data.playerHash };
-    const creator = publishedGame.creatorFor(socket.data.playerHash);
+    const player = socket.data.playerHash && publishedGame.findPlayer(socket.data.playerHash),playerHash=playerActive(player)?socket.data.playerHash:null;
+    if (validTeacherToken(socket.data.teacherToken)) return { role: "teacher", playerHash };
+    const creator = playerHash&&publishedGame.creatorFor(playerHash);
     if (creator) return { role: "creator", playerHash: socket.data.playerHash };
-    const player = socket.data.playerHash && publishedGame.findPlayer(socket.data.playerHash);
-    return { role: player && publishedGame.adminGrantFor(player.pid) ? "delegate" : "guest", playerHash: socket.data.playerHash };
+    return { role: playerHash && publishedGame.adminGrantFor(player.pid) ? "delegate" : "guest", playerHash };
   };
+  function recordActivity(socket){
+    const member=publishedGame.findPlayer(socket.data.playerHash),at=sessionNow();let active=false;
+    if(playerActive(member)){pendingPlayerActivity.set(member.pid,at);active=true}
+    if(validTeacherToken(socket.data.teacherToken)){const token=socket.data.teacherToken,data=JSON.parse(Buffer.from(token.split('.')[0],'base64url').toString());pendingTeacherActivity.set(hashToken(token),{at,expiresAt:data.expires});active=true}
+    return active;
+  }
+  async function maintainIdleSessions(forceFlush=false){
+    const at=sessionNow(),activity=game.state.accessControl.activity,members=game.state.regions.flatMap(t=>t.members),expired=members.filter(m=>at-Math.max(activity.players[m.pid]??activity.startedAt,pendingPlayerActivity.get(m.pid)||0)>=SESSION_IDLE_MS);
+    const teachers=new Map([...Object.entries(activity.teachers),...pendingTeacherActivity]);
+    const expiredTeachers=[...teachers].filter(([,r])=>at-r.at>=SESSION_IDLE_MS||r.expiresAt<=Date.now()).map(([hash])=>hash);
+    const flush=forceFlush||at-lastActivityFlush>=30000;
+    if(!expired.length&&!expiredTeachers.length&&(!flush||!pendingPlayerActivity.size&&!pendingTeacherActivity.size))return;
+    const before=structuredClone(game.state),playersCopy=new Map(pendingPlayerActivity),teachersCopy=new Map(pendingTeacherActivity),existing=new Set(members.map(m=>m.pid));
+    try{
+      for(const [pid,time]of playersCopy)if(existing.has(pid))activity.players[pid]=Math.max(activity.players[pid]||0,time);
+      for(const [hash,record]of teachersCopy)activity.teachers[hash]=record;
+      for(const pid of Object.keys(activity.players))if(!existing.has(pid))delete activity.players[pid];
+      for(const member of expired){const team=game.state.regions.find(t=>t.members.some(m=>m.pid===member.pid));game.leaveTeam(team.id,member.pid);delete activity.players[member.pid]}
+      for(const hash of expiredTeachers)delete activity.teachers[hash];
+      if(expired.length||expiredTeachers.length){game.log(`Автовыход после 30 минут бездействия: ${expired.length} участников, ${expiredTeachers.length} сессий преподавателя.`);if(game.state.revision===before.revision)game.touch()}
+      await store.save(game.state);publishedGame=new GameLogic(game.state);lastActivityFlush=at;
+      for(const [pid,time]of playersCopy)if((pendingPlayerActivity.get(pid)||0)<=time)pendingPlayerActivity.delete(pid);
+      for(const [hash,record]of teachersCopy)if((pendingTeacherActivity.get(hash)?.at||0)<=record.at)pendingTeacherActivity.delete(hash);
+      const hashes=new Set(expired.map(m=>m.tokenHash)),teacherHashes=new Set(expiredTeachers);
+      for(const socket of io.sockets.sockets.values()){
+        const roles=[];if(hashes.has(socket.data.playerHash)){socket.data.playerHash=null;roles.push('player')}
+        if(socket.data.teacherToken&&teacherHashes.has(hashToken(socket.data.teacherToken))){socket.data.teacherToken=null;roles.push('teacher')}
+        if(roles.length){socket.emit('session:expired',{roles,reason:'idle',message:'Сессия завершена после 30 минут бездействия. Войдите заново.'});sendState(socket)}
+      }
+      if(expired.length||expiredTeachers.length)broadcast();
+    }catch(error){game=new GameLogic(before);throw error}
+  }
   const cookieName=role=>(secureCookies?'__Host-':'')+'cq-'+role;
   const cookies=req=>Object.fromEntries((req.headers.cookie||'').split(';').flatMap(part=>{const at=part.indexOf('=');if(at<0)return [];try{return [[part.slice(0,at).trim(),decodeURIComponent(part.slice(at+1))]]}catch{return []}}));
   const cookie=(res,role,value,maxAge)=>res.cookie(cookieName(role),value,{httpOnly:true,secure:secureCookies,sameSite:'strict',path:'/',maxAge});
@@ -113,8 +155,26 @@ export async function createGameServer(options = {}) {
     try{const role=req.body?.role;if(!['teacher','player'].includes(role))throw new GameError('Некорректная сессия.');
       if(req.body.action==='clear'){cookie(res,role,'',0);return res.json({ok:true})}
       const token=req.body.token;if(typeof token!=='string'||token.length>2000)throw new GameError('Сессия недействительна.','SESSION_EXPIRED');
-      if(role==='teacher'){if(!validTeacherToken(token))throw new GameError('Войдите преподавателем заново.','SESSION_EXPIRED');await enqueue(async()=>{const before=structuredClone(game.state);try{if(!validTeacherToken(token))throw new GameError('Войдите преподавателем заново.','SESSION_EXPIRED');const data=JSON.parse(Buffer.from(token.split('.')[0],'base64url').toString()),replacement=signed({role:'teacher',epoch:game.state.accessControl.teacherEpoch||0,sessionId:randomUUID(),expires:data.expires,passwordVersion:createHmac('sha256',secret).update(password).digest('hex')});game.state.accessControl.revokedTeacherTokens=[...(game.state.accessControl.revokedTeacherTokens||[]).filter(t=>t.expiresAt>Date.now()),{hash:hashToken(token),expiresAt:data.expires}];game.touch();await store.save(game.state);publishedGame=new GameLogic(game.state);for(const s of io.sockets.sockets.values())if(s!==req.gameSocket&&s.data.teacherToken===token)s.disconnect(true);req.gameSocket.data.teacherToken=replacement;cookie(res,role,replacement,Math.max(0,data.expires-Date.now()))}catch(error){game=new GameLogic(before);throw error}});broadcast();return res.json({ok:true})}
-      await enqueue(async()=>{const before=structuredClone(game.state);try{const player=game.findPlayer(hashToken(token));if(!player)throw new GameError('Сессия недействительна.','SESSION_EXPIRED');const replacement=randomBytes(32).toString('base64url'),newHash=hashToken(replacement);game.member(player.regionId,player.pid).tokenHash=newHash;game.touch();await store.save(game.state);publishedGame=new GameLogic(game.state);for(const s of io.sockets.sockets.values())if(s!==req.gameSocket&&s.data.playerHash===player.tokenHash)s.disconnect(true);req.gameSocket.data.playerHash=newHash;cookie(res,role,replacement,30*86400000)}catch(error){game=new GameLogic(before);throw error}});broadcast();res.json({ok:true});
+      if(role==='teacher'){
+        if(!validTeacherToken(token))throw new GameError('Войдите преподавателем заново.','SESSION_EXPIRED');
+        await enqueue(async()=>{
+          await maintainIdleSessions();const before=structuredClone(game.state);
+          try{
+            if(!validTeacherToken(token))throw new GameError('Войдите преподавателем заново.','SESSION_EXPIRED');
+            const data=JSON.parse(Buffer.from(token.split('.')[0],'base64url').toString()),record=teacherActivity(token)||{at:game.state.accessControl.activity.startedAt,expiresAt:data.expires};
+            const replacement=signed({role:'teacher',epoch:game.state.accessControl.teacherEpoch||0,sessionId:randomUUID(),expires:data.expires,passwordVersion:createHmac('sha256',secret).update(password).digest('hex')});
+            game.state.accessControl.revokedTeacherTokens=[...(game.state.accessControl.revokedTeacherTokens||[]).filter(t=>t.expiresAt>Date.now()),{hash:hashToken(token),expiresAt:data.expires}];
+            delete game.state.accessControl.activity.teachers[hashToken(token)];game.state.accessControl.activity.teachers[hashToken(replacement)]=record;
+            game.touch();await store.save(game.state);publishedGame=new GameLogic(game.state);pendingTeacherActivity.delete(hashToken(token));
+            for(const s of io.sockets.sockets.values())if(s!==req.gameSocket&&s.data.teacherToken===token)s.disconnect(true);
+            req.gameSocket.data.teacherToken=replacement;cookie(res,role,replacement,Math.max(0,data.expires-Date.now()));
+          }catch(error){game=new GameLogic(before);throw error}
+        });broadcast();return res.json({ok:true});
+      }
+      await enqueue(async()=>{
+        await maintainIdleSessions();const before=structuredClone(game.state);
+        try{const player=game.findPlayer(hashToken(token));if(!player||!playerActive(player))throw new GameError('Сессия недействительна.','SESSION_EXPIRED');const replacement=randomBytes(32).toString('base64url'),newHash=hashToken(replacement);game.member(player.regionId,player.pid).tokenHash=newHash;game.touch();await store.save(game.state);publishedGame=new GameLogic(game.state);for(const s of io.sockets.sockets.values())if(s!==req.gameSocket&&s.data.playerHash===player.tokenHash)s.disconnect(true);req.gameSocket.data.playerHash=newHash;cookie(res,role,replacement,30*86400000)}catch(error){game=new GameLogic(before);throw error}
+      });broadcast();res.json({ok:true});
     }catch(error){res.status(error instanceof GameError?400:503).json({ok:false,error:error instanceof GameError?error.message:'Сессия не сохранена. Повторите вход.',code:error.code||'STORAGE_ERROR'})}
   });
   app.post('/api/bulk/:action',httpSocket,(req,res,next)=>{const socket=req.gameSocket,jar=cookies(req),surface=req.headers['x-cq-surface'],identity=actor(socket),player=publishedGame.findPlayer(socket.data.playerHash);const permitted=surface==='teacher'&&validTeacherToken(jar[cookieName('teacher')])&&equal(jar[cookieName('teacher')],socket.data.teacherToken)||typeof jar[cookieName('player')]==='string'&&hashToken(jar[cookieName('player')])===socket.data.playerHash;const authorized=['teacher','creator'].includes(identity.role)||identity.role==='delegate'&&publishedGame.adminCan(player?.pid,req.params.action);if(!bulkActions.has(req.params.action)||!permitted||!authorized)return res.status(403).json({ok:false,error:'Нужна действующая административная сессия.',code:'FORBIDDEN'});next()},express.json({limit:'8mb'}),(req,res)=>{const action=req.gameSocket.data.bulkHandlers?.get(req.params.action);if(!action)return res.status(400).json({ok:false,error:'Действие недоступно.'});action(req.body,value=>res.json(value))});
@@ -180,7 +240,16 @@ export async function createGameServer(options = {}) {
     socket.data.httpProof=randomBytes(24).toString('base64url');socket.emit('session:ready',{proof:socket.data.httpProof});
     sendState(socket);
     broadcast();
-    if(socket.data.refreshLegacy)socket.emit('ui:refresh',{id:randomUUID()});
+    if(socket.data.refreshLegacy||cookieSessions&&socket.handshake.auth?.activityVersion!==1)socket.emit('ui:refresh',{id:randomUUID()});
+    let lastActivityMessage=-Infinity;
+    socket.on('session:activity',(data,callback)=>{
+      if(typeof data==='function'){callback=data;data={}}
+      const reply=value=>{if(typeof callback==='function')callback(value)};
+      if(sessionNow()-lastActivityMessage<5000)return reply({ok:true});
+      lastActivityMessage=sessionNow();
+      if(!data||typeof data!=='object'||Array.isArray(data)||Object.keys(data).length)return reply({ok:false,code:'INVALID_ACTION'});
+      reply(recordActivity(socket)?{ok:true}:{ok:false,code:'SESSION_EXPIRED'});
+    });
     let eventWindow = Date.now(), eventCount = 0,waiting=0;
     socket.data.bulkHandlers=new Map();
     function handle(name, permission, fn, after = null) {
@@ -194,6 +263,7 @@ export async function createGameServer(options = {}) {
         waiting++;
         enqueue(async () => {
           if (closing) throw new GameError("Сервер перезапускается. Дождитесь подключения.");
+          await maintainIdleSessions();
           const identity = actor(socket);
           const actorPlayer = identity.playerHash ? game.findPlayer(identity.playerHash) : null;
           const delegatedAllowed = identity.role === 'delegate' && game.adminCan(actorPlayer?.pid, name);
@@ -209,6 +279,8 @@ export async function createGameServer(options = {}) {
           try {
             if(['resetGame','applyRawState'].includes(name)||name==='removeAllPlayers'&&game.state.regions.some(t=>t.members.some(m=>!m.creatorId)))game.createRestorePoint('Перед действием: '+name,false);
             result = await fn(data, player);
+            if(result?.playerToken&&result.player)game.state.accessControl.activity.players[result.player.pid]=sessionNow();
+            if(result?.teacherToken){const payload=JSON.parse(Buffer.from(result.teacherToken.split('.')[0],'base64url').toString());game.state.accessControl.activity.teachers[hashToken(result.teacherToken)]={at:sessionNow(),expiresAt:payload.expires};game.touch()}
             for(const member of before.regions.flatMap(t=>t.members).filter(m=>m.creatorId)){
               const current=game.findPlayer(member.tokenHash);
               const voluntary=player?.pid===member.pid&&(name==='leaveTeam'||name==='respondSessionExit'&&data.accept===true);
@@ -224,6 +296,7 @@ export async function createGameServer(options = {}) {
             throw error;
           }
           if (after) after(result);
+          if(name!=='chatSubscribe')recordActivity(socket);
           if (game.state.revision !== before.revision || (after&&!name.startsWith('chat'))) broadcast();
           reply({ ok: true, ...(result || {}),...(cookieSessions&&(result?.playerToken||result?.teacherToken)?{sessionMethod:'cookie'}:{}) });
         }).catch(error => {
@@ -239,7 +312,7 @@ export async function createGameServer(options = {}) {
       if (typeof data.password !== "string" || data.password.length > 256 || !equal(data.password, password)) {checkLoginLimit(socket);throw new GameError("Неверный пароль преподавателя.", "BAD_PASSWORD");}
       return { teacherToken: signed({ role: 'teacher',epoch:game.state.accessControl.teacherEpoch||0,sessionId:randomUUID(),expires:Date.now()+86400000,passwordVersion:createHmac('sha256',secret).update(password).digest('hex') }) };
     }, result => { socket.data.teacherToken = result.teacherToken; });
-    handle('teacherLogout','teacher',()=>{if(socket.data.teacherToken){const list=(game.state.accessControl.revokedTeacherTokens||[]).filter(item=>item.expiresAt>Date.now());if(list.length>=1000){game.state.accessControl.teacherEpoch=(game.state.accessControl.teacherEpoch||0)+1;game.state.accessControl.revokedTeacherTokens=[]}else game.state.accessControl.revokedTeacherTokens=[...list,{hash:hashToken(socket.data.teacherToken),expiresAt:Date.now()+86400000}];game.touch()}return {}},()=>{socket.data.teacherToken=null});
+    handle('teacherLogout','teacher',()=>{if(socket.data.teacherToken){const list=(game.state.accessControl.revokedTeacherTokens||[]).filter(item=>item.expiresAt>Date.now());if(list.length>=1000){game.state.accessControl.teacherEpoch=(game.state.accessControl.teacherEpoch||0)+1;game.state.accessControl.revokedTeacherTokens=[]}else game.state.accessControl.revokedTeacherTokens=[...list,{hash:hashToken(socket.data.teacherToken),expiresAt:Date.now()+86400000}];delete game.state.accessControl.activity.teachers[hashToken(socket.data.teacherToken)];game.touch()}return {}},()=>{if(socket.data.teacherToken)pendingTeacherActivity.delete(hashToken(socket.data.teacherToken));socket.data.teacherToken=null});
     handle("joinTeam", "guest", data => {
       if (socket.data.playerHash && game.findPlayer(socket.data.playerHash)) throw new GameError("Вы уже состоите в команде.");
       if(requireConsent&&(data.privacyConsent?.accepted!==true||data.privacyConsent?.version!==PRIVACY_VERSION))throw new GameError('Прочитайте политику и подтвердите согласие перед входом.','CONSENT_REQUIRED');
@@ -397,18 +470,22 @@ export async function createGameServer(options = {}) {
   const cleanup = setInterval(() => { for (const [ip, value] of attempts) if (value.until < Date.now()) attempts.delete(ip);for(const [id,times] of chatAttempts)if(!times.some(t=>t>Date.now()-10000))chatAttempts.delete(id);for(const [pid,at]of effectAttempts)if(at<Date.now()-30000)effectAttempts.delete(pid); }, 60000);
   cleanup.unref();
   const connectionCleanup=setInterval(()=>{for(const [ip,record]of connectionWindows)if(Date.now()-record.at>10000)connectionWindows.delete(ip)},10000);connectionCleanup.unref();
+  let idleBusy=false;
+  const idleTimer=setInterval(()=>{if(closing||idleBusy)return;idleBusy=true;enqueue(()=>maintainIdleSessions()).catch(error=>{if(error.code!=='SERVER_BUSY')console.error('Автовыход не сохранён; повторная попытка автоматически:',error.message)}).finally(()=>{idleBusy=false})},5000);idleTimer.unref();
 
   return {
     app, io, httpServer, store,
     get game() { return game; },
+    async checkInactiveSessions(){return enqueue(()=>maintainIdleSessions(true))},
     async listen(port = Number(process.env.PORT) || 3000, host = "0.0.0.0") {
       await new Promise((resolve, reject) => { httpServer.once("error", reject); httpServer.listen(port, host, resolve); });
       return httpServer.address().port;
     },
     async close() {
       closing = true;
-      clearInterval(timer); clearInterval(cleanup);clearInterval(connectionCleanup);clearTimeout(broadcastTimer);
+      clearInterval(timer); clearInterval(cleanup);clearInterval(connectionCleanup);clearInterval(idleTimer);clearTimeout(broadcastTimer);
       await pending;
+      try{await maintainIdleSessions(true)}catch(error){console.error('Активность сессий не сохранена перед остановкой:',error.message)}
       await new Promise(resolve => io.close(resolve));
       if (httpServer.listening) await new Promise(resolve => httpServer.close(resolve));
       await store.close();
