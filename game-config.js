@@ -14,6 +14,7 @@ export const soloMultiplier = streak => 1 + Math.min(8, Math.max(0, streak || 0)
 export const isCreatorTeam = team => team?.id === CREATOR_TEAM_ID;
 export const regularTeams = teams => teams.filter(team => !isCreatorTeam(team));
 export const ECONOMY_PENALTY = 20;
+export const ACHIEVEMENTS = [{id:'sky-breaker',title:'Ты смог, братец',description:'Дойти до 15% экономики, восстановить её ответами до 100% и завершить матч на первом месте.',icon:'⟐'}];
 export const CRISIS_THRESHOLD = 30;
 export const RESOURCE_CAP = 1000;
 export const DEVELOPMENT_STAGES = [

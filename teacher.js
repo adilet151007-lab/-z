@@ -1,4 +1,4 @@
-import { GameEngine, REGIONS, CITIES,capacityFor, totalCapacity, regularTeams, isCreatorTeam, MAX_TEAMS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, metadataFor, setupPresentationEffects, setupBranding, escapeHTML as h } from "./shared-engine.js";
+import { GameEngine, REGIONS, CITIES,capacityFor, totalCapacity, regularTeams, isCreatorTeam, MAX_TEAMS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, metadataFor, setupPresentationEffects, setupBranding,setupAchievements, escapeHTML as h } from "./shared-engine.js";
 import { setupSyllabus } from "./syllabus-ui.js";
 import { setupCommunication } from "./chat-ui.js";
 
@@ -6,6 +6,7 @@ const $ = id => document.getElementById(id), engine = new GameEngine("teacher");
 setupCommunication(engine);
 setupPresentationEffects(engine);
 setupBranding(engine);
+setupAchievements(engine);
 let scene=null,sceneFailed=false,sceneLoading=false,selectedQuestionId=null,duration=30,controlKey="",loggingIn=false;
 let editId=null,editVersion=null,bankKey="",bankPage=0,teamEditId=null,projector=false,mapKey="",playerEditId=null,countPlan=null,managerInitialized=false,countDirty=false,capacityDirty=false,playerOptionsKey="",rosterKey="";
 function message(text="",error=false){$("action-message").textContent=text;$("action-message").classList.toggle("red",error)}
@@ -46,7 +47,7 @@ $("export-btn").addEventListener("click",()=>act(async()=>{
  download("vedomost.csv","\uFEFF"+lines.map(row=>row.map(cell).join(";")).join("\r\n"),"text/csv;charset=utf-8");
 }));
 function renderControls(state){
- const questions=engine.allQuestions(),round=state.round,key=round?`${round.id}:${round.resolved}:${round.paused}:${engine.connected}`:`lobby:${questions.map(q=>q.id+":"+q.version).join("|")}:${selectedQuestionId}:${engine.connected}`;
+ const questions=engine.allQuestions(),round=state.round,key=JSON.stringify([round?.id,round?.resolved,round?.paused,engine.connected,state.match,questions.map(q=>q.id+':'+q.version),selectedQuestionId]);
  if(controlKey===key){updateTimer();return}controlKey=key;
  const disabled=engine.connected?"":"disabled";
  if(!round){
@@ -54,7 +55,7 @@ function renderControls(state){
   $("round-control").innerHTML=`<h2>Ожидаем начало раунда</h2><div class="teacher-private">${!questions.length?'<p class="small-note mut">В этом предмете пока нет вопросов. Добавьте их в редакторе ниже.</p>':''}<label for="q-select" class="field-label">Вопрос</label><select id="q-select" ${disabled}>${questions.map((q,i)=>`<option value="${q.id}" ${q.id===selectedQuestionId?"selected":""}>${i+1}. ${h(q.text)}</option>`).join("")}</select><div class="row" style="margin-top:12px"><label for="duration-select" class="mut">Время</label><select id="duration-select" style="width:95px" ${disabled}>${[20,30,45,60,90,120].map(n=>`<option value="${n}" ${n===duration?"selected":""}>${n} с</option>`).join("")}</select><button class="pri" data-control="start" ${!questions.length?'disabled':disabled}>Запустить</button></div></div>`;
  }else{
   $("round-control").innerHTML=`<h2>Текущий вопрос</h2><p class="qtext">${h(round.question.text)}</p><ol class="current-options">${round.question.options.map(o=>`<li>${h(o)}</li>`).join("")}</ol><p class="mut small-note"><span id="teacher-timer"></span> · Ответили: <span id="submitted-count"></span></p><div class="row" style="margin-top:12px">${!round.resolved?`<button data-control="pause" ${disabled}>${round.paused?"Продолжить":"Пауза"}</button><button data-control="timer" ${disabled}>Сбросить таймер</button><button class="pri" data-control="resolve" ${disabled}>Подвести итоги</button>`:`<button class="pri" data-control="next" ${disabled}>Следующий вопрос</button>`}</div>`;
- }updateTimer();
+ }$("round-control").insertAdjacentHTML('beforeend',`<div class="match-finish-row"><span class="small-note mut">${state.match?.finishedAt!==null&&state.match?.finishedAt!==undefined?'Матч завершён':`Матч · ${state.match?.completedCount||0} / ${state.match?.totalQuestions||questions.length} вопросов`}</span><button data-control="finish" class="ghost" ${!engine.connected||!state.match?.completedCount||state.match.finishedAt!==null||!!round&&!round.resolved?'disabled':''}>Завершить матч</button></div>`);updateTimer();
 }
 $("round-control").addEventListener("change",e=>{if(e.target.id==="q-select"){selectedQuestionId=e.target.value;renderAnswers(engine.state)}if(e.target.id==="duration-select")duration=Number(e.target.value)});
 $("round-control").addEventListener("click",e=>{
@@ -63,6 +64,7 @@ $("round-control").addEventListener("click",e=>{
  if(b.dataset.control==="pause")act(()=>engine.pauseRound());
  if(b.dataset.control==="timer")act(()=>engine.resetTimer());
  if(b.dataset.control==="resolve")act(()=>engine.resolveRound());
+ if(b.dataset.control==='finish'&&confirm('Завершить матч и определить победителей и достижения?'))act(()=>engine.finishMatch());
  if(b.dataset.control==="next"){
   const qs=engine.allQuestions(),index=qs.findIndex(q=>q.id===engine.state.round.questionId);selectedQuestionId=qs[(index+1)%qs.length]?.id;
   act(()=>engine.endRound());

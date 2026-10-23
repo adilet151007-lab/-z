@@ -42,7 +42,7 @@ export async function createGameServer(options = {}) {
   if(!Number.isSafeInteger(initialActivity.startedAt)||!initialActivity.players||!initialActivity.teachers||Array.isArray(initialActivity.players)||Array.isArray(initialActivity.teachers)||!Object.values(initialActivity.players).every(Number.isSafeInteger)||!Object.entries(initialActivity.teachers).every(([hash,r])=>/^[a-f0-9]{64}$/.test(hash)&&Number.isSafeInteger(r?.at)&&Number.isSafeInteger(r?.expiresAt)))throw new Error('Повреждено сохранение активности сессий.');
   const revokedCreators=game.state.regions.flatMap(team=>team.members.filter(member=>member.creatorId&&revokeCreatorSessionIds.includes(member.pid)).map(member=>({teamId:team.id,pid:member.pid})));
   for(const session of revokedCreators){game.leaveTeam(session.teamId,session.pid);delete initialActivity.players[session.pid]}
-  if(revokedCreators.length){game.state.exitRequests=(game.state.exitRequests||[]).filter(request=>!revokedCreators.some(session=>session.pid===request.pid));game.log(`Оператор инфраструктуры завершил персональные сессии: ${revokedCreators.length}.`)}
+  if(revokedCreators.length){game.state.exitRequests=(game.state.exitRequests||[]).filter(request=>!revokedCreators.some(session=>session.pid===request.pid));game.log(`Оператор инфраструктуры завершил персональные сессии: ${revokedCreators.length}.`,'admin')}
   if (!saved||game.state.revision!==saved.revision) await store.save(game.state);
   let publishedGame = new GameLogic(game.state);
   let lastActivityFlush=sessionNow();
@@ -137,7 +137,7 @@ export async function createGameServer(options = {}) {
       for(const pid of Object.keys(activity.players))if(!existing.has(pid))delete activity.players[pid];
       for(const member of expired){const team=game.state.regions.find(t=>t.members.some(m=>m.pid===member.pid));game.leaveTeam(team.id,member.pid);delete activity.players[member.pid]}
       for(const hash of expiredTeachers)delete activity.teachers[hash];
-      if(expired.length||expiredTeachers.length){game.log(`Автовыход после 30 минут бездействия: ${expired.length} участников, ${expiredTeachers.length} сессий преподавателя.`);if(game.state.revision===before.revision)game.touch()}
+      if(expired.length||expiredTeachers.length){game.log(`Автовыход после 30 минут бездействия: ${expired.length} участников, ${expiredTeachers.length} сессий преподавателя.`,expiredTeachers.length||expired.some(m=>m.creatorId)?'admin':'game');if(game.state.revision===before.revision)game.touch()}
       await store.save(game.state);publishedGame=new GameLogic(game.state);lastActivityFlush=at;
       for(const [pid,time]of playersCopy)if((pendingPlayerActivity.get(pid)||0)<=time)pendingPlayerActivity.delete(pid);
       for(const [hash,record]of teachersCopy)if((pendingTeacherActivity.get(hash)?.at||0)<=record.at)pendingTeacherActivity.delete(hash);
@@ -283,7 +283,9 @@ export async function createGameServer(options = {}) {
           let result;
           try {
             if(['resetGame','applyRawState'].includes(name)||name==='removeAllPlayers'&&game.state.regions.some(t=>t.members.some(m=>!m.creatorId)))game.createRestorePoint('Перед действием: '+name,false);
-            result = await fn(data, player);
+            const oldLogContext=game.logContext;
+            game.logContext=['teacher','creator','delegate'].includes(identity.role)&&!['startRound','resolveRound','endRound','finishMatch','castVote','confirmVote','cancelVote','teamSubmit','voteLeader','chatSend','chatSubscribe','offerTrade','settleTrade'].includes(name)?'admin':null;
+            try{result = await fn(data, player)}finally{game.logContext=oldLogContext}
             if(result?.playerToken&&result.player)game.state.accessControl.activity.players[result.player.pid]=sessionNow();
             if(result?.teacherToken){const payload=JSON.parse(Buffer.from(result.teacherToken.split('.')[0],'base64url').toString());game.state.accessControl.activity.teachers[hashToken(result.teacherToken)]={at:sessionNow(),expiresAt:payload.expires};game.touch()}
             for(const member of before.regions.flatMap(t=>t.members).filter(m=>m.creatorId)){
@@ -292,7 +294,6 @@ export async function createGameServer(options = {}) {
               if((!current||current.pid!==member.pid||current.creatorId!==member.creatorId)&&!voluntary)throw new GameError('Персональную сессию можно завершить только по согласию её владельца. Используйте запрос на выход.','PROTECTED_SESSION');
             }
             if (game.state.revision !== before.revision) {
-              if(permission==='teacher'&&identity.role==='creator')game.log(`Системное изменение · ${name}`);
               await store.save(game.state);
               publishedGame = new GameLogic(game.state);
             }
@@ -404,6 +405,9 @@ export async function createGameServer(options = {}) {
     handle("resetTimer", "teacher", () => game.resetTimer());
     handle("resolveRound", "teacher", () => game.resolveRound());
     handle("endRound", "teacher", () => game.endRound());
+    handle('finishMatch','teacher',()=>game.finishMatch());
+    handle('grantAchievement','teacher',data=>game.grantAchievement(data.achievementId,data.scope,data.targetId));
+    handle('previewAchievement','teacher',data=>{if(!['sky-breaker'].includes(data.achievementId))throw new GameError('Неизвестное достижение.');return {achievementId:data.achievementId}},result=>socket.emit('achievement:preview',result));
     handle("adjustPoints", "teacher", data => game.adjustPoints(data.regionId, data.delta));
     handle("adjustEconomy", "teacher", data => game.adjustEconomy(data.regionId, data.delta));
     handle("addCustomQuestion", "teacher", data => game.addCustomQuestion(data.text, data.options, data.correctIdx, data.points));

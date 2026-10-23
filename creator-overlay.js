@@ -1,8 +1,8 @@
-import {escapeHTML as h} from './shared-engine.js';
+import {escapeHTML as h,setupAchievementControls} from './shared-engine.js';
 import {setupSyllabus} from './syllabus-ui.js';
 
 export function setupTelemetry(engine){
- let root=null,sheet=null,open=false,tab='eye',hold=null,origin=null,swipe=null,busy=false,selected='',pid='',lastIdentity='',lastPlayer='',editingQuestion=null,exitDialog=null,stopSyllabus=null;
+ let root=null,sheet=null,open=false,tab='eye',hold=null,origin=null,swipe=null,busy=false,selected='',pid='',lastIdentity='',lastPlayer='',editingQuestion=null,exitDialog=null,stopSyllabus=null,stopAwards=null;
  const enabled=()=>engine.state?.viewer.isDevTelemetry===true,$=id=>document.getElementById(id);
  function permitted(action){
   const v=engine.state?.viewer;if(!v)return false;
@@ -82,6 +82,7 @@ export function setupTelemetry(engine){
   $('sys-player-form').addEventListener('submit',e=>{e.preventDefault();run(()=>engine.updatePlayer(pid,$('sys-player-name').value.trim(),$('sys-player-team').value))});
   $('sys-question-form').addEventListener('submit',e=>{e.preventDefault();run(saveQuestion)});
   stopSyllabus=setupSyllabus(engine,message=>status(message));
+  const awardTools=document.createElement('details');awardTools.className='section-gap';awardTools.dataset.awardToolsShell='';awardTools.innerHTML='<summary>Достижения · просмотр и вручение</summary><div></div>';sheet.querySelector('[data-sys-pane="control"]').append(awardTools);stopAwards=setupAchievementControls(engine,awardTools.querySelector('div'));
   exitDialog=document.createElement('dialog');exitDialog.id='sys-exit-confirm';exitDialog.className='admin-dialog';exitDialog.innerHTML='<h2>Запрос на выход</h2><p class="section-gap">Преподаватель просит завершить вашу персональную сессию. Выйти из игры?</p><p class="small-note mut">Если отклонить запрос, вы останетесь в игре.</p><p id="sys-exit-status" class="red small-note" role="status"></p><div class="row section-gap"><button id="sys-exit-decline" class="pri">Остаться</button><button id="sys-exit-accept" class="danger">Подтвердить выход</button></div>';document.body.append(exitDialog);
   async function respond(accept){const request=engine.state?.viewer.exitRequest;if(!request)return;const buttons=[...exitDialog.querySelectorAll('button')];buttons.forEach(b=>b.disabled=true);try{await engine.respondSessionExit(request.id,accept);exitDialog?.close()}catch(e){if($('sys-exit-status'))$('sys-exit-status').textContent=e.message}finally{buttons.forEach(b=>b.disabled=false)}}
   $('sys-exit-accept').addEventListener('click',()=>respond(true));$('sys-exit-decline').addEventListener('click',()=>respond(false));exitDialog.addEventListener('cancel',e=>{e.preventDefault();respond(false)});
@@ -153,5 +154,5 @@ export function setupTelemetry(engine){
  const heading=document.getElementById('session-heading');heading.addEventListener('pointerdown',e=>{if(!enabled()||e.button>0)return;origin={x:e.clientX,y:e.clientY};hold=setTimeout(()=>{hold=null;try{navigator.vibrate?.(50)}catch{}show()},2000)});
  heading.addEventListener('pointermove',e=>{if(origin&&Math.hypot(e.clientX-origin.x,e.clientY-origin.y)>12)cancelHold()});for(const event of ['pointerup','pointercancel','pointerleave'])heading.addEventListener(event,cancelHold);heading.addEventListener('contextmenu',e=>{if(enabled())e.preventDefault()});
  document.addEventListener('keydown',e=>{if(!enabled())return;if(e.key==='Escape'){close();return}if(e.key==='F9'||e.code==='Backquote'&&!e.target.closest('input,textarea,select')){e.preventDefault();open?close():show()}});window.addEventListener('cq:show-chat',close);
- engine.onChange(()=>{if(!enabled()){cancelHold();close();stopSyllabus?.();stopSyllabus=null;exitDialog?.close();exitDialog?.remove();exitDialog=null;root?.remove();$('sys-signal-zone')?.remove();root=null;sheet=null;lastIdentity='';lastPlayer='';return}mount();syncExit();if(open)render()});
+ engine.onChange(()=>{if(!enabled()){cancelHold();close();stopSyllabus?.();stopSyllabus=null;stopAwards?.();stopAwards=null;exitDialog?.close();exitDialog?.remove();exitDialog=null;root?.remove();$('sys-signal-zone')?.remove();root=null;sheet=null;lastIdentity='';lastPlayer='';return}mount();syncExit();if(open)render()});
 }
