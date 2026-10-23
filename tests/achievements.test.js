@@ -80,13 +80,32 @@ test('сохранение и журнал: ошибка БД откатывае
  f.server.game.state.log.push({t:1,msg:'Адилет: имя исправлено на «Новое имя».'},{t:2,msg:'Игрок: перенос из «А» в «Б».'},{t:3,msg:'Алия: место в команде освобождено.',kind:'game'});const migrated=f.server.game.view({role:'creator',playerHash:hashToken(owner.playerToken)}).log;assert.equal(migrated.some(entry=>entry.t===1||entry.t===2),false);assert.ok(migrated.some(entry=>entry.t===3));
 });
 
-test('анимация: новая награда показывается один раз, предпросмотр не выдаёт её, чужое имя экранируется',async t=>{
- const old={document:globalThis.document,localStorage:globalThis.localStorage},handlers=new Map(),socketHandlers=new Map(),layers=[],listeners=new Set(),values=new Map(),shelf={innerHTML:''};let stop;
- t.after(()=>{stop?.();globalThis.document=old.document;globalThis.localStorage=old.localStorage});
+test('анимация: безопасная выдача и предпросмотр, лимит кадров, остановка, reduced-motion и SVG при недоступном Canvas',async t=>{
+ const keys=['document','localStorage','requestAnimationFrame','cancelAnimationFrame','matchMedia','devicePixelRatio','addEventListener','removeEventListener'];
+ const old=Object.fromEntries(keys.map(key=>[key,globalThis[key]])),handlers=new Map(),windowHandlers=new Map(),socketHandlers=new Map(),layers=[],listeners=new Set(),values=new Map(),frames=new Map(),shelf={innerHTML:''};
+ let stop,nextFrame=0,paints=0,finite=true,reduced=false,canvasAvailable=true,canvasQueries=0;
+ t.after(()=>{stop?.();for(const key of keys)if(old[key]===undefined)delete globalThis[key];else globalThis[key]=old[key]});
  globalThis.localStorage={getItem:key=>values.get(key),setItem:(key,value)=>values.set(key,value)};
- globalThis.document={hidden:false,body:{classList:{add(){},remove(){}},append(node){layers.push(node)}},querySelectorAll(selector){return selector==='[data-achievement-shelf]'?[shelf]:[]},getElementById(){return null},addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name),createElement(){return {setAttribute(){},querySelector(){return {addEventListener(){}}},remove(){this.removed=true}}}};
+ globalThis.requestAnimationFrame=fn=>{frames.set(++nextFrame,fn);return nextFrame};globalThis.cancelAnimationFrame=id=>frames.delete(id);
+ globalThis.matchMedia=()=>({get matches(){return reduced}});globalThis.devicePixelRatio=3;
+ globalThis.addEventListener=(name,fn)=>windowHandlers.set(name,fn);globalThis.removeEventListener=name=>windowHandlers.delete(name);
+ const step=now=>{const pending=[...frames.values()];frames.clear();for(const fn of pending)fn(now)};
+ const context={clearRect(){paints++},setTransform(){},beginPath(){},moveTo(x,y){finite&&=Number.isFinite(x)&&Number.isFinite(y)},lineTo(x,y){finite&&=Number.isFinite(x)&&Number.isFinite(y)},closePath(){},fill(){},stroke(){}};
+ globalThis.document={hidden:false,body:{classList:{add(){},remove(){}},append(node){layers.push(node)}},querySelectorAll(selector){return selector==='[data-achievement-shelf]'?[shelf]:[]},getElementById(){return null},addEventListener:(name,fn)=>handlers.set(name,fn),removeEventListener:name=>handlers.delete(name),createElement(){
+  const classes=new Set(),canvas={clientWidth:220,clientHeight:330,getContext(){canvasQueries++;return canvasAvailable?context:null}};
+  return {canvas,classes,classList:{add:name=>classes.add(name)},setAttribute(){},querySelector(selector){return selector==='canvas'?canvas:{addEventListener(){}}},remove(){this.removed=true}};
+ }};
  let source=await readFile(new URL('../shared-engine.js',import.meta.url),'utf8');source=source.replace(/^import .*\n/gm,'').replace(/^export \{ .*from .*\n/gm,'');const {setupAchievements}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
  const engine={mode:'student',socket:{on:(name,fn)=>socketHandlers.set(name,fn),off:name=>socketHandlers.delete(name)},onChange(fn){listeners.add(fn);return()=>listeners.delete(fn)}};stop=setupAchievements(engine);
- const state={viewer:{role:'student',player:{pid:'alice'}},achievements:[],match:null};for(const fn of listeners)fn(state);state.achievements=[{id:'award-1" onclick="alert(1)',title:'Ты смог, братец',recipientName:'<img src=x onerror=alert(1)>'}];for(const fn of listeners)fn(state);assert.equal(layers.length,1);assert.ok(layers[0].innerHTML.includes('&lt;img'));assert.equal(shelf.innerHTML.includes('" onclick='),false);assert.ok(shelf.innerHTML.includes('&quot;'));for(const fn of listeners)fn(state);assert.equal(layers.length,1);
- socketHandlers.get('achievement:preview')();assert.equal(layers.length,2);assert.equal(state.achievements.length,1);globalThis.document.hidden=true;handlers.get('visibilitychange')();assert.equal(layers[1].removed,true);stop();assert.equal(listeners.size,0);
+ const state={viewer:{role:'student',player:{pid:'alice'}},achievements:[],match:null};for(const fn of listeners)fn(state);state.achievements=[{id:'award-1" onclick="alert(1)',title:'Ты смог, братец',recipientName:'<img src=x onerror=alert(1)>'}];for(const fn of listeners)fn(state);
+ assert.equal(layers.length,1);assert.ok(layers[0].innerHTML.includes('&lt;img'));assert.equal(shelf.innerHTML.includes('" onclick='),false);assert.ok(shelf.innerHTML.includes('&quot;'));for(const fn of listeners)fn(state);assert.equal(layers.length,1);
+ assert.equal(layers[0].canvas.width,275);assert.equal(layers[0].canvas.height,413);assert.equal(finite,true);assert.equal(frames.size,1);
+ step(0);const first=paints;step(10);assert.equal(paints,first);step(34);assert.equal(paints,first+1);
+ layers[0].canvas.clientWidth=170;layers[0].canvas.clientHeight=255;windowHandlers.get('resize')();assert.equal(layers[0].canvas.width,213);
+ socketHandlers.get('achievement:preview')();assert.equal(layers.length,2);assert.equal(layers[0].removed,true);assert.equal(frames.size,1);assert.equal(state.achievements.length,1);
+ globalThis.document.hidden=true;handlers.get('visibilitychange')();assert.equal(layers[1].removed,true);assert.equal(frames.size,0);assert.equal(windowHandlers.size,0);
+ globalThis.document.hidden=false;reduced=true;const before=canvasQueries;socketHandlers.get('achievement:preview')();assert.equal(frames.size,0);assert.equal(canvasQueries,before);assert.equal(layers[2].classes.has('has-drill-mesh'),false);
+ reduced=false;canvasAvailable=false;socketHandlers.get('achievement:preview')();assert.equal(frames.size,0);assert.equal(layers[3].classes.has('has-drill-mesh'),false);assert.ok(layers[3].innerHTML.includes('sky-drill-fallback'));
+ canvasAvailable=true;socketHandlers.get('achievement:preview')();step(0);step(5001);assert.equal(frames.size,0);assert.equal(windowHandlers.size,0);assert.equal(finite,true);
+ handlers.get('keydown')({key:'Escape'});assert.equal(layers[4].removed,true);stop();assert.equal(listeners.size,0);assert.equal(socketHandlers.size,0);
 });

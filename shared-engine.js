@@ -81,15 +81,127 @@ export function setupAchievementControls(engine,host){
   host.addEventListener('click',click);const off=engine.onChange(render);return()=>{off();host.removeEventListener('click',click)};
 }
 
+// The drill is a small projected mesh, not a second WebGL scene competing with the map.
+function skyDrillMesh(){
+  const vertices=[],faces=[];let component=0;
+  const vertex=(radius,y,angle)=>{vertices.push([Math.cos(angle)*radius,y,Math.sin(angle)*radius]);return vertices.length-1};
+  const triangle=(a,b,c,metal)=>{
+    const p=vertices[a],q=vertices[b],r=vertices[c],u=q.map((v,i)=>v-p[i]),v=r.map((x,i)=>x-p[i]);
+    const normal=[u[1]*v[2]-u[2]*v[1],u[2]*v[0]-u[0]*v[2],u[0]*v[1]-u[1]*v[0]],length=Math.hypot(...normal)||1;
+    faces.push({indices:[a,b,c],normal:normal.map(n=>n/length),metal,component});
+  };
+  const quad=(a,b,c,d,metal)=>{triangle(a,b,c,metal);triangle(a,c,d,metal)};
+  const ring=(radius,y)=>Array.from({length:32},(_,i)=>vertex(radius,y,i*Math.PI/16));
+  let previous=ring(.008,0);
+  for(let row=1;row<=8;row++){
+    const next=ring(1.07*row/8,3.6*row/8);
+    for(let i=0;i<32;i++)quad(previous[i],next[i],next[(i+1)%32],previous[(i+1)%32],0);
+    previous=next;
+  }
+  // A continuous triangular flight winds around the cone; its edges and undersides catch different light.
+  let last=null;component=1;
+  for(let step=0;step<=180;step++){
+    const t=.035+.965*step/180,y=3.6*t,r=1.07*t,angle=t*Math.PI*9.2;
+    const next=[vertex(Math.max(.008,r-.083*t),y-.21*t,angle),vertex(r+.025+.28*t,y,angle),vertex(r+.025*t,y+.16*t,angle)];
+    if(last){quad(last[0],next[0],next[1],last[1],1);quad(last[1],next[1],next[2],last[2],2)}
+    last=next;
+  }
+  previous=ring(1.07,3.6);component=2;
+  for(const [radius,y,metal]of [[1.19,3.68,2],[1.19,3.8,0],[1.16,3.83,3],[1.16,3.89,3],[1.08,3.94,0],[1.08,4.12,0],[.94,4.21,2]]){
+    const next=ring(radius,y);for(let i=0;i<32;i++)quad(previous[i],next[i],next[(i+1)%32],previous[(i+1)%32],metal);previous=next;
+  }
+  return {vertices,faces};
+}
+
+function paintSkyDrill(context,mesh,width,height,rotation){
+  context.clearRect(0,0,width,height);
+  const cosine=Math.cos(rotation),sine=Math.sin(rotation),tilt=-.19,ct=Math.cos(tilt),st=Math.sin(tilt),lean=-.055;
+  const rotate=([x,y,z])=>{const rx=x*cosine+z*sine,rz=z*cosine-x*sine,ry=y*ct-rz*st;return [rx+ry*lean,ry,y*st+rz*ct]};
+  const scale=Math.min(width/3.15,height*.205),points=mesh.vertices.map(point=>{
+    const [x,y,z]=rotate(point),perspective=13/(13+z);return [width/2+x*scale*perspective,height*.06+y*scale*perspective,z];
+  });
+  const palette=[[70,91,92],[203,183,136],[94,111,106],[69,226,182]],light=[-.45,-.34,-.826];
+  const sorted=mesh.faces.map(face=>{
+    const depth=face.indices.reduce((sum,i)=>sum+points[i][2],0)/3;
+    // Render the buried roots behind the cone and the visible flight in front, avoiding intersection seams.
+    const side=face.indices.reduce((sum,i)=>sum+mesh.vertices[i][2]*cosine-mesh.vertices[i][0]*sine,0);
+    return {face,depth,layer:face.component===1?(side>0?0:2):1};
+  }).sort((a,b)=>a.layer-b.layer||b.depth-a.depth);
+  context.lineJoin='round';context.lineWidth=.45;
+  for(const {face}of sorted){
+    const normal=rotate(face.normal);if(normal[2]>0)for(let i=0;i<3;i++)normal[i]*=-1;
+    const diffuse=Math.max(0,normal.reduce((sum,n,i)=>sum+n*light[i],0)),shine=Math.pow(Math.max(0,-normal[2]*.78-normal[0]*.55-normal[1]*.28),12);
+    const base=palette[face.metal],brightness=face.metal===3?.72+diffuse*.35:.24+diffuse*.98;
+    const color=base.map(channel=>Math.min(255,Math.round(channel*brightness+shine*(face.metal===1?115:155))));
+    const [a,b,c]=face.indices.map(i=>points[i]);context.beginPath();context.moveTo(a[0],a[1]);context.lineTo(b[0],b[1]);context.lineTo(c[0],c[1]);context.closePath();
+    context.fillStyle=context.strokeStyle=`rgb(${color.join(',')})`;context.fill();context.stroke();
+  }
+}
+
+function startAchievementDrill(canvas){
+  const reduced=globalThis.matchMedia?.('(prefers-reduced-motion: reduce)');
+  if(!canvas?.getContext||reduced?.matches||!globalThis.requestAnimationFrame)return null;
+  let context;try{context=canvas.getContext('2d',{alpha:true,desynchronized:true})}catch{return null}
+  if(!context)return null;
+  let mesh=skyDrillMesh(),frame=0,start=null,last=-Infinity,stopped=false,width=0,height=0;
+  const resize=()=>{width=canvas.clientWidth||260;height=canvas.clientHeight||390;const ratio=Math.min(globalThis.devicePixelRatio||1,1.25);canvas.width=Math.round(width*ratio);canvas.height=Math.round(height*ratio);context.setTransform(ratio,0,0,ratio,0,0)};
+  const stop=()=>{if(stopped)return;stopped=true;globalThis.cancelAnimationFrame(frame);globalThis.removeEventListener?.('resize',resize);mesh=null};
+  const tick=now=>{
+    if(stopped)return;if(document.hidden||reduced?.matches){stop();return}start??=now;const elapsed=now-start;
+    if(elapsed>5000){stop();return}
+    if(now-last>=1000/30){last=now;paintSkyDrill(context,mesh,width,height,.55+elapsed*.0085)}
+    frame=globalThis.requestAnimationFrame(tick);
+  };
+  resize();paintSkyDrill(context,mesh,width,height,.55);globalThis.addEventListener?.('resize',resize);frame=globalThis.requestAnimationFrame(tick);return stop;
+}
+
+function skyFractureMarkup(){
+  const branches=[
+    ['M500 500 481 464 490 429 452 385 463 343 422 299 434 244 392 190 403 128 363 54 370 0',0,2.7],
+    ['M500 500 529 470 526 432 567 402 550 366 602 327 597 278 643 231 633 179 684 124 678 69 720 0',70,2.4],
+    ['M500 500 552 492 581 511 620 490 661 504 703 469 741 476 786 440 837 448 882 414 938 425 1000 388',120,2.1],
+    ['M500 500 528 537 520 568 555 606 547 654 590 686 581 730 633 785 622 838 674 904 680 1000',20,2.4],
+    ['M500 500 474 530 477 565 437 598 444 642 402 682 412 721 367 769 374 823 323 886 312 945 277 1000',100,2.2],
+    ['M500 500 457 491 422 514 388 495 347 511 312 482 268 490 217 455 170 469 117 434 61 449 0 421',35,2.6],
+    ['M500 500 483 478 443 462 439 428 403 411 384 366 341 350 318 305 275 295 245 251 198 243 157 190 97 186 42 137 0 131',170,1.7],
+    ['M490 429 523 403 511 370 529 339',320,1.1],['M463 343 498 316 493 279 516 247',440,1.2],
+    ['M434 244 478 230 482 189 510 165',560,1],['M422 299 374 293 357 253 313 243',500,1.1],
+    ['M567 402 607 412 628 388 663 386',350,1.1],['M597 278 556 252 566 218 549 191',490,1],
+    ['M643 231 681 241 713 215 751 223 784 193',560,1.1],['M620 490 627 450 660 432 654 399',400,1.2],
+    ['M741 476 753 521 785 530 800 562',590,1],['M837 448 846 402 882 390',680,1],
+    ['M555 606 595 594 617 618 653 611',400,1.2],['M581 730 545 742 534 778',600,1],
+    ['M477 565 505 592 497 622',340,1],['M402 682 359 675 345 705 307 710',480,1.1],
+    ['M367 769 410 788 410 822',620,1],['M388 495 379 547 350 562 346 601',390,1.2],
+    ['M268 490 252 534 211 546 209 582',520,1],['M170 469 157 412 119 397',640,1],
+    ['M341 350 355 312 339 285',540,1],['M245 251 271 224 262 190',650,1],
+    ['M547 654 521 670 523 699',510,.7],['M633 785 675 770 690 784',650,.65],
+    ['M444 642 471 671 464 699',490,.6],['M374 823 345 837 345 866',670,.6],
+    ['M312 482 319 450 307 433',490,.6],['M703 469 698 436 715 419',560,.65]
+  ];
+  const paths=branches.map(([d,delay,width],seed)=>{
+    const numbers=d.match(/-?\d+(?:\.\d+)?/g).map(Number),points=[];for(let i=0;i<numbers.length;i+=2)points.push([numbers[i],numbers[i+1]]);
+    let jagged=`M${points[0].join(' ')}`;
+    for(let i=1;i<points.length;i++){
+      const [x,y]=points[i-1],[endX,endY]=points[i],dx=endX-x,dy=endY-y,length=Math.hypot(dx,dy)||1;
+      for(const fraction of [.36,.73]){const offset=Math.sin(seed*17+i*11+fraction*31)*Math.min(3.5,length*.065);jagged+=` ${+(x+dx*fraction-dy/length*offset).toFixed(1)} ${+(y+dy*fraction+dx/length*offset).toFixed(1)}`}
+      jagged+=` ${endX} ${endY}`;
+    }
+    return `<path d="${jagged}" pathLength="1" style="--branch-delay:${delay}ms;--branch-width:${width}px"/>`;
+  }).join('');
+  const pieces=[['M498 494 481 464 490 429 512 465',-48,-116,-34],['M505 496 529 470 526 432 552 480',77,-100,42],['M512 501 552 492 581 511 540 519',135,-18,65],['M507 510 528 537 520 568 500 542',74,113,-54],['M496 510 474 530 477 565 453 534',-56,143,43],['M490 503 457 491 422 514 467 521',-133,52,-62],['M492 493 483 478 443 462 470 493',-119,-68,36]];
+  return `<div class="sky-fracture" aria-hidden="true"><div class="sky-aperture"><i></i><i></i><i></i><i></i><i></i></div><svg viewBox="0 0 1000 1000" fill="none"><defs><linearGradient id="cq-shard-metal" x1=".1" y1="0" x2=".8" y2="1"><stop stop-color="#c8f8e1" stop-opacity=".5"/><stop offset=".24" stop-color="#2c7777" stop-opacity=".24"/><stop offset="1" stop-color="#0b252f" stop-opacity=".8"/></linearGradient></defs><g class="sky-fracture-shadow">${paths}</g><g class="sky-fracture-glow">${paths}</g><g class="sky-fracture-lines">${paths}</g><g class="sky-shards">${pieces.map(([d,x,y,turn],i)=>`<path d="${d}" style="--shard-x:${x}px;--shard-y:${y}px;--shard-turn:${turn}deg;--shard-delay:${i*35}ms"/>`).join('')}</g></svg></div>`;
+}
+
 export function setupAchievements(engine){
-  let layer=null,timer=null,identity='',ready=false,shelfKey='';const seen=new Set();
+  let layer=null,timer=null,stopDrill=()=>{},identity='',ready=false,shelfKey='';const seen=new Set();
   try{for(const id of JSON.parse(localStorage.getItem('cq_awards_seen_v1')||'[]'))if(typeof id==='string')seen.add(id)}catch{}
-  const close=()=>{clearTimeout(timer);layer?.remove();layer=null;document.body.classList.remove('achievement-playing')};
+  const close=()=>{clearTimeout(timer);stopDrill();stopDrill=()=>{};layer?.remove();layer=null;document.body.classList.remove('achievement-playing')};
   function play(award,preview=false){
     if(document.hidden)return;close();
     layer=document.createElement('div');layer.className='achievement-cinema';layer.setAttribute('aria-label','Достижение: '+(award.title||'Ты смог, братец'));
-    layer.innerHTML=`<div class="sky-veins" aria-hidden="true"><svg viewBox="0 0 1000 700" preserveAspectRatio="none"><g class="sky-cracks"><path d="M500 188 L442 150 L458 119 L405 71 L370 0 M500 188 L564 142 L552 112 L617 58 L631 0 M500 188 L401 208 L349 175 L287 191 L202 136 L130 146 L0 72 M500 188 L594 220 L659 184 L724 207 L779 171 L866 181 L1000 125 M500 188 L476 249 L504 281 L452 333 L467 381 M500 188 L532 270 L582 288 L569 345 L638 414 M405 71 L339 68 L310 29 M617 58 L682 63 L723 23 M349 175 L337 116 L288 95 M779 171 L801 112 L859 88"/></g></svg></div><div class="sky-impact" aria-hidden="true"></div><div class="spiral-rocket" aria-hidden="true"><div class="drill-spin"><div class="drill-core"></div>${[0,1,2,3,4,5,6].map(i=>`<i class="drill-ring" style="--ring:${i}"></i>`).join('')}<div class="drill-nose"></div><div class="drill-collar"></div></div><div class="spiral-exhaust"></div></div><aside class="achievement-toast" role="status" aria-live="polite"><span class="achievement-emblem">⟐</span><div><small>${preview?'ПРЕДПРОСМОТР':'ДОСТИЖЕНИЕ ПОЛУЧЕНО'}</small><strong>${escapeHTML(award.title||'Ты смог, братец')}</strong><span>${escapeHTML(preview?'Так выглядит момент прорыва':award.recipientName||'Путь от кризиса к победе')}</span></div></aside><button class="achievement-skip" type="button">Пропустить анимацию ×</button>`;
-    layer.querySelector('button').addEventListener('click',close);document.body.append(layer);document.body.classList.add('achievement-playing');timer=setTimeout(close,6400);
+    layer.innerHTML=`<div class="sky-atmosphere" aria-hidden="true"></div><div class="sky-speed-lines" aria-hidden="true">${Array.from({length:10},(_,i)=>`<i style="--line:${i}"></i>`).join('')}</div>${skyFractureMarkup()}<div class="sky-contact" aria-hidden="true"><div class="sky-impact"></div><div class="sky-shockwave"></div><div class="sky-shockwave secondary"></div>${Array.from({length:16},(_,i)=>`<i class="sky-spark" style="--spark:${i};--spark-distance:${65+(i*37)%100}px"></i>`).join('')}</div><div class="sky-drill" aria-hidden="true"><div class="sky-drill-aura"></div><div class="sky-exhaust"><i></i><i></i><i></i></div><canvas class="sky-drill-art"></canvas><svg class="sky-drill-fallback" viewBox="0 0 260 390"><defs><linearGradient id="cq-drill-metal"><stop stop-color="#142f38"/><stop offset=".34" stop-color="#b9bb9c"/><stop offset=".45" stop-color="#f0deb4"/><stop offset=".63" stop-color="#556c66"/><stop offset="1" stop-color="#162f38"/></linearGradient></defs><path fill="url(#cq-drill-metal)" d="m130 22 98 311-17 34H49l-17-34Z"/><path d="m124 47 17 12-27 21 40 20-51 27 65 25-78 32 91 31-103 35 118 33-130 39" fill="none" stroke="#c8b888" stroke-width="12" stroke-linejoin="round"/><path d="M45 341h170" stroke="#6de4bd" stroke-width="5"/></svg></div><aside class="achievement-toast" role="status" aria-live="polite"><span class="achievement-emblem"><svg viewBox="0 0 48 56" aria-hidden="true"><path d="M24 3 42 43 36 51H12L6 43Z" fill="#203c3b" stroke="#d4c18d" stroke-width="1.5"/><path d="m22 10 6 5-11 8 16 6-20 9 25 7" fill="none" stroke="#e8d6a0" stroke-width="3"/><path d="M13 49h22" stroke="#70e5bd" stroke-width="2"/></svg></span><div><small>${preview?'ПРЕДПРОСМОТР · ПРОРЫВ':'ДОСТИЖЕНИЕ ПОЛУЧЕНО'}</small><strong>${escapeHTML(award.title||'Ты смог, братец')}</strong><span>${escapeHTML(preview?'Небо — не предел':award.recipientName||'Путь от кризиса к победе')}</span></div></aside><button class="achievement-skip" type="button">Пропустить анимацию ×</button>`;
+    layer.querySelector('button').addEventListener('click',close);document.body.append(layer);document.body.classList.add('achievement-playing');
+    const animate=startAchievementDrill(layer.querySelector('canvas'));stopDrill=animate||(()=>{});if(animate)layer.classList.add('has-drill-mesh');timer=setTimeout(close,7800);
   }
   const render=state=>{
     if(!state)return;
