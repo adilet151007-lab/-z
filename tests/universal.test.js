@@ -22,11 +22,11 @@ test('командный выбор: отмена, подтверждение с
  g.castVote('saryarka',a.player.pid,0,id);g.confirmVote('saryarka',b.player.pid,a.player.pid,id);assert.deepEqual(g.votesFor('saryarka'),{0:1});
  g.castVote('saryarka',b.player.pid,0,id);advance(3000);g.pauseRound();advance(20000);assert.equal(g.flushProposals(),false);g.pauseRound();advance(4001);assert.equal(g.flushProposals(),true);assert.deepEqual(g.votesFor('saryarka'),{0:2});
 });
-test('экономика: несгораемые 15%, два верных ответа восстанавливают 20% без ресурсов',()=>{
+test('экономика: несгораемые 15%, каждый верный ответ восстанавливает до 25 пунктов без ресурсов',()=>{
  const {g}=make(),a=g.joinTeam('saryarka','Алия');g.adjustEconomy('saryarka',-100);assert.equal(g.region('saryarka').economy,15);
- g.startRound('q1',30);g.castVote('saryarka',a.player.pid,0,g.state.round.id);g.confirmVote('saryarka',a.player.pid,a.player.pid,g.state.round.id);g.resolveRound();assert.equal(g.region('saryarka').economy,15);assert.equal(g.region('saryarka').points,0);assert.equal(g.region('saryarka').recoveryAnswers,1);
- g.startRound('q1',30);g.castVote('saryarka',a.player.pid,0,g.state.round.id);g.confirmVote('saryarka',a.player.pid,a.player.pid,g.state.round.id);g.resolveRound();assert.equal(g.region('saryarka').economy,35);assert.equal(g.region('saryarka').points,0);
- g.startRound('q1',30);g.resolveRound();assert.equal(g.region('saryarka').economy,15);
+ for(const economy of [40,65,90,100]){g.startRound('q1',30);g.castVote('saryarka',a.player.pid,0,g.state.round.id);g.confirmVote('saryarka',a.player.pid,a.player.pid,g.state.round.id);g.resolveRound();assert.equal(g.region('saryarka').economy,economy);assert.equal(g.region('saryarka').points,0);assert.equal(g.region('saryarka').recoveryAnswers,0)}
+ g.startRound('q1',30);g.castVote('saryarka',a.player.pid,0,g.state.round.id);g.confirmVote('saryarka',a.player.pid,a.player.pid,g.state.round.id);g.resolveRound();assert.equal(g.region('saryarka').economy,100);assert.equal(g.region('saryarka').points,25);
+ g.startRound('q1',30);g.resolveRound();assert.equal(g.region('saryarka').economy,80);
 });
 test('сброс таймера сохраняет уже прошедшую часть семисекундного подтверждения',()=>{
  const {g,advance}=make(),a=g.joinTeam('jetisu','Алия');g.startRound('q1',30);g.castVote('jetisu',a.player.pid,0,g.state.round.id);advance(3000);g.resetTimer();advance(3999);assert.equal(g.flushProposals(),false);advance(1);assert.equal(g.flushProposals(),true);assert.deepEqual(g.votesFor('jetisu'),{0:1});

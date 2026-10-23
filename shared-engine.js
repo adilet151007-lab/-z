@@ -76,7 +76,7 @@ export function setupAchievementControls(engine,host){
   const click=async event=>{const button=event.target.closest('button');if(!button||busy||button.disabled)return;busy=true;render(engine.state);status.textContent='';try{
     if(button.hasAttribute('data-award-preview')){await engine.previewAchievement();status.textContent='Предпросмотр запущен. Награды и очки не изменены.'}
     else if(button.hasAttribute('data-award-grant')){const [scope,targetId]=target.value.split(':');const result=await engine.grantAchievement('sky-breaker',scope,targetId);status.textContent=result.duplicate?'У получателя уже есть эта награда за текущий матч.':'Достижение вручено.'}
-    else if(button.hasAttribute('data-award-finish')){if(confirm('Досрочно завершить матч? Награда за рейтинг выдаётся автоматически после последнего вопроса; раннее завершение её не даёт.'))await engine.finishMatch()}
+    else if(button.hasAttribute('data-award-finish')){if(confirm('Завершить сессию и зафиксировать итоговый рейтинг? Команды, выполнившие условия достижения «Ты смог, братец», получат награду.'))await engine.finishMatch()}
   }catch(error){status.textContent=error.message}finally{busy=false;render(engine.state)}};
   host.addEventListener('click',click);const off=engine.onChange(render);return()=>{off();host.removeEventListener('click',click)};
 }
@@ -188,7 +188,7 @@ export function setupAchievements(engine){
       globalThis.dispatchEvent?.(new CustomEvent('cq:world-achievement',{detail:{teamIds:active.map(a=>a.teamId)}}));
     }
     document.querySelectorAll('[data-achievement-rules]').forEach(node=>node.textContent=ACHIEVEMENTS[0].description);
-    const progress=state.achievementProgress;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;node.textContent=progress?`${progress.hitFloor?'✓':'○'} Экономика достигала 15% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} Восстановлена ответами до 100% · ${progress.resources}/1000 ресурсов · место ${rank||'—'}. ${state.match?.milestoneWinnerTeamIds?.length?'Досрочная награда уже определена; остаётся итоговый рейтинг.':'Первый выполнивший путь получает досрочную награду.'}`:''});
+    const progress=state.achievementProgress;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;node.textContent=progress?`${progress.hitCrisis?'✓':'○'} Экономика опускалась ниже 30% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} Восстановлена ответами до 100% · ${state.match?.finishedAt!=null&&rank===1?'✓':'○'} Первое место при завершении сессии. Текущее место: ${rank||'—'}.`:''});
     const awards=engine.mode==='teacher'?(state.match?.awards||[]):state.achievements||[],key=JSON.stringify([awards,state.match?.id]);
     if(key!==shelfKey){shelfKey=key;
       document.querySelectorAll('[data-achievement-count]').forEach(node=>node.textContent=String(awards.length));

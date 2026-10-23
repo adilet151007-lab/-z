@@ -11,21 +11,22 @@ function answer(g,correct=true,questionId='q1'){
  g.startRound(questionId,60);const team=g.region('saryarka'),q=g.state.round.questionSnapshot,option=correct?q.correct:(q.correct+1)%4,p=team.members[0];
  g.castVote(team.id,p.pid,option,g.state.round.id);g.confirmVote(team.id,(team.members[1]||p).pid,p.pid,g.state.round.id);g.resolveRound();return g.state.round.results.saryarka;
 }
-function comeback(g){for(let i=0;i<5;i++)answer(g,false);assert.equal(g.region('saryarka').economy,15);for(let i=0;i<10;i++)answer(g,true);assert.equal(g.region('saryarka').economy,100)}
+function comeback(g){for(let i=0;i<4;i++)answer(g,false);assert.equal(g.region('saryarka').economy,20);for(let i=0;i<4;i++)answer(g,true);assert.equal(g.region('saryarka').economy,100)}
 function answerBoth(g,correct=true){g.startRound('q1',60);const round=g.state.round;for(const id of ['saryarka','jetisu']){const p=g.region(id).members[0],option=correct?round.questionSnapshot.correct:(round.questionSnapshot.correct+1)%4;g.castVote(id,p.pid,option,round.id);g.confirmVote(id,p.pid,p.pid,round.id)}g.resolveRound()}
 
-test('восстановление: оба правильных ответа идут только на экономику, ошибка не стирает накопленный ответ',()=>{
- const g=game();answer(g,false);assert.equal(g.region('saryarka').economy,80);let r=answer(g);assert.equal(r.awarded,0);assert.equal(r.recoveryAnswers,1);assert.equal(r.economyRecovered,0);
- answer(g,false);assert.equal(g.region('saryarka').economy,60);r=answer(g);assert.equal(r.economyRecovered,20);assert.equal(r.economyAfter,80);assert.equal(r.awarded,0);
- answer(g);r=answer(g);assert.equal(r.economyAfter,100);assert.equal(r.awarded,0);assert.equal(g.region('saryarka').points,0);r=answer(g);assert.equal(r.awarded,25);assert.equal(g.region('saryarka').points,25);
+test('восстановление: каждый верный ответ возвращает 25 пунктов без ресурсов, последний шаг ограничен 100%',()=>{
+ const g=game();answer(g,false);answer(g,false);assert.equal(g.region('saryarka').economy,60);let r=answer(g);assert.equal(r.economyAfter,85);assert.equal(r.awarded,0);assert.equal(r.recoveryAnswers,0);assert.equal(r.economyRecovered,25);
+ answer(g,false);assert.equal(g.region('saryarka').economy,65);r=answer(g);assert.equal(r.economyRecovered,25);assert.equal(r.economyAfter,90);assert.equal(r.awarded,0);
+ r=answer(g);assert.equal(r.economyRecovered,10);assert.equal(r.economyAfter,100);assert.equal(r.awarded,0);assert.equal(g.region('saryarka').points,0);r=answer(g);assert.equal(r.awarded,25);assert.equal(g.region('saryarka').points,25);
 });
 
-test('восстановление: предел ресурса не мешает ремонту, последний шаг ограничен 100%, прогресс сохраняется',()=>{
- let g=game();g.adjustPoints('saryarka',1000);g.adjustEconomy('saryarka',-5);answer(g);g=new GameLogic(g.state);assert.equal(g.region('saryarka').recoveryAnswers,1);const r=answer(g);assert.equal(r.economyRecovered,5);assert.equal(g.region('saryarka').economy,100);assert.equal(g.region('saryarka').points,1000);assert.equal(r.awarded,0);
+test('восстановление: предел ресурса не мешает ремонту, 1000 не дают досрочную награду, старые сохранения совместимы',()=>{
+ let g=game();g.adjustPoints('saryarka',1000);g.adjustEconomy('saryarka',-5);const r=answer(g);g=new GameLogic(g.state);assert.equal(g.region('saryarka').recoveryAnswers,0);assert.equal(r.economyRecovered,5);assert.equal(g.region('saryarka').economy,100);assert.equal(g.region('saryarka').points,1000);assert.equal(r.awarded,0);g.finishMatch();assert.equal(g.state.achievements.length,0);
  const raw=g.editorSnapshot();assert.throws(()=>g.applyRawState({...raw,achievements:[{achievementId:'sky-breaker'}]}),/Редактор/);
- const race=game();race.joinTeam('jetisu','Бек');for(let i=0;i<5;i++)answerBoth(race,false);for(let i=0;i<10;i++)answerBoth(race);for(let i=0;i<40;i++)answerBoth(race);
- assert.equal(race.state.match.finishedAt,null);assert.equal(race.state.achievements.length,2);assert.ok(race.state.achievements.every(a=>a.reason==='milestone'));assert.deepEqual(race.state.match.milestoneWinnerTeamIds,['saryarka','jetisu']);answerBoth(race);assert.equal(race.state.achievements.length,2);
- const restored=new GameLogic(race.state);assert.deepEqual(restored.state.match.milestoneWinnerTeamIds,['saryarka','jetisu']);
+ const race=game();race.joinTeam('jetisu','Бек');for(let i=0;i<4;i++)answerBoth(race,false);for(let i=0;i<4;i++)answerBoth(race);for(let i=0;i<40;i++)answerBoth(race);
+ assert.equal(race.state.match.finishedAt,null);assert.equal(race.state.achievements.length,0);assert.equal(race.region('saryarka').points,1000);assert.equal(race.region('jetisu').points,1000);race.finishMatch();assert.equal(race.state.achievements.length,2);assert.ok(race.state.achievements.every(a=>a.reason==='ranking'));assert.deepEqual(new Set(race.state.match.winnerTeamIds),new Set(['saryarka','jetisu']));
+ const snapshot=structuredClone(race.state);snapshot.match.milestoneWinnerTeamIds=['saryarka'];snapshot.achievements[0].reason='milestone';for(const stats of Object.values(snapshot.match.stats)){stats.hitFloor=stats.hitCrisis;delete stats.hitCrisis}snapshot.regions[0].recoveryAnswers=1;
+ const restored=new GameLogic(snapshot);assert.deepEqual(restored.state.match.stats.saryarka,{hitCrisis:true,recoveredByQuiz:true});assert.equal(restored.region('saryarka').recoveryAnswers,0);assert.equal(restored.state.achievements[0].id,snapshot.achievements[0].id);assert.equal(restored.state.achievements[0].reason,'milestone');assert.equal(restored.state.revision,snapshot.revision+1);assert.equal(new GameLogic(restored.state).state.revision,restored.state.revision);
 });
 
 test('камбэк: после последнего вопроса награда выдаётся всей команде лидера, общий эффект не раскрывает чужую витрину',()=>{
@@ -37,16 +38,18 @@ test('камбэк: после последнего вопроса наград�
  const clock=g.now;g.now=()=>clock()+8000;assert.equal(g.view({playerHash:hashToken(ally.playerToken)}).worldAchievements.length,0);assert.equal(g.state.achievements.length,1);
 });
 
-test('камбэк: неполное восстановление, ручная правка и второе место не дают автоматическую награду',()=>{
- const partial=game();for(let i=0;i<5;i++)answer(partial,false);for(let i=0;i<8;i++)answer(partial);answer(partial,true,partial.state.questions.at(-1).id);assert.equal(partial.region('saryarka').economy,95);assert.equal(partial.state.achievements.length,0);
+test('камбэк: строгий порог ниже 30%, полное восстановление ответами и первое место обязательны',()=>{
+ const boundary=game();boundary.adjustEconomy('saryarka',-50);answer(boundary,false);assert.equal(boundary.region('saryarka').economy,30);assert.equal(boundary.state.match.stats.saryarka.hitCrisis,false);for(let i=0;i<3;i++)answer(boundary);boundary.finishMatch();assert.equal(boundary.state.achievements.length,0);
+ const below=game();below.adjustEconomy('saryarka',-51);answer(below,false);assert.equal(below.region('saryarka').economy,29);assert.equal(below.state.match.stats.saryarka.hitCrisis,true);for(let i=0;i<3;i++)answer(below);below.finishMatch();assert.equal(below.state.achievements.length,1);
+ const partial=game();for(let i=0;i<4;i++)answer(partial,false);for(let i=0;i<2;i++)answer(partial);answer(partial,true,partial.state.questions.at(-1).id);assert.equal(partial.region('saryarka').economy,95);assert.equal(partial.state.achievements.length,0);
  const edited=game();for(let i=0;i<5;i++)answer(edited,false);edited.adjustEconomy('saryarka',100);answer(edited,true,edited.state.questions.at(-1).id);assert.equal(edited.state.achievements.length,0);
  const second=game();second.joinTeam('jetisu','Данияр');second.adjustPoints('jetisu',1000);comeback(second);answer(second,true,second.state.questions.at(-1).id);assert.deepEqual(second.state.match.winnerTeamIds,['jetisu']);assert.equal(second.state.achievements.length,0);
 });
 
-test('матч: ранняя кнопка не даёт награду за рейтинг; последний вопрос завершает автоматически, новая игра очищает историю',()=>{
- const early=game();comeback(early);early.finishMatch();assert.equal(early.state.achievements.length,0);
+test('матч: награда только при завершении сессии, ручном или автоматическом; новая игра очищает историю',()=>{
+ const early=game();comeback(early);assert.equal(early.state.achievements.length,0);early.startRound('q1',30);assert.throws(()=>early.finishMatch(),/Сначала подведите итоги текущего вопроса/);const p=early.region('saryarka').members[0];early.castVote('saryarka',p.pid,early.state.round.questionSnapshot.correct,early.state.round.id);early.confirmVote('saryarka',p.pid,p.pid,early.state.round.id);early.resolveRound();early.finishMatch();assert.equal(early.state.achievements.length,1);assert.equal(early.state.achievements[0].reason,'ranking');
  const g=game();g.state.questions=g.state.questions.slice(0,2);comeback(g);assert.equal(g.state.match.finishedAt,null);answer(g,true,'q2');assert.ok(g.state.match.finishedAt);assert.equal(g.state.achievements.length,1);g.finishMatch();assert.equal(g.state.achievements.length,1);
- const award=g.state.achievements[0];answer(g,true);assert.equal(g.state.achievements[0].id,award.id);assert.notEqual(g.state.match.id,award.matchId);assert.deepEqual(g.state.match.stats.saryarka,{hitFloor:false,recoveredByQuiz:false});g.resetGame();assert.equal(g.state.match,null);assert.equal(g.state.achievements.length,0);
+ const award=g.state.achievements[0];answer(g,true);assert.equal(g.state.achievements[0].id,award.id);assert.notEqual(g.state.match.id,award.matchId);assert.deepEqual(g.state.match.stats.saryarka,{hitCrisis:false,recoveredByQuiz:false});g.resetGame();assert.equal(g.state.match,null);assert.equal(g.state.achievements.length,0);
 });
 
 const config={teacherPassword:'award-test-teacher-password',sessionSecret:'award-test-session-secret-more-than-thirty-two',creatorCodes:{adilet:'A'.repeat(26),ernur:'E'.repeat(26)}};
