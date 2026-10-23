@@ -77,6 +77,7 @@ test('сохранение и журнал: ошибка БД откатывае
  const f=await fixture(t),owner=await f.join(config.creatorCodes.adilet+' Адилет'),p=await f.join();f.store.fail=true;assert.equal((await cmd(owner.socket,'grantAchievement',{achievementId:'sky-breaker',scope:'player',targetId:p.player.pid})).code,'STORAGE_ERROR');assert.equal(f.server.game.state.achievements.length,0);f.store.fail=false;
  await cmd(owner.socket,'adjustPoints',{regionId:'saryarka',delta:25});await cmd(owner.socket,'renamePlayer',{pid:p.player.pid,name:'Арман'});await cmd(owner.socket,'startRound',{questionId:'q1',duration:30});
  const view=f.server.game.view({role:'creator',playerHash:hashToken(owner.playerToken)});assert.ok(f.server.game.state.log.some(entry=>entry.kind==='admin'));assert.equal(view.log.some(entry=>/Ресурс «|имя исправлено|Системное изменение/.test(entry.msg)),false);assert.ok(view.log.some(entry=>entry.msg.startsWith('Начат вопрос')));
+ f.server.game.state.log.push({t:1,msg:'Адилет: имя исправлено на «Новое имя».'},{t:2,msg:'Игрок: перенос из «А» в «Б».'},{t:3,msg:'Алия: место в команде освобождено.',kind:'game'});const migrated=f.server.game.view({role:'creator',playerHash:hashToken(owner.playerToken)}).log;assert.equal(migrated.some(entry=>entry.t===1||entry.t===2),false);assert.ok(migrated.some(entry=>entry.t===3));
 });
 
 test('анимация: новая награда показывается один раз, предпросмотр не выдаёт её, чужое имя экранируется',async t=>{

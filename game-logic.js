@@ -12,7 +12,7 @@ function ensure(condition, message, code) {
 }
 export const hashToken = token => createHash("sha256").update(String(token)).digest("hex");
 const integer = (value, min, max) => Number.isSafeInteger(value) && value >= min && value <= max;
-const ADMIN_LOG_PATTERN=/^(Системное изменение|Ресурс «|Экономика «|Настройки команды|Вместимость|Установлено команд|Создана команда|Команда «.*удалена|Административный доступ|Делегированный административный|Обновлены оформление|Преподаватель применил|Преподаватель перезапустил|Игра восстановлена|Игра сброшена|В банк добавлен|Вопрос (?:обновлён|удалён)|Добавлено вопросов из силлабуса|Оператор инфраструктуры|Включен[аы] |Назначен лидер)/;
+const ADMIN_LOG_PATTERN=/^(Системное изменение|Ресурс «|Экономика «|Настройки команды|Вместимость|Установлено команд|Создана команда|Команда «.*удалена|Административный доступ|Делегированный административный|Обновлены оформление|Преподаватель применил|Преподаватель перезапустил|Игра восстановлена|Игра сброшена|В банк добавлен|Вопрос (?:обновлён|удалён)|Добавлено вопросов из силлабуса|Оператор инфраструктуры|Включен[аы] |Назначен лидер|Формат:|Активный вопрос заменён|.*: перенос из «|.*: имя исправлено на «|.*: место в команде освобождено|.*вошёл в команду создателей|Автовыход после.*сессий преподавателя)/;
 const cleanText = (value, min, max, label,stored=false) => {
   ensure(typeof value === "string", `${label}: ожидается текст.`);
   const text = value.normalize("NFC").trim();
@@ -746,7 +746,7 @@ export class GameLogic {
       regions: frame.regions,
       leaderboard:frame.leaderboard,teamLeaderboard:frame.teamLeaderboard,
       questions: teacher || delegated?.permissions.questions ? structuredClone(this.state.questions) : delegated?.permissions.game ? this.state.questions.map(({id,text,options,points,version,topic,subject})=>({id,text,options:[...options],points,version,topic,subject})) : [],
-      round: null, log: adminView ? structuredClone(this.state.log.filter(entry=>entry.kind!=='admin'&&!ADMIN_LOG_PATTERN.test(entry.msg))) : []
+      round: null, log: adminView ? structuredClone(this.state.log.filter(entry=>entry.kind!=='admin'&&(entry.kind==='game'||!ADMIN_LOG_PATTERN.test(entry.msg)))) : []
     };
     const awards=(this.state.achievements||[]).map(({recipientIds,...award})=>({...ACHIEVEMENTS.find(item=>item.id===award.achievementId),...award}));
     view.achievementCatalog=structuredClone(ACHIEVEMENTS);
