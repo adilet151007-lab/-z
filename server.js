@@ -57,7 +57,14 @@ export async function createGameServer(options = {}) {
   const chatStore=options.chatStore || (store.loadChat&&store.saveChat ? {kind:store.kind,load:()=>store.loadChat(),save:state=>store.saveChat(state)} : {kind:'memory',load:async()=>memoryChat,save:async state=>{memoryChat=structuredClone(state)}});
   const chat=new ChatEngine(await chatStore.load());
   let pending = Promise.resolve(), closing = false,queued=0;
-  const enqueue = fn => {if(queued>=256)return Promise.reject(new GameError('Сервер занят. Подождите немного и повторите действие.','SERVER_BUSY'));queued++;const result=pending.then(fn).finally(()=>{queued--});pending=result.catch(()=>{});return result};
+  let flushInputs=async()=>{},inputBatch=null,inputTimer=null;
+  const enqueue = (fn,fast=false) => {if(queued>=256)return Promise.reject(new GameError('Сервер занят. Подождите немного и повторите действие.','SERVER_BUSY'));queued++;const result=pending.then(async()=>{if(!fast)await flushInputs();return fn()}).finally(()=>{queued--});pending=result.catch(()=>{});return result};
+  flushInputs=async()=>{
+    if(!inputBatch)return;
+    clearTimeout(inputTimer);inputTimer=null;const batch=inputBatch;inputBatch=null;
+    try{await store.save(game.state);publishedGame=new GameLogic(game.state);broadcast();for(const done of batch.replies)done(true)}
+    catch(error){game=new GameLogic(batch.before);for(const done of batch.replies)done(false);console.error('Ответы не сохранены:',error.message)}
+  };
   const app = express();
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -78,7 +85,7 @@ export async function createGameServer(options = {}) {
   app.get('/api/logo', (req,res)=>{const logo=publishedGame.state.branding.logo;if(!logo||req.query.v!==hashToken(logo).slice(0,16))return res.sendStatus(404);const [header,data]=logo.split(',');res.setHeader('Cache-Control','public, max-age=86400, immutable');res.type(header.slice(5,header.indexOf(';'))).send(Buffer.from(data,'base64'))});
   app.get('/license-texts/:name', (req,res)=>{const licenses={three:'three/LICENSE','socket.io':'socket.io/LICENSE',express:'express/LICENSE',pg:'pg/LICENSE',dotenv:'dotenv/LICENSE',mammoth:'mammoth/LICENSE','pdfjs-dist':'pdfjs-dist/LICENSE'};const file=licenses[req.params.name];if(!file)return res.sendStatus(404);res.type('text/plain').sendFile(path.join(directory,'node_modules',file))});
   const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
-  for(const file of ['./achievement-player.js','./achievement-animations.js',...Object.values(ANIMATION_MODULES)])if(/^\.\/[a-z0-9-]+\.js$/.test(file))allowed.add(file.slice(1));
+  for(const file of ['./award-2d.js','./achievement-player.js','./achievement-animations.js',...Object.values(ANIMATION_MODULES)])if(/^\.\/[a-z0-9-]+\.js$/.test(file))allowed.add(file.slice(1));
   app.use(async(req,res,next)=>{if(!allowed.has(req.path))return next();const file=path.join(directory,req.path.slice(1));if(req.path.endsWith('.html'))return res.type('html').send((await readFile(file,'utf8')).replace(/<script(?=[\s>])/g,`<script nonce="${res.locals.nonce}"`));res.sendFile(file)});
   app.get("/vendor/pdfjs/pdf.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.mjs")));
   app.get("/vendor/pdfjs/pdf.worker.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.worker.mjs")));
@@ -166,7 +173,7 @@ export async function createGameServer(options = {}) {
       if(role==='teacher'){
         if(!validTeacherToken(token))throw new GameError('Войдите преподавателем заново.','SESSION_EXPIRED');
         await enqueue(async()=>{
-          await maintainIdleSessions();const before=structuredClone(game.state);
+          if(!fastInput)await maintainIdleSessions();const before=structuredClone(game.state);
           try{
             if(!validTeacherToken(token))throw new GameError('Войдите преподавателем заново.','SESSION_EXPIRED');
             const data=JSON.parse(Buffer.from(token.split('.')[0],'base64url').toString()),record=teacherActivity(token)||{at:game.state.accessControl.activity.startedAt,expiresAt:data.expires};
@@ -287,16 +294,17 @@ export async function createGameServer(options = {}) {
         if (++eventCount > 100) { reply({ ok: false, error: "Слишком много действий. Подождите несколько секунд.", code: "RATE_LIMIT" }); return; }
         if(waiting>=8){reply({ok:false,error:'Дождитесь выполнения предыдущих действий.',code:'SERVER_BUSY'});return}
         try{const limit=viaHTTP?8*1024*1024:bulkActions.has(name)?240*1024:16*1024;if(Buffer.byteLength(JSON.stringify(data))>limit)throw new Error()}catch{reply({ok:false,error:'Запрос слишком большой или повреждён.',code:'PAYLOAD_TOO_LARGE'});return}
+        const fastInput=["castVote","confirmVote","cancelVote","voteLeader","teamSubmit"].includes(name);
         waiting++;
         enqueue(async () => {
           if (closing) throw new GameError("Сервер перезапускается. Дождитесь подключения.");
-          await maintainIdleSessions();
+          if(!fastInput)await maintainIdleSessions();
           const identity = actor(socket);
           const actorPlayer = identity.playerHash ? game.findPlayer(identity.playerHash) : null;
           const delegatedAllowed = identity.role === 'delegate' && game.adminCan(actorPlayer?.pid, name);
           if (permission === "teacher" && !["teacher","creator"].includes(identity.role) && !delegatedAllowed) throw new GameError("Нужен вход преподавателя или создателя.", "FORBIDDEN");
           if(permission==='creator'&&!game.creatorFor(identity.playerHash)&&!delegatedAllowed)throw new GameError('Нужен персональный доступ.','FORBIDDEN');
-          if(permission==='actualTeacher'&&!validTeacherToken(socket.data.teacherToken))throw new GameError('Нужен вход преподавателя.','FORBIDDEN');
+          if(permission==='actualTeacher'&&!validTeacherToken(socket.data.teacherToken)&&!(name==='revokeAchievement'&&identity.role==='creator'))throw new GameError('Нужен вход преподавателя.','FORBIDDEN');
           if(identity.role==='delegate'&&['movePlayer','renamePlayer','updatePlayer'].includes(name)&&game.state.regions.some(t=>t.members.some(m=>m.pid===data?.pid&&m.creatorId)))throw new GameError('Делегированный доступ не позволяет менять персональных администраторов.','PROTECTED_SESSION');
           const player = actorPlayer;
           if (permission === "student" && !player) throw new GameError("Войдите в команду заново.", "SESSION_EXPIRED");
@@ -316,8 +324,8 @@ export async function createGameServer(options = {}) {
               if((!current||current.pid!==member.pid||current.creatorId!==member.creatorId)&&!voluntary)throw new GameError('Персональную сессию можно завершить только по согласию её владельца. Используйте запрос на выход.','PROTECTED_SESSION');
             }
             if (game.state.revision !== before.revision) {
-              await store.save(game.state);
-              publishedGame = new GameLogic(game.state);
+              if(!fastInput){await store.save(game.state);publishedGame = new GameLogic(game.state);}
+              else if(!inputBatch)inputBatch={before,replies:[]};
             }
           } catch (error) {
             game = new GameLogic(before);
@@ -325,9 +333,12 @@ export async function createGameServer(options = {}) {
           }
           if (after) after(result);
           if(name!=='chatSubscribe')recordActivity(socket);
-          if (game.state.revision !== before.revision || (after&&!name.startsWith('chat'))) broadcast();
-          reply({ ok: true, ...(result || {}),...(cookieSessions&&(result?.playerToken||result?.teacherToken)?{sessionMethod:'cookie'}:{}) });
-        }).catch(error => {
+          const response={ ok: true, ...(result || {}),...(cookieSessions&&(result?.playerToken||result?.teacherToken)?{sessionMethod:'cookie'}:{}) };
+          if(fastInput&&inputBatch){
+            inputBatch.replies.push(ok=>reply(ok?response:{ok:false,code:'STORAGE_ERROR',error:'Ответ не сохранён. Повторите попытку.'}));
+            if(!inputTimer)inputTimer=setTimeout(()=>{inputTimer=null;enqueue(async()=>{}).catch(console.error)},40);
+          }else{if(game.state.revision!==before.revision||(after&&!name.startsWith('chat')))broadcast();reply(response)}
+        },fastInput).catch(error => {
           if (!(error instanceof GameError)) console.error("Команда не выполнена:", error.message);
           reply({ ok: false, error: error instanceof GameError ? error.message : "Изменение не сохранено. Проверьте соединение с базой и повторите.", code: error.code || "STORAGE_ERROR" });
         }).finally(()=>{waiting--});
@@ -430,6 +441,9 @@ export async function createGameServer(options = {}) {
     handle("endRound", "teacher", () => game.endRound());
     handle('finishMatch','teacher',()=>game.finishMatch());
     handle('grantAchievement','teacher',data=>game.grantAchievement(data.achievementId,data.scope,data.targetId));
+    handle('revokeAchievement','actualTeacher',data=>game.revokeAchievement(data.achievementId,data.scope,data.targetId));
+    handle('setAutoAdvance','teacher',data=>game.setAutoAdvance(data.enabled,data.duration));
+    handle('clearQuestions','teacher',()=>game.clearQuestions());
     handle('previewAchievement','teacher',data=>{const definition=awardDefinition(data.achievementId);if(!definition)throw new GameError('Неизвестное достижение.');return {...definition,achievementId:data.achievementId}},result=>socket.emit('achievement:preview',result));
     handle("adjustPoints", "teacher", data => game.adjustPoints(data.regionId, data.delta));
     handle("adjustEconomy", "teacher", data => game.adjustEconomy(data.regionId, data.delta));
@@ -490,12 +504,13 @@ export async function createGameServer(options = {}) {
     const round = game.state.round;
     const proposalsReady=round?.proposals&&Object.values(round.proposals).some(p=>p.remainingAt-game.remainingMs()>=7000);
     const expired=(game.state.delegatedAdmins||[]).some(g=>g.expiresAt&&g.expiresAt<=Date.now()),roundReady=round&&!round.resolved&&!round.paused&&(game.remainingMs()<=0||proposalsReady);
+    const advanceReady=game.state.settings.autoAdvance&&round?.resolved&&game.state.match?.finishedAt===null;
     const awardReady=round&&!round.resolved&&round.paused&&Number.isFinite(round.awardPauseUntil)&&round.awardPauseUntil<=Date.now();
-    if (closing || timerBusy || !expired&&!roundReady&&!awardReady) return;
+    if (closing || timerBusy || !expired&&!roundReady&&!awardReady&&!advanceReady) return;
     timerBusy = true;
     enqueue(async () => {
       const before = structuredClone(game.state);
-      try {game.expireAdminGrants();game.resumeAwardPauseIfDue();if(game.state.round&&!game.state.round.resolved&&!game.state.round.paused){if(game.remainingMs()>0)game.flushProposals();else game.resolveRound()}if(game.state.revision===before.revision)return;await store.save(game.state);publishedGame=new GameLogic(game.state);broadcast();}
+      try {game.expireAdminGrants();game.resumeAwardPauseIfDue();game.advanceIfDue();if(game.state.round&&!game.state.round.resolved&&!game.state.round.paused){if(game.remainingMs()>0)game.flushProposals();else game.resolveRound()}if(game.state.revision===before.revision)return;await store.save(game.state);publishedGame=new GameLogic(game.state);broadcast();}
       catch (error) { game = new GameLogic(before); console.error("Итоги раунда не сохранены; повторная попытка автоматически:", error.message); }
     }).catch(error=>{if(error.code!=='SERVER_BUSY')console.error('Таймер:',error.message)}).finally(() => { timerBusy = false; });
   }, 250);
@@ -517,7 +532,7 @@ export async function createGameServer(options = {}) {
     async close() {
       closing = true;
       clearInterval(timer); clearInterval(cleanup);clearInterval(connectionCleanup);clearInterval(idleTimer);clearTimeout(broadcastTimer);
-      await pending;
+      await pending;await flushInputs();clearTimeout(inputTimer);
       try{await maintainIdleSessions(true)}catch(error){console.error('Активность сессий не сохранена перед остановкой:',error.message)}
       await new Promise(resolve => io.close(resolve));
       if (httpServer.listening) await new Promise(resolve => httpServer.close(resolve));

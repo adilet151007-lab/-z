@@ -27,7 +27,7 @@ const questionKey=q=>digest(JSON.stringify([q.subject||'',q.text.trim(),q.option
 const automatic=a=>a.source!=='manual';
 const earned=(p,id)=>p?.earned.some(a=>a.achievementId===id&&automatic(a));
 export const completedStones=p=>LEGENDARY_IDS.filter(id=>earned(p,id));
-export const ownsInfinity=p=>Boolean(p?.earned.some(a=>a.achievementId==='infinity-gauntlet'))||completedStones(p).length===LEGENDARY_IDS.length;
+export const ownsInfinity=p=>!p?.perkRevoked&&(Boolean(p?.earned.some(a=>a.achievementId==='infinity-gauntlet'))||completedStones(p).length===LEGENDARY_IDS.length);
 const profileIndexes=new WeakMap();
 function profileIndex(g){
  let index=profileIndexes.get(g);const state=g.state;
@@ -89,7 +89,7 @@ function saveToProfile(p,award){
  p.updatedAt=award.earnedAt;
 }
 export function recordCollectionAward(g,award){
- for(const pid of award.recipientIds){const p=ensurePlayerProfile(g,pid);if(!p)continue;saveToProfile(p,award);if(ownsInfinity(p)&&!earned(p,'infinity-gauntlet'))g.grantAchievement('infinity-gauntlet','player',pid,'earned','collection');}
+ for(const pid of award.recipientIds){const p=ensurePlayerProfile(g,pid);if(!p)continue;saveToProfile(p,award);if(award.achievementId==='infinity-gauntlet')delete p.perkRevoked;if(ownsInfinity(p)&&!earned(p,'infinity-gauntlet'))g.grantAchievement('infinity-gauntlet','player',pid,'earned','collection');}
 }
 export function scoreLimit(g,scope,id){
  if(!g.state.settings.perksEnabled)return RESOURCE_CAP;

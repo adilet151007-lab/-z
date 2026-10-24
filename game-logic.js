@@ -37,7 +37,7 @@ function validateBranding(raw={}) {
 }
 
 export function validateQuestions(questions) {
-  ensure(Array.isArray(questions) && questions.length >= 1 && questions.length <= 1000, "Нужно от 1 до 1000 вопросов.");
+  ensure(Array.isArray(questions) && questions.length <= 1000, "Можно хранить до 1000 вопросов.");
   const ids = new Set();
   return questions.map(q => {
     ensure(q && typeof q === "object" && typeof q.id === "string" && /^[\w-]{1,80}$/.test(q.id) && !ids.has(q.id), "Некорректный или повторный ID вопроса.");
@@ -103,7 +103,7 @@ function restoreSnapshot(raw) {
     if (!state.awardSystemVersion&&integer(region.points, RESOURCE_CAP + 1, 10000000)) region.points = RESOURCE_CAP;
   }
   state.regions = validateRegions(state.regions,null,!!state.settings?.universal,state.settings?.mode,!!state.settings?.flexibleTeams);
-  state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT,perksEnabled:state.settings?.perksEnabled??true,...(state.settings?.universal?{universal:true,mode:state.settings.mode}:{}),...(state.settings?.flexibleTeams?{flexibleTeams:true,teamDecision:state.settings.teamDecision||'consensus',tradeEnabled:state.settings.tradeEnabled===true}:{}) };
+  state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT,perksEnabled:state.settings?.perksEnabled??true,autoAdvance:state.settings?.autoAdvance===true,autoDuration:state.settings?.autoDuration||60,...(state.settings?.universal?{universal:true,mode:state.settings.mode}:{}),...(state.settings?.flexibleTeams?{flexibleTeams:true,teamDecision:state.settings.teamDecision||'consensus',tradeEnabled:state.settings.tradeEnabled===true}:{}) };
   if(state.settings.universal){
     ensure(['team','solo'].includes(state.settings.mode)&&(state.settings.flexibleTeams||state.regions.length===10)&&!state.regions.some(isCreatorTeam)&&state.regions.every(t=>(state.settings.flexibleTeams||t.capacity===4)&&t.economy>=15),'Повреждены настройки формата игры.');
     if(state.settings.flexibleTeams)ensure(['consensus','leader'].includes(state.settings.teamDecision),'Неизвестный способ ответа команды.');
@@ -249,7 +249,7 @@ export class GameLogic {
     if(action==='previewAchievement'||action==='finishMatch')return grant.permissions.game===true;
     const scope = action === 'presentationEffect' ? 'effects'
       : /^(freeSlot|movePlayer|renamePlayer|updatePlayer|renameTeam|removeTeam|removeAllPlayers|createTeam|expandTeams|planTeamCount|setTeamCount|setTeamCapacity|setAllCapacities|updateTeam|setLeader)$/.test(action) ? 'players'
-      : /^(addCustomQuestion|editQuestion|deleteQuestion|importQuestions|analyzeSyllabus|generateQuestions)$/.test(action) ? 'questions'
+      : /^(addCustomQuestion|editQuestion|deleteQuestion|clearQuestions|importQuestions|analyzeSyllabus|generateQuestions)$/.test(action) ? 'questions'
       : /^(startRound|switchQuestion|pauseRound|resetTimer|resolveRound|endRound|adjustPoints|adjustEconomy|adjustCapital|setGameMode|setSessionMode|setTeamRules|setPerksEnabled)$/.test(action) ? 'game' : null;
     return !!(scope && grant.permissions[scope] === true);
   }
@@ -558,6 +558,7 @@ export class GameLogic {
   resolveRound() {
     const round = this.state.round;
     if (!round || round.resolved) return;
+    round.resolvedAt=this.now();
     const question = round.questionSnapshot;
     if(this.state.settings.mode==='solo'){
       for(const m of this.state.regions.flatMap(t=>t.members)){
@@ -714,8 +715,36 @@ export class GameLogic {
     this.state.questions[index]=question;this.log("Вопрос обновлён в банке. Активный раунд использует свою сохранённую версию.");this.touch();
     return {questionId:id,activeRoundUnchanged:this.state.round?.questionId===id&&!this.state.round.resolved};
   }
+  revokeAchievement(achievementId,scope,targetId) {
+    ensure(awardDefinition(achievementId),'Неизвестное достижение.');
+    ensure(['team','player'].includes(scope),'Выберите получателя.');
+    const people=scope==='team'?this.region(targetId).members:[this.state.regions.flatMap(t=>t.members).find(m=>m.pid===targetId)];
+    ensure(people.length&&people.every(Boolean),'Получатель не найден.');
+    const ids=new Set(people.map(m=>m.pid));
+    for(const person of people){const profile=profileFor(this,person.pid);if(profile){profile.earned=profile.earned.filter(a=>a.achievementId!==achievementId);if(achievementId==='infinity-gauntlet')profile.perkRevoked=true}}
+    this.state.achievements=this.state.achievements.flatMap(a=>{if(a.achievementId!==achievementId)return [a];const recipientIds=a.recipientIds.filter(id=>!ids.has(id));return recipientIds.length?[{...a,recipientIds}]:[]});
+    this.touch();
+  }
+  clearQuestions() {
+    ensure(!this.state.round||this.state.round.resolved,'Сначала завершите активный вопрос.');
+    this.createRestorePoint('Перед очисткой банка вопросов',false);
+    this.state.questions=[];this.state.round=null;this.state.match=null;this.state.phase='lobby';this.touch();
+  }
+  setAutoAdvance(enabled,duration=60) {
+    ensure(typeof enabled==='boolean'&&integer(duration,5,3600),'Проверьте режим и длительность.');
+    if(this.state.round?.resolved&&!this.state.round.resolvedAt)this.state.round.resolvedAt=this.now();
+    this.state.settings.autoAdvance=enabled;this.state.settings.autoDuration=duration;this.touch();
+  }
+  advanceIfDue() {
+    const round=this.state.round,match=this.state.match;
+    if(!this.state.settings.autoAdvance||!round?.resolved||!match||match.finishedAt!==null)return;
+    const lastAward=Math.max(0,...this.state.achievements.filter(a=>a.matchId===match.id).map(a=>a.earnedAt+(ANIMATION_DURATIONS[a.achievementId]??7800)));
+    if(this.now()<Math.max((round.resolvedAt||this.now())+8000,lastAward))return;
+    const next=match.questionIds.find(id=>!match.completedQuestionIds.includes(id)&&this.state.questions.some(q=>q.id===id));
+    if(next)this.startRound(next,this.state.settings.autoDuration||60);else this.finishMatch();
+  }
   deleteQuestion(id) {
-    ensure(this.state.questions.length>1,"Оставьте хотя бы один вопрос.");
+
     ensure(this.state.questions.some(q=>q.id===id),"Вопрос не найден.");
     ensure(!this.state.round || this.state.round.resolved || this.state.round.questionId!==id,"Сначала завершите активный вопрос.");
     this.state.questions=this.state.questions.filter(q=>q.id!==id);this.log("Вопрос удалён из банка.");this.touch();

@@ -1,3 +1,4 @@
+import {has2DAnimation,mount2DAnimation} from './award-2d.js';
 import { io } from "/socket.io/socket.io.esm.min.js";
 import { hasAchievementAnimation, mountAchievementAnimation } from './achievement-player.js';
 import { PRIVACY_VERSION, DEFAULT_SUBJECT, ACHIEVEMENTS, createDrillGeometryData } from './game-config.js';
@@ -61,7 +62,7 @@ export function setupAmbientAudio(){
 
 export function setupAchievementControls(engine,host){
   host.classList.add('achievement-tools');
-  host.innerHTML='<h3>Достижения и перки</h3><label class="field-label section-gap">Достижение<select data-award-kind aria-label="Достижение для проверки"></select></label><p data-award-description class="small-note mut section-gap"></p><p class="small-note mut">Предпросмотр виден только вам. Ручное вручение не собирает камни для перка.</p><div class="row section-gap"><button type="button" data-award-preview>▶ Предпросмотр анимации</button><button type="button" data-award-finish>Завершить сессию</button></div><label class="field-label section-gap">Получатель<select data-award-target aria-label="Получатель достижения"></select></label><button type="button" data-award-grant class="pri section-gap">Вручить достижение</button><label class="privacy-consent section-gap"><input type="checkbox" data-award-perks><span>Играть с перками · полная коллекция снимает предел 1000 очков</span></label><p data-award-status class="small-note" role="status"></p>';
+  host.innerHTML='<h3>Достижения и перки</h3><label class="field-label section-gap">Достижение<select data-award-kind aria-label="Достижение для проверки"></select></label><p data-award-description class="small-note mut section-gap"></p><p class="small-note mut">Предпросмотр виден только вам. Ручное вручение не собирает камни для перка.</p><div class="row section-gap"><button type="button" data-award-preview>▶ Предпросмотр анимации</button><button type="button" data-award-finish>Завершить сессию</button></div><label class="field-label section-gap">Получатель<select data-award-target aria-label="Получатель достижения"></select></label><button type="button" data-award-grant class="pri section-gap">Вручить достижение</button><button type="button" data-award-revoke class="danger section-gap">Отозвать достижение</button><label class="privacy-consent section-gap"><input type="checkbox" data-award-perks><span>Играть с перками · полная коллекция снимает предел 1000 очков</span></label><p data-award-status class="small-note" role="status"></p>';
   let busy=false;
   const target=host.querySelector('[data-award-target]'),status=host.querySelector('[data-award-status]'),kind=host.querySelector('[data-award-kind]'),perks=host.querySelector('[data-award-perks]');
   const render=state=>{
@@ -73,7 +74,7 @@ export function setupAchievementControls(engine,host){
     perks.checked=state.settings.perksEnabled!==false;perks.disabled=busy||!engine.connected||!!state.round&&!state.round.resolved;
     const options=(viewer.player?`<option value="player:${viewer.player.pid}">Себе · ${escapeHTML(viewer.player.name)}</option>`:'')+'<optgroup label="Команды">'+state.regions.filter(t=>t.members.length).map(t=>`<option value="team:${t.id}">${escapeHTML(t.name)}</option>`).join('')+'</optgroup><optgroup label="Участники">'+state.regions.flatMap(t=>t.members.filter(m=>m.pid!==viewer.player?.pid).map(m=>`<option value="player:${m.pid}">${escapeHTML(m.name)} · ${escapeHTML(t.name)}</option>`)).join('')+'</optgroup>';
     if(target.dataset.key!==options){const value=target.value;target.innerHTML=options;target.dataset.key=options;if([...target.options].some(option=>option.value===value))target.value=value}
-    host.querySelector('[data-award-grant]').hidden=!canGrant;target.parentElement.hidden=!canGrant;
+    host.querySelector('[data-award-revoke]').hidden=!full;host.querySelector('[data-award-grant]').hidden=!canGrant;target.parentElement.hidden=!canGrant;
     for(const button of host.querySelectorAll('button'))button.disabled=busy||!engine.connected;
     host.querySelector('[data-award-grant]').disabled||=!target.value;
     host.querySelector('[data-award-finish]').disabled||=!state.match?.completedCount||state.match.finishedAt!==null||!!state.round&&!state.round.resolved;
@@ -81,6 +82,7 @@ export function setupAchievementControls(engine,host){
   const click=async event=>{const button=event.target.closest('button');if(!button||busy||button.disabled)return;busy=true;render(engine.state);status.textContent='';try{
     if(button.hasAttribute('data-award-preview')){await engine.previewAchievement(kind.value);status.textContent='Предпросмотр запущен.'}
     else if(button.hasAttribute('data-award-grant')){const [scope,targetId]=target.value.split(':');const result=await engine.grantAchievement(kind.value,scope,targetId);status.textContent=result.duplicate?'У получателя уже есть эта награда за текущий матч.':'Достижение вручено как специальная награда.'}
+    else if(button.hasAttribute('data-award-revoke')){const [scope,targetId]=target.value.split(':');if(confirm('Отозвать выбранное достижение у получателя?')){await engine.request('revokeAchievement',{achievementId:kind.value,scope,targetId});status.textContent='Достижение отозвано.'}}
     else if(button.hasAttribute('data-award-finish')){if(confirm('Завершить сессию и зафиксировать итоговый рейтинг? Команды, выполнившие условия достижения «Ты смог, братец», получат награду.'))await engine.finishMatch()}
   }catch(error){status.textContent=error.message}finally{busy=false;render(engine.state)}};
   const change=async event=>{if(event.target===kind)render(engine.state);if(event.target===perks){const enabled=perks.checked;busy=true;render(engine.state);try{await engine.setPerksEnabled(enabled);status.textContent=enabled?'Перки включены.':'Перки выключены; заработанные очки сохраняются.'}catch(error){status.textContent=error.message}finally{busy=false;render(engine.state)}}};
@@ -198,6 +200,7 @@ export function setupAchievements(engine){
   function play(award,preview=false,toastOnly=false){
     if(document.hidden)return;close();
     closeExtras();
+    if(has2DAnimation(award.achievementId)&&!toastOnly){layer=document.createElement('div');layer.className='collection-cinema';document.body.append(layer);document.body.classList.add('achievement-playing');stopDrill=mount2DAnimation(layer,award,{onDone:finish});return;}
     if(hasAchievementAnimation(award.achievementId)&&!toastOnly){
       layer=document.createElement('div');layer.className='collection-cinema';document.body.append(layer);document.body.classList.add('achievement-playing');
       stopDrill=mountAchievementAnimation(layer,award,{preview,onDone:finish});return;
@@ -222,7 +225,7 @@ export function setupAchievements(engine){
     const active=(state.worldAchievements||[]).filter(a=>a.durationMs-(state.serverTime-a.startedAt)-Math.max(0,Date.now()-(state.clientReceivedAt||Date.now()))>0);
     if(!document.hidden&&active.some(a=>!worldSeen.has(a.id))){
       const freshWorld=active.filter(a=>!worldSeen.has(a.id));for(const a of active)worldSeen.add(a.id);
-      const drills=freshWorld.filter(a=>a.achievementId==='sky-breaker');
+      const drills=freshWorld;
       if(drills.length){closeExtras();worldActive=true;document.body.classList.add('map-celebrating');clearTimeout(worldTimer);const remaining=Math.max(...drills.map(a=>a.durationMs-(state.serverTime-a.startedAt)-Math.max(0,Date.now()-(state.clientReceivedAt||Date.now()))));worldTimer=setTimeout(clearWorld,remaining);}
       globalThis.dispatchEvent?.(new CustomEvent('cq:world-achievement',{detail:{teamIds:freshWorld.map(a=>a.teamId),achievementIds:freshWorld.map(a=>a.achievementId)}}));
       const ownAwards=new Set((state.achievements||[]).map(a=>a.id));
@@ -239,7 +242,7 @@ export function setupAchievements(engine){
     }
     const fresh=awards.filter(award=>!seen.has(award.id));for(const award of awards)seen.add(award.id);
     try{localStorage.setItem('cq_awards_seen_v1',JSON.stringify([...seen].slice(-1000)))}catch{}
-    if(ready)for(const award of fresh)if(engine.mode!=='teacher'||!worldSeen.has(award.id))enqueue(award,false,award.achievementId==='sky-breaker');ready=current!=='guest';
+    if(ready)for(const award of fresh)if(engine.mode!=='teacher'||!worldSeen.has(award.id))enqueue(award,false,worldSeen.has(award.id));ready=current!=='guest';
     for(const notice of state.achievementNotices||[])if(!noticed.has(notice.id)){noticed.add(notice.id);enqueue({id:notice.id,achievementId:'notice',title:notice.text,rarity:'common',effect:'eye',recipientName:'Полученное достижение остаётся в коллекции.'},false,true)}
   };
   const preview=data=>{queue.length=0;play({...data,title:data?.title||'Ты смог, братец'},true)},replay=event=>{const id=event.target.closest('[data-award-replay]')?.dataset.awardReplay;if(!id)return;const state=engine.state,award=(engine.mode==='teacher'?state?.match?.awards:state?.achievements)?.find(a=>a.id===id);if(award){queue.length=0;play(award)}};

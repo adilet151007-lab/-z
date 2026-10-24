@@ -1,3 +1,5 @@
+import {ANIMATION_MODULES} from './achievement-animations.js';
+import {disposeAnimationScene} from './achievement-player.js';
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
@@ -417,6 +419,22 @@ export function createScene(canvas, opts = {}) {
       if(seenWorld.has(award.id))continue;seenWorld.add(award.id);if(seenWorld.size>1000)seenWorld.delete(seenWorld.values().next().value);
       const duration=award.durationMs||7800,elapsed=Math.max(0,(state.serverTime||Date.now())-award.startedAt+Math.max(0,Date.now()-(state.clientReceivedAt||Date.now())));if(elapsed>=duration)continue;
       const team=state.regions.find(t=>t.id===award.teamId),base=team&&metadataFor(team).baseRegionId,region=regions.find(r=>r.meta.id===base);if(!region)continue;
+      if(Object.hasOwn(ANIMATION_MODULES,award.achievementId)){
+        const group=new THREE.Group();region.group.add(group);let cancelled=false,animation=null,normalizer=null;
+        const started=performance.now()-elapsed;
+        const effect={group,started,update(seconds){if(seconds*1000>=duration)return false;if(animation){animation.update(seconds,1/30);group.visible=true;}return true},dispose(){cancelled=true;animation?.dispose?.();if(animation)disposeAnimationScene(animation.scene);group.removeFromParent()}};
+        worldEffects.set(award.id,effect);newEffects.push({region,award});wake(duration-elapsed);
+        import(ANIMATION_MODULES[award.achievementId]).then(module=>{
+          if(cancelled||disposed)return;
+          animation=module.createAnimation({THREE,reducedMotion:window.matchMedia('(prefers-reduced-motion: reduce)').matches,lowPower:true});
+          animation.update(Math.min(6.8,duration/1000),0);
+          const box=new THREE.Box3().setFromObject(animation.scene),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
+          const scale=12/Math.max(size.x,size.y,size.z,1);normalizer=new THREE.Group();normalizer.scale.setScalar(scale);normalizer.position.set(-center.x*scale,.8-box.min.y*scale,-center.z*scale);
+          normalizer.add(animation.scene);group.add(normalizer);animation.scene.background=null;animation.scene.fog=null;
+          animation.update(Math.max(0,(performance.now()-started)/1000),0);wake(duration);
+        }).catch(error=>{console.error('Не удалось загрузить сцену достижения:',error);effect.dispose();worldEffects.delete(award.id)});
+        continue;
+      }
       const effect=(award.achievementId==='sky-breaker'?mapAchievement:mapLegendaryAchievement)(award,window.matchMedia('(prefers-reduced-motion: reduce)').matches);effect.started=performance.now()-elapsed;effect.group.scale.setScalar(clamp(region.data.cityRadius*.5,1.25,1.8));effect.group.position.y=.7;
       const peers=state.regions.filter(t=>metadataFor(t).baseRegionId===base);if(peers.length>1){const angle=peers.findIndex(t=>t.id===team.id)*Math.PI*2/peers.length,radius=Math.min(2.2,region.data.cityRadius*.65);effect.group.position.x=Math.cos(angle)*radius;effect.group.position.z=Math.sin(angle)*radius}
       region.group.add(effect.group);worldEffects.set(award.id,effect);newEffects.push({region,award});wake(duration-elapsed);

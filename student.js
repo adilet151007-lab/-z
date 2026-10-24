@@ -32,7 +32,7 @@ function message(text = "", isError = false) {
 }
 async function act(fn) {
   if (actionPending) return;
-  actionPending = true;
+  actionPending = true;message("Отправляем ответ…");
   if(engine.state?.viewer.player)renderQuestion(engine.state);
   try { await fn(); message(); }
   catch (error) { message(error.message, true); }
@@ -132,7 +132,7 @@ function renderQuestion(state) {
 }
 $("question-panel").addEventListener("click", event => {
   const option = event.target.closest("[data-option]"), submit = event.target.closest("[data-submit]");
-  if (option && !option.disabled) act(() => engine.castVote(Number(option.dataset.option)));
+  if (option && !option.disabled) {option.classList.add("chosen");navigator.vibrate?.(15);act(() => engine.castVote(Number(option.dataset.option)));}
   if (submit && !submit.disabled) act(() => engine.teamSubmit());
   const approval=event.target.closest('[data-leader-agree]');if(approval&&!approval.disabled)act(()=>engine.voteLeader(approval.dataset.leaderAgree==='true'));
   const confirm=event.target.closest('[data-confirm-vote]'),cancel=event.target.closest('[data-cancel-vote]');

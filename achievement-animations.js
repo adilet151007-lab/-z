@@ -6,4 +6,4 @@ export const ANIMATION_MODULES = Object.freeze({
   'determination': './award-determination.js',
   'daily-training': './award-daily-training.js'
 });
-export const ANIMATION_DURATIONS = Object.freeze({'zero-card':8200,'scenario-reader':8000,'neon-summit':8000,'determination':8000,'daily-training':8000});
+export const ANIMATION_DURATIONS = Object.freeze({'basic-implant':6500,'foresight':6500,'near-victory':6500,'perfect-form':6500,'zero-card':8200,'scenario-reader':8000,'neon-summit':8000,'determination':8000,'daily-training':8000});
