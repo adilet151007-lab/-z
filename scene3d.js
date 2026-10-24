@@ -158,6 +158,64 @@ function mapAchievement(award,quiet=false){
   },dispose(){if(released)return;released=true;group.removeFromParent();shards.dispose();for(const g of geometries)g.dispose();for(const m of materials)m.dispose();label.texture.dispose();label.sprite.material.dispose()}};
 }
 
+function mapLegendaryAchievement(award,quiet=false){
+  const group=new THREE.Group();group.name='match-achievement';group.userData.achievementId=award.id;
+  const geometries=new Set(),materials=new Set(),instanced=[];
+  const geo=g=>{geometries.add(g);return g};
+  const mat=(color,opacity=1)=>{const m=new THREE.MeshBasicMaterial({color,transparent:true,opacity,depthWrite:false,side:THREE.DoubleSide});materials.add(m);return m};
+  const colors={'zero-card':0xc7a4fb,'scenario-reader':0xf4cf80,'determination':0xff7182,'daily-training':0xffd797,'neon-summit':0xff609a,'infinity-gauntlet':0xc991ff};
+  const color=colors[award.achievementId]||0xffd797,material=mat(color),icon=new THREE.Group();icon.position.y=3.7;group.add(icon);
+  const mesh=(parent,geometry,m=material)=>{const o=new THREE.Mesh(geo(geometry),m);parent.add(o);return o};
+  const column=mesh(group,new THREE.CylinderGeometry(.08,.55,5,12,1,true),mat(color,.18));column.position.y=2.65;
+  const ring=mesh(group,new THREE.RingGeometry(2,2.13,48),mat(color,.7));ring.rotation.x=-Math.PI/2;ring.position.y=.16;
+  const halo=mesh(group,new THREE.RingGeometry(.4,.48,48),mat(color,.55));halo.rotation.x=-Math.PI/2;halo.position.y=.2;
+  const id=award.achievementId;
+  if(id==='zero-card'){
+    mesh(icon,new THREE.BoxGeometry(2.2,3,.16),mat(0x211633));
+    const edge=mesh(icon,new THREE.TorusGeometry(1,.045,6,48),material);edge.scale.set(.85,1.28,1);edge.position.z=.12;
+    const zero=mesh(icon,new THREE.TorusGeometry(.45,.09,8,48),material);zero.position.z=.15;
+  }else if(id==='scenario-reader'){
+    const spine=mesh(icon,new THREE.BoxGeometry(.14,2.2,.12),mat(0xffe4aa));spine.position.z=0;
+    for(const sign of [-1,1]){const page=mesh(icon,new THREE.BoxGeometry(1.2,1.9,.07),mat(0xe4d7b5));page.position.set(sign*.66,0,0);page.rotation.y=sign*.32;
+      const line=mesh(icon,new THREE.BoxGeometry(.75,.035,.025),material);line.position.set(sign*.67,.35,.1);line.rotation.y=sign*.32}
+  }else if(id==='determination'){
+    const shape=new THREE.Shape();shape.moveTo(0,-1);shape.bezierCurveTo(-1.9,.1,-.95,1.3,0,.65);shape.bezierCurveTo(.95,1.3,1.9,.1,0,-1);
+    mesh(icon,new THREE.ExtrudeGeometry(shape,{depth:.32,bevelEnabled:true,bevelThickness:.07,bevelSize:.06,bevelSegments:2,curveSegments:10}),material).position.z=-.16;
+    const scar=mesh(icon,new THREE.BoxGeometry(.07,1.25,.035),mat(0xffd897));scar.position.set(.05,0,.25);scar.rotation.z=.34;
+  }else if(id==='daily-training'){
+    for(let i=0;i<10;i++){const r=.55+i*.16,o=mesh(icon,new THREE.TorusGeometry(r,.016,4,48),mat(i%2?0xffd797:0xa7c9eb,.7));o.rotation.x=.42+i*.08}
+    const mark=geo(new THREE.OctahedronGeometry(.045,0)),marks=new THREE.InstancedMesh(mark,material,100),dummy=new THREE.Object3D();
+    for(let i=0;i<100;i++){const row=Math.floor(i/10),angle=(i%10)*Math.PI/5,r=.55+row*.16;dummy.position.set(Math.cos(angle)*r,Math.sin(angle)*r,.06);dummy.updateMatrix();marks.setMatrixAt(i,dummy.matrix)}
+    marks.count=0;marks.frustumCulled=false;icon.add(marks);instanced.push(marks);
+  }else if(id==='neon-summit'){
+    const tiers=[[1.05,.95,0],[.8,.85,.88],[.5,.7,1.65],[.12,.8,2.4]];
+    for(const [r,h,y]of tiers){const tier=mesh(icon,new THREE.CylinderGeometry(r*.82,r,h,10),mat(0x293552));tier.position.y=y-.9}
+    const beacon=mesh(icon,new THREE.SphereGeometry(.2,12,8),material);beacon.position.y=2.1;
+    const beam=mesh(icon,new THREE.CylinderGeometry(.08,.38,3.5,12,1,true),mat(color,.32));beam.position.y=3.9;beam.userData.beam=true;
+  }else{
+    const metal=mat(0x49435e),palm=mesh(icon,new THREE.BoxGeometry(1.55,1.45,.3),metal);palm.position.y=-.43;
+    for(let i=0;i<5;i++){const finger=mesh(icon,new THREE.BoxGeometry(.24,1.05+(i===2?.2:0),.28),metal);finger.position.set((i-2)*.32,.65,0)}
+    const gemColors=[0xb58dff,0x66f3d5,0xe87a89,0xf5c767,0x7ab5ff,0xf3e6a5];
+    gemColors.forEach((c,i)=>{const gem=mesh(icon,new THREE.OctahedronGeometry(i===5?.25:.14,0),mat(c));gem.position.set(i===5?0:(i-2)*.32,i===5?-.45:1.05,.2);gem.userData.gem=i});
+  }
+  const label=labelSprite(),ctx=label.canvas.getContext('2d');ctx.clearRect(0,0,768,192);ctx.fillStyle='rgba(9,20,33,.88)';ctx.strokeStyle=`#${color.toString(16).padStart(6,'0')}`;ctx.lineWidth=3;ctx.beginPath();ctx.roundRect(4,4,760,180,22);ctx.fill();ctx.stroke();ctx.textAlign='center';ctx.fillStyle='#fff2d5';ctx.font='700 36px sans-serif';
+  const titles={'neon-summit':'Вершина башни','infinity-gauntlet':'Я — сама неотвратимость'};
+  ctx.fillText(titles[id]||award.title||'Легендарное достижение',384,76,700);ctx.fillStyle='#d4e7da';ctx.font='29px sans-serif';ctx.fillText(award.teamName||'',384,132,690);label.texture.needsUpdate=true;label.sprite.position.y=6.8;label.sprite.renderOrder=30;group.add(label.sprite);
+  let released=false;
+  return {group,started:0,duration:award.durationMs||8000,update(seconds,camera,viewportHeight){
+    const duration=(award.durationMs||8000)/1000,fade=1-smooth(duration-1.5,duration,seconds),rise=quiet?1:smooth(0,1.6,seconds);
+    icon.scale.setScalar(Math.max(.001,rise*(1+(!quiet&&id==='determination'?.06*Math.sin(seconds*8):0))));icon.position.y=3.7+(quiet?0:.22*Math.sin(seconds*2));
+    if(['zero-card','scenario-reader','determination','infinity-gauntlet'].includes(id))icon.quaternion.copy(camera.quaternion);
+    if(!quiet){if(id==='zero-card')icon.rotateY(Math.sin(seconds*1.8)*.22);if(id==='daily-training')icon.rotation.y=seconds*.25;if(id==='neon-summit')icon.rotation.y=seconds*.18}
+    if(instanced.length)instanced[0].count=quiet?100:Math.min(100,Math.floor(Math.max(0,seconds-.6)*17));
+    icon.traverse(o=>{if(o.userData.gem!==undefined)o.visible=quiet||seconds>1+o.userData.gem*.35;if(o.userData.beam)o.visible=quiet||seconds>2.4});
+    column.material.opacity=.18*rise*fade;column.scale.y=Math.max(.001,rise);ring.scale.setScalar(1+.13*Math.sin(seconds*3));ring.material.opacity=.7*fade;halo.scale.setScalar(1+3*smooth(0,2,seconds));halo.material.opacity=(1-smooth(.3,3,seconds))*.5*fade;
+    label.sprite.visible=quiet||seconds>1.6;label.sprite.material.opacity=fade;
+    const worldPosition=label.sprite.getWorldPosition(new THREE.Vector3()),depth=camera.position.distanceTo(worldPosition),width=labelScaleForDepth(depth,viewportHeight,camera.fov).world/group.scale.x;label.sprite.scale.set(width,width/4,1);
+    return seconds<duration;
+  },dispose(){if(released)return;released=true;group.removeFromParent();instanced.forEach(o=>o.dispose());geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());label.texture.dispose();label.sprite.material.dispose()}};
+}
+
 export function createScene(canvas, opts = {}) {
   const mobile = window.matchMedia("(max-width: 700px), (pointer: coarse)").matches;
   let lowPower=mobile;
@@ -355,16 +413,19 @@ export function createScene(canvas, opts = {}) {
   function syncWorldAchievements(state){
     if(worldMatch!==state.match?.id){clearWorld();seenWorld.clear();worldMatch=state.match?.id}
     if(state.viewer&&!state.viewer.player&&!['teacher','creator'].includes(state.viewer.role)){clearWorld();return}
-    let created=false;for(const award of state.worldAchievements||[]){
-      if(award.achievementId!=='sky-breaker')continue;
+    const newEffects=[];for(const award of state.worldAchievements||[]){
       if(seenWorld.has(award.id))continue;seenWorld.add(award.id);if(seenWorld.size>1000)seenWorld.delete(seenWorld.values().next().value);
-      const elapsed=Math.max(0,(state.serverTime||Date.now())-award.startedAt+Math.max(0,Date.now()-(state.clientReceivedAt||Date.now())));if(elapsed>=7800)continue;
+      const duration=award.durationMs||7800,elapsed=Math.max(0,(state.serverTime||Date.now())-award.startedAt+Math.max(0,Date.now()-(state.clientReceivedAt||Date.now())));if(elapsed>=duration)continue;
       const team=state.regions.find(t=>t.id===award.teamId),base=team&&metadataFor(team).baseRegionId,region=regions.find(r=>r.meta.id===base);if(!region)continue;
-      const effect=mapAchievement(award,window.matchMedia('(prefers-reduced-motion: reduce)').matches);effect.started=performance.now()-elapsed;effect.group.scale.setScalar(clamp(region.data.cityRadius*.5,1.25,1.8));effect.group.position.y=.7;
+      const effect=(award.achievementId==='sky-breaker'?mapAchievement:mapLegendaryAchievement)(award,window.matchMedia('(prefers-reduced-motion: reduce)').matches);effect.started=performance.now()-elapsed;effect.group.scale.setScalar(clamp(region.data.cityRadius*.5,1.25,1.8));effect.group.position.y=.7;
       const peers=state.regions.filter(t=>metadataFor(t).baseRegionId===base);if(peers.length>1){const angle=peers.findIndex(t=>t.id===team.id)*Math.PI*2/peers.length,radius=Math.min(2.2,region.data.cityRadius*.65);effect.group.position.x=Math.cos(angle)*radius;effect.group.position.z=Math.sin(angle)*radius}
-      region.group.add(effect.group);worldEffects.set(award.id,effect);created=true;wake(7800-elapsed);
+      region.group.add(effect.group);worldEffects.set(award.id,effect);newEffects.push({region,award});wake(duration-elapsed);
     }
-    if(created){selected=null;mapPreview=null;regionSelect.value='';const distance=Math.max(44,44/(Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect));moveCamera(new THREE.Vector3(0,4,0),Math.min(138,distance))}
+    if(newEffects.length){selected=null;mapPreview=null;regionSelect.value='';const distance=Math.max(44,44/(Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect));
+      if(newEffects.length===1&&newEffects[0].award.achievementId!=='sky-breaker'){
+        const region=newEffects[0].region;moveCamera(new THREE.Vector3(region.data.city[0],region.group.position.y+4,region.data.city[1]),42);
+      }else moveCamera(new THREE.Vector3(0,4,0),Math.min(138,distance));
+    }
   }
   function wake(ms=180){activeUntil=performance.now()+ms;if(renderingReady&&!frame&&!disposed&&sceneVisible&&requestedVisible&&!document.hidden)frame=requestAnimationFrame(animate)}
   function setVisible(value){if(requestedVisible===value)return;requestedVisible=value;if(value)wake();else{cancelAnimationFrame(frame);frame=0}}

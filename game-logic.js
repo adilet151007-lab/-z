@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { REGIONS, CITIES, SEAT_LIMIT, ECONOMY_PENALTY, ECONOMY_RECOVERY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, MAX_PLAYERS, metadataFor, capacityFor, totalCapacity, normalizeRegionId, CREATOR_TEAM_ID, CREATOR_NAMES, isCreatorTeam, regularTeams } from "./game-config.js";
 import { QUESTION_BANK } from "./question-bank.js";
 import {AWARD_CATALOG,awardDefinition,initializeAwards,validateAwardState,ensurePlayerProfile,profileFor,issueCollectionCookie,recordCollectionAward,scoreLimit,SAFE_SCORE,prepareAwardRound,answerElapsed,pauseAwardClock,evaluateAwardRound,evaluateAwardFinish,achievementView} from "./achievement-system.js";
+import { ANIMATION_DURATIONS } from './achievement-animations.js';
 import {MODE_NAMES,ECONOMY_FLOOR,soloMultiplier,DEFAULT_BRANDING,DEFAULT_SUBJECT,ACHIEVEMENTS} from './game-config.js';
 export { REGIONS, SEAT_LIMIT, ECONOMY_PENALTY, CRISIS_THRESHOLD } from "./game-config.js";
 
@@ -410,7 +411,20 @@ export class GameLogic {
     const recipients=scope==='team'?team.members:[member];
     if(source!=='manual'&&recipients.every(m=>profileFor(this,m.pid)?.earned.some(a=>a.achievementId===achievementId&&a.source!=='manual')))return {achievement:structuredClone(profileFor(this,recipients[0].pid).earned.find(a=>a.achievementId===achievementId)),duplicate:true};
     const award={id:randomUUID(),achievementId,scope,targetId,teamId:team.id,matchId:match.id,earnedAt:this.now(),source,reason,recipientName:scope==='team'?team.name:member.name,recipientIds:scope==='team'?team.members.map(m=>m.pid):[member.pid]};
-    this.state.achievements=[...this.state.achievements,award].slice(-1000);recordCollectionAward(this,award);this.log(`Достижение «${awardDefinition(achievementId).secret?'Открыта тайна':awardDefinition(achievementId).title}»: ${award.recipientName}.`,source==='manual'?'admin':'game');this.touch();return {achievement:structuredClone(award),duplicate:false};
+    this.state.achievements=[...this.state.achievements,award].slice(-1000);recordCollectionAward(this,award);
+    if(source==='manual'){
+      const round=this.state.round;
+      if(round&&!round.resolved){
+        const wasAutoPaused=Number.isFinite(round.awardPauseUntil);
+        const canPause=!round.paused&&this.remainingMs()>0;
+        if(canPause)this.pauseRound();
+        if(canPause||wasAutoPaused){
+          const duration=ANIMATION_DURATIONS[achievementId]??(achievementId==='sky-breaker'?7800:awardDefinition(achievementId).rarity==='common'||awardDefinition(achievementId).rarity==='rare'?3600:5600);
+          round.awardPauseUntil=Math.max(round.awardPauseUntil||0,this.now()+duration+1500);
+        }
+      }
+    }
+    this.log(`Достижение «${awardDefinition(achievementId).secret?'Открыта тайна':awardDefinition(achievementId).title}»: ${award.recipientName}.`,source==='manual'?'admin':'game');this.touch();return {achievement:structuredClone(award),duplicate:false};
   }
   completeMatchQuestion(){
     const match=this.ensureMatch();if(match.finishedAt!==null)return;
@@ -511,6 +525,7 @@ export class GameLogic {
   pauseRound() {
     const round = this.state.round;
     ensure(round && !round.resolved, "Нет активного раунда.");
+    delete round.awardPauseUntil;
     if (!round.paused) {
       ensure(this.remainingMs() > 0, "Время уже истекло.");
       pauseAwardClock(this,true);
@@ -523,6 +538,12 @@ export class GameLogic {
       round.paused = false;
     }
     this.touch();
+  }
+  resumeAwardPauseIfDue() {
+    const round=this.state.round;
+    if(!round||round.resolved||!round.paused||!Number.isFinite(round.awardPauseUntil)||round.awardPauseUntil>this.now())return false;
+    this.pauseRound();
+    return true;
   }
   resetTimer() {
     const round = this.state.round;
@@ -768,9 +789,9 @@ export class GameLogic {
     this.touch();
   }
   publicFrame(onlinePlayers = new Set()) {
-    const now=this.now(),worldAchievements=(this.state.achievements||[]).filter(a=>awardDefinition(a.achievementId)?.world&&a.matchId===this.state.match?.id&&a.earnedAt<=now&&now-a.earnedAt<7800).flatMap(a=>{
+    const now=this.now(),worldAchievements=(this.state.achievements||[]).filter(a=>awardDefinition(a.achievementId)?.world&&a.matchId===this.state.match?.id&&a.earnedAt<=now&&now-a.earnedAt<(ANIMATION_DURATIONS[a.achievementId]??7800)).flatMap(a=>{
       const team=this.state.regions.find(t=>t.id===(a.teamId||(a.scope==='team'?a.targetId:null)));if(!team)return [];
-      return [{id:a.id,achievementId:a.achievementId,teamId:team.id,teamName:team.name,title:awardDefinition(a.achievementId).title,effect:awardDefinition(a.achievementId).effect,rarity:awardDefinition(a.achievementId).rarity,startedAt:a.earnedAt,durationMs:7800}];
+      return [{id:a.id,achievementId:a.achievementId,teamId:team.id,teamName:team.name,title:awardDefinition(a.achievementId).title,effect:awardDefinition(a.achievementId).effect,rarity:awardDefinition(a.achievementId).rarity,startedAt:a.earnedAt,durationMs:ANIMATION_DURATIONS[a.achievementId]??7800}];
     });
     return {
       worldAchievements,

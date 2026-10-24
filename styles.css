@@ -433,3 +433,13 @@ body.telemetry-open,body.presentation-signal{overflow:hidden}
 .map-review-mode .atlas-projector,.map-review-mode .stage-wrap{height:calc(100dvh - 155px)!important;min-height:220px!important;max-height:none!important;flex:1 1 auto!important}
 .map-review-mode .session-utilities>:not([data-map-review]){display:none!important}
 @media(max-width:600px){.session-utilities{padding:8px 10px;gap:6px}.session-utilities .chat-launcher,.session-utilities .utility-button{font-size:10px;padding:7px 9px}.session-utilities .product-signature{font-size:9px}.chat-panel{left:12px;width:calc(100vw - 24px)}.teacher-page .session-utilities{order:1!important}}
+
+.achievement-custom{background:rgba(7,4,15,.46)}
+.achievement-custom .award-stage{background:rgba(7,4,15,.34)}
+.achievement-custom .award-stage{position:absolute;inset:0;pointer-events:auto;touch-action:none}
+.award-stage canvas{width:100%;height:100%;display:block}
+.award-loading{position:absolute;inset:45% 12px auto;text-align:center;color:#d8c8f1}
+.award-caption{position:absolute;bottom:max(70px,env(safe-area-inset-bottom));left:12px;right:12px;text-align:center;color:#fff;opacity:0;transform:translateY(8px);transition:opacity .6s,transform .6s;pointer-events:none}
+.award-caption.on{opacity:1;transform:none}.award-caption small,.award-caption span{display:block;color:#cfc6e6;font-size:12px}.award-caption strong{display:block;margin:8px 0;font:700 clamp(22px,5vw,32px)/1.2 Georgia,serif;text-shadow:0 0 20px #b48cff}
+.award-static{display:none}.award-fallback .award-static{display:block;position:absolute;inset:25% 30% 35%;border:2px solid #c8993a;border-radius:14px;text-align:center;color:#f8e199;font:100px Georgia,serif}.award-fallback canvas{display:none}
+@media(prefers-reduced-motion:reduce){.award-caption{transition:none}}

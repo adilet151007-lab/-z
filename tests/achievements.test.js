@@ -14,6 +14,35 @@ function answer(g,correct=true,questionId='q1'){
 function comeback(g){for(let i=0;i<4;i++)answer(g,false);assert.equal(g.region('saryarka').economy,20);for(let i=0;i<4;i++)answer(g,true);assert.equal(g.region('saryarka').economy,100)}
 function answerBoth(g,correct=true){g.startRound('q1',60);const round=g.state.round;for(const id of ['saryarka','jetisu']){const p=g.region(id).members[0],option=correct?round.questionSnapshot.correct:(round.questionSnapshot.correct+1)%4;g.castVote(id,p.pid,option,round.id);g.confirmVote(id,p.pid,p.pid,round.id)}g.resolveRound()}
 
+test('ручное вручение останавливает общее время вопроса и автоматически возобновляет его после показа',()=>{
+ let now=100000;const g=game();g.now=()=>now;const pid=g.region('saryarka').members[0].pid;
+ g.startRound('q1',60);now+=5000;
+ const first=g.grantAchievement('scenario-reader','player',pid);
+ assert.equal(first.duplicate,false);assert.equal(g.state.round.paused,true);assert.equal(g.remainingMs(),55000);
+ const firstUntil=g.state.round.awardPauseUntil;
+ now+=4000;g.grantAchievement('zero-card','player',pid);
+ assert.ok(g.state.round.awardPauseUntil>firstUntil);
+ now=firstUntil+1;assert.equal(g.resumeAwardPauseIfDue(),false);assert.equal(g.remainingMs(),55000);
+ now=g.state.round.awardPauseUntil;assert.equal(g.resumeAwardPauseIfDue(),true);assert.equal(g.state.round.paused,false);
+ now+=2000;assert.equal(g.remainingMs(),53000);
+ assert.equal(g.grantAchievement('scenario-reader','player',pid).duplicate,true);
+ assert.equal(g.state.round.paused,false);
+ g.pauseRound();g.grantAchievement('determination','player',pid);
+ assert.equal(g.state.round.paused,true);assert.equal(g.state.round.awardPauseUntil,undefined);
+ now+=30000;assert.equal(g.resumeAwardPauseIfDue(),false);
+});
+
+test('легендарные награды публикуются всем как события 3D-карты без личных данных игрока',()=>{
+ const g=game(),player=g.region('saryarka').members[0],other=g.joinTeam('jetisu','Бек');
+ const ids=['sky-breaker','neon-summit','zero-card','scenario-reader','determination','daily-training','infinity-gauntlet'];
+ for(const id of ids)g.grantAchievement(id,'player',player.pid);
+ const view=g.view({playerHash:hashToken(other.playerToken)});
+ assert.deepEqual(new Set(view.worldAchievements.map(a=>a.achievementId)),new Set(ids));
+ assert.ok(view.worldAchievements.every(a=>a.teamId==='saryarka'&&a.durationMs>=7800));
+ assert.equal(JSON.stringify(view.worldAchievements).includes(player.pid),false);
+ assert.equal(view.achievements.some(a=>a.achievementId==='determination'),false);
+});
+
 test('восстановление: каждый верный ответ возвращает 25 пунктов без ресурсов, последний шаг ограничен 100%',()=>{
  const g=game();answer(g,false);answer(g,false);assert.equal(g.region('saryarka').economy,60);let r=answer(g);assert.equal(r.economyAfter,85);assert.equal(r.awarded,0);assert.equal(r.recoveryAnswers,0);assert.equal(r.economyRecovered,25);
  answer(g,false);assert.equal(g.region('saryarka').economy,65);r=answer(g);assert.equal(r.economyRecovered,25);assert.equal(r.economyAfter,90);assert.equal(r.awarded,0);
@@ -107,7 +136,7 @@ test('анимация: безопасная выдача и предпросм�
   const classes=new Set(),canvas={clientWidth:220,clientHeight:330,getContext(){canvasQueries++;return canvasAvailable?context:null}};
   return {canvas,classes,classList:{add:name=>classes.add(name)},setAttribute(){},querySelector(selector){return selector==='canvas'?canvas:{addEventListener(){}}},remove(){this.removed=true}};
  }};
- let source=await readFile(new URL('../shared-engine.js',import.meta.url),'utf8');source=source.replace(/^import .*\n/gm,'').replace(/^export \{ .*from .*\n/gm,'');source='import {ACHIEVEMENTS,createDrillGeometryData} from '+JSON.stringify(new URL('../game-config.js',import.meta.url).href)+';\n'+source;const {setupAchievements}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
+ let source=await readFile(new URL('../shared-engine.js',import.meta.url),'utf8');source=source.replace(/^import .*\n/gm,'').replace(/^export \{ .*from .*\n/gm,'');source='import {ACHIEVEMENTS,createDrillGeometryData} from '+JSON.stringify(new URL('../game-config.js',import.meta.url).href)+';\nimport {hasAchievementAnimation,mountAchievementAnimation} from '+JSON.stringify(new URL('../achievement-player.js',import.meta.url).href)+';\n'+source;const {setupAchievements}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));
  const engine={mode:'student',socket:{on:(name,fn)=>socketHandlers.set(name,fn),off:name=>socketHandlers.delete(name)},onChange(fn){listeners.add(fn);return()=>listeners.delete(fn)}};stop=setupAchievements(engine);
  const state={viewer:{role:'student',player:{pid:'alice'}},achievements:[],match:null};for(const fn of listeners)fn(state);
  state.match={id:'match-1'};state.serverTime=1000;state.worldAchievements=[{id:'world-1',achievementId:'sky-breaker',teamId:'jetisu',startedAt:1000,durationMs:7800}];for(const fn of listeners)fn(state);for(const fn of listeners)fn(state);assert.equal(uiEvents.filter(n=>n==='cq:world-achievement').length,1);assert.equal(bodyClasses.has('map-celebrating'),true);

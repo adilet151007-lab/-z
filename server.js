@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import { ANIMATION_MODULES } from './achievement-animations.js';
 import { createServer } from "node:http";
 import { createHash, createHmac, timingSafeEqual, randomUUID, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -77,6 +78,7 @@ export async function createGameServer(options = {}) {
   app.get('/api/logo', (req,res)=>{const logo=publishedGame.state.branding.logo;if(!logo||req.query.v!==hashToken(logo).slice(0,16))return res.sendStatus(404);const [header,data]=logo.split(',');res.setHeader('Cache-Control','public, max-age=86400, immutable');res.type(header.slice(5,header.indexOf(';'))).send(Buffer.from(data,'base64'))});
   app.get('/license-texts/:name', (req,res)=>{const licenses={three:'three/LICENSE','socket.io':'socket.io/LICENSE',express:'express/LICENSE',pg:'pg/LICENSE',dotenv:'dotenv/LICENSE',mammoth:'mammoth/LICENSE','pdfjs-dist':'pdfjs-dist/LICENSE'};const file=licenses[req.params.name];if(!file)return res.sendStatus(404);res.type('text/plain').sendFile(path.join(directory,'node_modules',file))});
   const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
+  for(const file of ['./achievement-player.js','./achievement-animations.js',...Object.values(ANIMATION_MODULES)])if(/^\.\/[a-z0-9-]+\.js$/.test(file))allowed.add(file.slice(1));
   app.use(async(req,res,next)=>{if(!allowed.has(req.path))return next();const file=path.join(directory,req.path.slice(1));if(req.path.endsWith('.html'))return res.type('html').send((await readFile(file,'utf8')).replace(/<script(?=[\s>])/g,`<script nonce="${res.locals.nonce}"`));res.sendFile(file)});
   app.get("/vendor/pdfjs/pdf.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.mjs")));
   app.get("/vendor/pdfjs/pdf.worker.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.worker.mjs")));
@@ -488,11 +490,12 @@ export async function createGameServer(options = {}) {
     const round = game.state.round;
     const proposalsReady=round?.proposals&&Object.values(round.proposals).some(p=>p.remainingAt-game.remainingMs()>=7000);
     const expired=(game.state.delegatedAdmins||[]).some(g=>g.expiresAt&&g.expiresAt<=Date.now()),roundReady=round&&!round.resolved&&!round.paused&&(game.remainingMs()<=0||proposalsReady);
-    if (closing || timerBusy || !expired&&!roundReady) return;
+    const awardReady=round&&!round.resolved&&round.paused&&Number.isFinite(round.awardPauseUntil)&&round.awardPauseUntil<=Date.now();
+    if (closing || timerBusy || !expired&&!roundReady&&!awardReady) return;
     timerBusy = true;
     enqueue(async () => {
       const before = structuredClone(game.state);
-      try {game.expireAdminGrants();if(game.state.round&&!game.state.round.resolved&&!game.state.round.paused){if(game.remainingMs()>0)game.flushProposals();else game.resolveRound()}if(game.state.revision===before.revision)return;await store.save(game.state);publishedGame=new GameLogic(game.state);broadcast();}
+      try {game.expireAdminGrants();game.resumeAwardPauseIfDue();if(game.state.round&&!game.state.round.resolved&&!game.state.round.paused){if(game.remainingMs()>0)game.flushProposals();else game.resolveRound()}if(game.state.revision===before.revision)return;await store.save(game.state);publishedGame=new GameLogic(game.state);broadcast();}
       catch (error) { game = new GameLogic(before); console.error("Итоги раунда не сохранены; повторная попытка автоматически:", error.message); }
     }).catch(error=>{if(error.code!=='SERVER_BUSY')console.error('Таймер:',error.message)}).finally(() => { timerBusy = false; });
   }, 250);

@@ -36,5 +36,11 @@ test('сцена: камера следует высоте города, кра�
   window.matchMedia=query=>({matches:!query.includes('prefers-reduced-motion')});api.update(state);step();const effect=group.children.find(o=>o.name==='match-achievement');assert.ok(effect);assert.equal(effect.userData.achievementId,'award-1');assert.ok(effect.getWorldPosition(new THREE.Vector3()).y>group.position.y);
   api.update(state);assert.equal(group.children.filter(o=>o.name==='match-achievement').length,1);let released=0;effect.traverse(o=>{if(o.geometry)o.geometry.addEventListener('dispose',()=>released++)});
   for(let i=0;i<60;i++)step();assert.ok(effect.children.some(o=>o.children.some(c=>c.isLineSegments&&c.geometry.drawRange.count>0)));for(let i=0;i<110;i++)step();assert.equal(group.children.includes(effect),false);assert.ok(released>0);assert.equal(frames.size,0);api.update(state);assert.equal(group.children.some(o=>o.name==='match-achievement'),false);
+  const ids=['neon-summit','zero-card','scenario-reader','determination','daily-training','infinity-gauntlet'];
+  api.update({...state,worldAchievements:ids.map((achievementId,i)=>({id:'new-'+i,achievementId,teamId:'astana',teamName:'Астана',title:achievementId,startedAt:1000,durationMs:8000}))});step();
+  const effects=group.children.filter(o=>o.name==='match-achievement');assert.equal(effects.length,ids.length);
+  for(const [i,id]of ids.entries())assert.equal(effects[i].userData.achievementId,'new-'+i);
+  const training=effects.find(o=>o.children.some(c=>c.children.some(m=>m.isInstancedMesh)));
+  assert.ok(training);for(let i=0;i<180;i++)step();assert.equal(group.children.some(o=>o.name==='match-achievement'),false);
  }finally{api?.dispose();await unlink(fileURLToPath(temporary))}
 });

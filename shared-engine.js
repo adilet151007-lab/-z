@@ -1,4 +1,5 @@
 import { io } from "/socket.io/socket.io.esm.min.js";
+import { hasAchievementAnimation, mountAchievementAnimation } from './achievement-player.js';
 import { PRIVACY_VERSION, DEFAULT_SUBJECT, ACHIEVEMENTS, createDrillGeometryData } from './game-config.js';
 export { REGIONS, CITIES, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, metadataFor, mapRegionsFor, capacityFor, totalCapacity, CREATOR_TEAM_ID, isCreatorTeam, regularTeams, MODE_NAMES, soloMultiplier } from "./game-config.js";
 
@@ -197,6 +198,10 @@ export function setupAchievements(engine){
   function play(award,preview=false,toastOnly=false){
     if(document.hidden)return;close();
     closeExtras();
+    if(hasAchievementAnimation(award.achievementId)&&!toastOnly){
+      layer=document.createElement('div');layer.className='collection-cinema';document.body.append(layer);document.body.classList.add('achievement-playing');
+      stopDrill=mountAchievementAnimation(layer,award,{preview,onDone:finish});return;
+    }
     if(award.achievementId&&award.achievementId!=='sky-breaker'){
       const effect=['gauntlet','tower','card','chip','eye','heart','book','sun','medal','eclipse'].includes(award.effect)?award.effect:'medal',rarity=['perk','legendary','rare','common'].includes(award.rarity)?award.rarity:'common',compact=toastOnly||rarity==='common'||rarity==='rare';
       layer=document.createElement('div');layer.className=`collection-cinema collection-${effect} rarity-${rarity}${compact?' collection-compact':''}`;layer.setAttribute('aria-label','Достижение: '+award.title);
@@ -218,8 +223,10 @@ export function setupAchievements(engine){
     if(!document.hidden&&active.some(a=>!worldSeen.has(a.id))){
       const freshWorld=active.filter(a=>!worldSeen.has(a.id));for(const a of active)worldSeen.add(a.id);
       const drills=freshWorld.filter(a=>a.achievementId==='sky-breaker');
-      if(drills.length){closeExtras();worldActive=true;document.body.classList.add('map-celebrating');clearTimeout(worldTimer);const remaining=Math.max(...drills.map(a=>a.durationMs-(state.serverTime-a.startedAt)-Math.max(0,Date.now()-(state.clientReceivedAt||Date.now()))));worldTimer=setTimeout(clearWorld,remaining);globalThis.dispatchEvent?.(new CustomEvent('cq:world-achievement',{detail:{teamIds:drills.map(a=>a.teamId)}}));}
-      for(const a of freshWorld.filter(a=>a.achievementId!=='sky-breaker'))enqueue({...a,recipientName:a.teamName});
+      if(drills.length){closeExtras();worldActive=true;document.body.classList.add('map-celebrating');clearTimeout(worldTimer);const remaining=Math.max(...drills.map(a=>a.durationMs-(state.serverTime-a.startedAt)-Math.max(0,Date.now()-(state.clientReceivedAt||Date.now()))));worldTimer=setTimeout(clearWorld,remaining);}
+      globalThis.dispatchEvent?.(new CustomEvent('cq:world-achievement',{detail:{teamIds:freshWorld.map(a=>a.teamId),achievementIds:freshWorld.map(a=>a.achievementId)}}));
+      const ownAwards=new Set((state.achievements||[]).map(a=>a.id));
+      for(const a of freshWorld.filter(a=>a.achievementId!=='sky-breaker'&&!ownAwards.has(a.id)))enqueue({...a,recipientName:a.teamName},false,true);
     }
     document.querySelectorAll('[data-achievement-rules]').forEach(node=>node.textContent=engine.mode==='teacher'?'Обычные, редкие и легендарные награды. Секретные условия доступны в пульте ниже.':'Коллекция сохраняется после выхода в этом браузере. Шесть разных легендарных наград открывают перк. Секретные награды появляются после получения.');
     const progress=state.achievementProgress,counters=state.achievementCounters;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;node.textContent=state.settings?.mode==='solo'&&counters?`Быстрых ответов: ${Math.min(5,counters.fast)}/5 · быстрая верная серия: ${Math.min(3,counters.fastRun)}/3.`:progress?`«Ты смог, братец»: ${progress.hitCrisis?'✓':'○'} экономика ниже 30% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} восстановлена до 100% · ${state.match?.finishedAt!=null&&rank===1?'✓':'○'} первое место в конце. Текущее место: ${rank||'—'}.`:''});
@@ -232,7 +239,7 @@ export function setupAchievements(engine){
     }
     const fresh=awards.filter(award=>!seen.has(award.id));for(const award of awards)seen.add(award.id);
     try{localStorage.setItem('cq_awards_seen_v1',JSON.stringify([...seen].slice(-1000)))}catch{}
-    if(ready)for(const award of fresh)if(award.achievementId==='sky-breaker'||!worldSeen.has(award.id))enqueue(award,false,award.achievementId==='sky-breaker');ready=current!=='guest';
+    if(ready)for(const award of fresh)if(engine.mode!=='teacher'||!worldSeen.has(award.id))enqueue(award,false,award.achievementId==='sky-breaker');ready=current!=='guest';
     for(const notice of state.achievementNotices||[])if(!noticed.has(notice.id)){noticed.add(notice.id);enqueue({id:notice.id,achievementId:'notice',title:notice.text,rarity:'common',effect:'eye',recipientName:'Полученное достижение остаётся в коллекции.'},false,true)}
   };
   const preview=data=>{queue.length=0;play({...data,title:data?.title||'Ты смог, братец'},true)},replay=event=>{const id=event.target.closest('[data-award-replay]')?.dataset.awardReplay;if(!id)return;const state=engine.state,award=(engine.mode==='teacher'?state?.match?.awards:state?.achievements)?.find(a=>a.id===id);if(award){queue.length=0;play(award)}};
