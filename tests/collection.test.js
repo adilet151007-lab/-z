@@ -86,6 +86,22 @@ test('перчатка: шесть разных игровых наград, л�
  f.g.endRound();f.g.setGameMode('solo');f.g.adjustCapital(pid,1000);answer(f,2,[0,0]);assert.equal(f.g.state.regions.flatMap(t=>t.members).find(m=>m.pid===pid).capital,1025);
 });
 
+test('прямая выдача перчатки снимает лимит, ручные камни не снимают; отключение перков возвращает предел',()=>{
+ const f=fixture('team',12,2),pid=f.players[0].player.pid,team=f.players[0].player.regionId,other=f.players[1].player.regionId;
+ for(const id of LEGENDARY_IDS)f.g.grantAchievement(id,'player',pid);
+ assert.equal(f.g.scoreLimit('team',team),1000);
+ f.g.grantAchievement('infinity-gauntlet','player',pid);
+ assert.equal(f.g.scoreLimit('team',team),SAFE_SCORE);
+ assert.equal(f.g.scoreLimit('team',other),1000);
+ assert.deepEqual(f.g.view({playerHash:hashToken(f.players[0].playerToken)}).collection.stones,[]);
+ assert.equal(f.g.view({playerHash:hashToken(f.players[0].playerToken)}).collection.active,true);
+ f.g.adjustPoints(team,1000);answer(f,0,[0,0]);assert.equal(f.g.region(team).points,1025);
+ f.g.setPerksEnabled(false);assert.equal(f.g.scoreLimit('team',team),1000);
+ f.g.setPerksEnabled(true);f.g.movePlayer(pid,other);
+ assert.equal(f.g.scoreLimit('team',team),1000);
+ assert.equal(f.g.scoreLimit('team',other),SAFE_SCORE);
+});
+
 test('коллекция: защищённая cookie переживает выход, не даёт игровых или админ-прав',async t=>{
  let saved=null;const store={kind:'memory',async load(){return saved},async save(s){saved=structuredClone(s)},async close(){}};
  const server=await createGameServer({store,teacherPassword:'collection-test-password',sessionSecret:'collection-test-secret-more-than-32-characters',creatorCodes:{},requireConsent:false,secureCookies:false}),port=await server.listen(0,'127.0.0.1'),base='http://127.0.0.1:'+port,sockets=[];

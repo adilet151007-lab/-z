@@ -13,7 +13,7 @@ export const AWARD_CATALOG=[
  {id:'foresight',title:'Похоже, ты наделён даром предвидения!',description:'В Solo дать 3 правильных ответа подряд на разные вопросы, каждый — не позднее 5 секунд от его начала.',rarity:'rare',effect:'eye',icon:'◉'},
  {id:'near-victory',title:'Ты почти смог, Джо',description:'Завершить сессию вторым с отставанием от лидера от 1 до 25 очков рейтинга. Нужно хотя бы 5 разных вопросов.',rarity:'rare',effect:'medal',icon:'Ⅱ'},
  {id:'perfect-form',title:'Карс?',description:'Правильно ответить на все вопросы завершённой сессии с самого начала. Минимум 10 разных вопросов; пропуски и повтор одного вопроса не засчитываются.',rarity:'rare',effect:'eclipse',icon:'☀'},
- {id:'infinity-gauntlet',title:'Я — сама неотвратимость',description:'Собрать все 6 разных легендарных достижений игровым путём. При включённых перках снимает предел 1000 очков в Solo и у команды обладателя. Ручные награды не собирают камни.',rarity:'perk',effect:'gauntlet',icon:'∞',secret:true,world:true}
+ {id:'infinity-gauntlet',title:'Я — сама неотвратимость',description:'Собрать все 6 разных легендарных достижений игровым путём или получить перк напрямую от администратора. При включённых перках снимает предел 1000 очков в Solo и у команды обладателя. Ручные легендарные награды не собирают камни.',rarity:'perk',effect:'gauntlet',icon:'∞',secret:true,world:true}
 ];
 export const STONES=['power','space','reality','mind','soul','time'];
 export const LEGENDARY_IDS=AWARD_CATALOG.filter(a=>a.stone).map(a=>a.id);
@@ -27,7 +27,7 @@ const questionKey=q=>digest(JSON.stringify([q.subject||'',q.text.trim(),q.option
 const automatic=a=>a.source!=='manual';
 const earned=(p,id)=>p?.earned.some(a=>a.achievementId===id&&automatic(a));
 export const completedStones=p=>LEGENDARY_IDS.filter(id=>earned(p,id));
-export const ownsInfinity=p=>completedStones(p).length===LEGENDARY_IDS.length;
+export const ownsInfinity=p=>Boolean(p?.earned.some(a=>a.achievementId==='infinity-gauntlet'))||completedStones(p).length===LEGENDARY_IDS.length;
 const profileIndexes=new WeakMap();
 function profileIndex(g){
  let index=profileIndexes.get(g);const state=g.state;
@@ -98,7 +98,7 @@ export function scoreLimit(g,scope,id){
 }
 export function publicCollection(g,pid){
  const p=profileFor(g,pid),m=members(g).find(m=>m.pid===pid),stones=completedStones(p);
- return {awards:(p?.earned||[]).map(a=>({...byId.get(a.achievementId),...a,recipientName:m?.name||''})),stones:stones.map(id=>byId.get(id).stone),totalStones:6,unlocked:stones.length===6,active:g.state.settings.perksEnabled&&stones.length===6,studied:earned(p,'daily-training')?100:p?.studied.length||0};
+ return {awards:(p?.earned||[]).map(a=>({...byId.get(a.achievementId),...a,recipientName:m?.name||''})),stones:stones.map(id=>byId.get(id).stone),totalStones:6,unlocked:ownsInfinity(p),active:g.state.settings.perksEnabled&&ownsInfinity(p),studied:earned(p,'daily-training')?100:p?.studied.length||0};
 }
 const emptyStats=()=>({seen:[],correct:0,answered:0,errors:0,correctRun:0,fast:0,fastRun:0,hard:0,armed:false,foresight:false,brokenNotice:false,midLast:false,ledAfterMid:false,previousRank:null,initial:false,earnedPoints:0});
 function statsFor(match,key){match.questStats??={};if(!Object.hasOwn(match.questStats,key))Object.defineProperty(match.questStats,key,{value:emptyStats(),enumerable:true,writable:true,configurable:true});return match.questStats[key]}
