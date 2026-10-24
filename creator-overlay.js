@@ -32,7 +32,7 @@ export function setupTelemetry(engine){
   root.addEventListener('click',e=>{const action=e.target.closest('[data-sys-action]')?.dataset.sysAction;if(action)run(()=>act(action))});
  }
  async function loadJSON(){$('sys-json').value=JSON.stringify(await engine.getSnapshot(),null,2)}
- function renderTarget(){const s=engine.state,solo=s.settings.mode==='solo',item=solo?s.leaderboard.find(m=>m.pid===selected):s.regions.find(t=>t.id===selected);$('sys-target-info').textContent=!item?'':solo?`${item.capital} капитала · серия ${item.streak} · ×${item.multiplier}`:`${item.points} / 1000 · экономика ${item.economy}%`;for(const a of ['economy','restore'])sheet.querySelector(`[data-sys-action="${a}"]`).disabled=solo||!engine.connected||!permitted(a)}
+ function renderTarget(){const s=engine.state,solo=s.settings.mode==='solo',item=solo?s.leaderboard.find(m=>m.pid===selected):s.regions.find(t=>t.id===selected);$('sys-target-info').textContent=!item?'':solo?`${item.capital} капитала · серия ${item.streak} · ×${item.multiplier}`:`${item.points} / ${item.scoreLimit===null?'∞':'1000'} · экономика ${item.economy}%`;for(const a of ['economy','restore'])sheet.querySelector(`[data-sys-action="${a}"]`).disabled=solo||!engine.connected||!permitted(a)}
  function render(){
   if(!root||!enabled())return;const s=engine.state,solo=s.settings.mode==='solo',q=s.round?.question;
   if(tab==='json'&&!s.viewer.isCreator)tab='eye';

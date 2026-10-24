@@ -60,12 +60,16 @@ export function setupAmbientAudio(){
 
 export function setupAchievementControls(engine,host){
   host.classList.add('achievement-tools');
-  host.innerHTML='<h3>Ты смог, братец</h3><p class="small-note mut">'+escapeHTML(ACHIEVEMENTS[0].description)+'</p><p class="small-note mut">Предпросмотр — только в этом окне. Первое вручение видно всем на карте.</p><div class="row section-gap"><button type="button" data-award-preview>▶ Предпросмотр анимации</button><button type="button" data-award-finish>Завершить матч</button></div><label class="field-label section-gap">Получатель<select data-award-target aria-label="Получатель достижения"></select></label><button type="button" data-award-grant class="pri section-gap">Вручить достижение</button><p data-award-status class="small-note" role="status"></p>';
+  host.innerHTML='<h3>Достижения и перки</h3><label class="field-label section-gap">Достижение<select data-award-kind aria-label="Достижение для проверки"></select></label><p data-award-description class="small-note mut section-gap"></p><p class="small-note mut">Предпросмотр виден только вам. Ручное вручение не собирает камни для перка.</p><div class="row section-gap"><button type="button" data-award-preview>▶ Предпросмотр анимации</button><button type="button" data-award-finish>Завершить сессию</button></div><label class="field-label section-gap">Получатель<select data-award-target aria-label="Получатель достижения"></select></label><button type="button" data-award-grant class="pri section-gap">Вручить достижение</button><label class="privacy-consent section-gap"><input type="checkbox" data-award-perks><span>Играть с перками · полная коллекция снимает предел 1000 очков</span></label><p data-award-status class="small-note" role="status"></p>';
   let busy=false;
-  const target=host.querySelector('[data-award-target]'),status=host.querySelector('[data-award-status]');
+  const target=host.querySelector('[data-award-target]'),status=host.querySelector('[data-award-status]'),kind=host.querySelector('[data-award-kind]'),perks=host.querySelector('[data-award-perks]');
   const render=state=>{
     const viewer=state?.viewer,full=viewer?.isCreator||viewer?.role==='teacher',game=full||viewer?.adminGrant?.permissions.game,canGrant=full||game&&viewer?.adminGrant?.permissions.players;
     host.hidden=!game;const shell=host.closest('[data-award-tools-shell]');if(shell)shell.hidden=!game;if(!game)return;
+    const catalogue=state.achievementCatalog||ACHIEVEMENTS,catalogueKey=JSON.stringify(catalogue);
+    if(kind.dataset.key!==catalogueKey){const value=kind.value;kind.innerHTML=catalogue.map(a=>`<option value="${escapeHTML(a.id)}">${escapeHTML(a.title)}${a.secret?' · секретное':''}</option>`).join('');kind.dataset.key=catalogueKey;if(catalogue.some(a=>a.id===value))kind.value=value}
+    host.querySelector('[data-award-description]').textContent=catalogue.find(a=>a.id===kind.value)?.description||'';
+    perks.checked=state.settings.perksEnabled!==false;perks.disabled=busy||!engine.connected||!!state.round&&!state.round.resolved;
     const options=(viewer.player?`<option value="player:${viewer.player.pid}">Себе · ${escapeHTML(viewer.player.name)}</option>`:'')+'<optgroup label="Команды">'+state.regions.filter(t=>t.members.length).map(t=>`<option value="team:${t.id}">${escapeHTML(t.name)}</option>`).join('')+'</optgroup><optgroup label="Участники">'+state.regions.flatMap(t=>t.members.filter(m=>m.pid!==viewer.player?.pid).map(m=>`<option value="player:${m.pid}">${escapeHTML(m.name)} · ${escapeHTML(t.name)}</option>`)).join('')+'</optgroup>';
     if(target.dataset.key!==options){const value=target.value;target.innerHTML=options;target.dataset.key=options;if([...target.options].some(option=>option.value===value))target.value=value}
     host.querySelector('[data-award-grant]').hidden=!canGrant;target.parentElement.hidden=!canGrant;
@@ -74,11 +78,12 @@ export function setupAchievementControls(engine,host){
     host.querySelector('[data-award-finish]').disabled||=!state.match?.completedCount||state.match.finishedAt!==null||!!state.round&&!state.round.resolved;
   };
   const click=async event=>{const button=event.target.closest('button');if(!button||busy||button.disabled)return;busy=true;render(engine.state);status.textContent='';try{
-    if(button.hasAttribute('data-award-preview')){await engine.previewAchievement();status.textContent='Предпросмотр запущен. Награды и очки не изменены.'}
-    else if(button.hasAttribute('data-award-grant')){const [scope,targetId]=target.value.split(':');const result=await engine.grantAchievement('sky-breaker',scope,targetId);status.textContent=result.duplicate?'У получателя уже есть эта награда за текущий матч.':'Достижение вручено.'}
+    if(button.hasAttribute('data-award-preview')){await engine.previewAchievement(kind.value);status.textContent='Предпросмотр запущен.'}
+    else if(button.hasAttribute('data-award-grant')){const [scope,targetId]=target.value.split(':');const result=await engine.grantAchievement(kind.value,scope,targetId);status.textContent=result.duplicate?'У получателя уже есть эта награда за текущий матч.':'Достижение вручено как специальная награда.'}
     else if(button.hasAttribute('data-award-finish')){if(confirm('Завершить сессию и зафиксировать итоговый рейтинг? Команды, выполнившие условия достижения «Ты смог, братец», получат награду.'))await engine.finishMatch()}
   }catch(error){status.textContent=error.message}finally{busy=false;render(engine.state)}};
-  host.addEventListener('click',click);const off=engine.onChange(render);return()=>{off();host.removeEventListener('click',click)};
+  const change=async event=>{if(event.target===kind)render(engine.state);if(event.target===perks){const enabled=perks.checked;busy=true;render(engine.state);try{await engine.setPerksEnabled(enabled);status.textContent=enabled?'Перки включены.':'Перки выключены; заработанные очки сохраняются.'}catch(error){status.textContent=error.message}finally{busy=false;render(engine.state)}}};
+  host.addEventListener('click',click);host.addEventListener('change',change);const off=engine.onChange(render);return()=>{off();host.removeEventListener('click',click);host.removeEventListener('change',change)};
 }
 
 
@@ -161,48 +166,80 @@ function skyFractureMarkup(){
   return `<div class="sky-fracture" aria-hidden="true"><div class="sky-aperture"><i></i><i></i><i></i><i></i><i></i></div><svg viewBox="0 0 1000 1000" fill="none"><defs><linearGradient id="cq-shard-metal" x1=".1" y1="0" x2=".8" y2="1"><stop stop-color="#c8f8e1" stop-opacity=".5"/><stop offset=".24" stop-color="#2c7777" stop-opacity=".24"/><stop offset="1" stop-color="#0b252f" stop-opacity=".8"/></linearGradient></defs><g class="sky-fracture-shadow">${paths}</g><g class="sky-fracture-glow">${paths}</g><g class="sky-fracture-lines">${paths}</g><g class="sky-shards">${pieces.map(([d,x,y,turn],i)=>`<path d="${d}" style="--shard-x:${x}px;--shard-y:${y}px;--shard-turn:${turn}deg;--shard-delay:${i*35}ms"/>`).join('')}</g></svg></div>`;
 }
 
+const stoneColors={power:'#bb69ff',space:'#4aa5ff',reality:'#ff5277',mind:'#ffe467',soul:'#ffad4b',time:'#5de4a5'};
+function collectionArtwork(effect){
+  if(effect==='gauntlet'){
+    const gems=[[87,118,'power'],[131,105,'space'],[176,113,'reality'],[216,138,'mind'],[60,211,'time'],[153,204,'soul']];
+    return `<div class="gauntlet-orbit" aria-hidden="true"></div><svg class="gauntlet-art" viewBox="0 0 300 370" aria-hidden="true"><defs><linearGradient id="cq-gold" x1="0" y1="0" x2="1" y2=".7"><stop stop-color="#624116"/><stop offset=".3" stop-color="#f7da85"/><stop offset=".5" stop-color="#bc8438"/><stop offset=".77" stop-color="#f1c973"/><stop offset="1" stop-color="#69441c"/></linearGradient><linearGradient id="cq-gold-dark" x2="0" y2="1"><stop stop-color="#e3b95f"/><stop offset="1" stop-color="#644020"/></linearGradient></defs><g class="gauntlet-fist" fill="url(#cq-gold)" stroke="#ffdf8b" stroke-width="1.3" stroke-linejoin="round"><path d="M83 245 72 329 95 351 204 351 225 326 211 243Z"/><path d="m90 253-3 70 19 14h85l18-17-13-66" fill="url(#cq-gold-dark)"/><path d="M72 125 222 134 234 181 218 246 194 268 107 270 74 246 62 197Z"/><path d="M70 131 67 95 77 75 99 73 111 91 112 141 90 159 72 150Z"/><path d="M111 133 108 79 118 62 142 63 154 80 153 137 132 150Z"/><path d="M153 140 153 81 163 69 186 73 196 92 196 150 177 162Z"/><path d="M196 156 194 103 204 90 224 97 235 119 236 170 215 183Z"/><path d="M79 171 55 155 36 170 34 212 47 244 76 254 101 233 100 214 77 207Z"/><path d="m84 165 26 8 21-12 23 12 23-6 28 14-2 58-22 20-70-1-27-25Z" fill="url(#cq-gold-dark)"/><g fill="none" stroke="#68441b" stroke-width="3"><path d="m73 100 31-2m10-12 33 1m12 4 31 7m11 20 28 9M85 294l30 11h74l23-13M81 322l27 12h88l20-14M99 250l15-18m77 16-14-17"/></g>${gems.map(([x,y,color],i)=>`<g class="gauntlet-gem" style="--gem:${stoneColors[color]};--gem-order:${i}"><path d="M${x} ${y-17} ${x+13} ${y-8} ${x+11} ${y+11} ${x} ${y+18} ${x-12} ${y+8} ${x-13} ${y-8}Z" fill="#1b1228" stroke="#ffe3a1" stroke-width="4"/><path d="M${x} ${y-14} ${x+10} ${y-7} ${x+8} ${y+9} ${x} ${y+14} ${x-9} ${y+6} ${x-10} ${y-6}Z" class="gem-core"/><path d="m${x-9} ${y-6} 9 4 10-5m-10 5v16m0-16v-12" fill="none" stroke="#ffffffaa" stroke-width="1"/><ellipse cx="${x-3}" cy="${y-7}" rx="3" ry="5" fill="#fff" opacity=".8"/></g>`).join('')}</g></svg><div class="limit-shatter" aria-hidden="true"><span>1000 / 1000</span><strong>1000 / ∞</strong></div>`;
+  }
+  if(effect==='tower')return `<div class="neon-horizon" aria-hidden="true"></div><svg class="tower-art" viewBox="0 0 360 450" aria-hidden="true"><defs><linearGradient id="cq-tower" x2="1" y2="1"><stop stop-color="#1b2344"/><stop offset="1" stop-color="#090f20"/></linearGradient></defs><g fill="#10172c" stroke="#ef4266" stroke-width="1"><path d="M15 450V300h55v150M83 450V235h47v215M246 450V277h40v173M299 450V330h44v120"/></g><g class="tower-main"><path d="M116 448V106l64-43 63 43v342Z" fill="url(#cq-tower)" stroke="#fb4d7a" stroke-width="2"/><path d="M180 63v385M116 106l64 33 63-33M127 124v300m105-300v300" fill="none" stroke="#4a93be"/><path d="m153 82 27-18 28 18-28 15Z" fill="#e75675"/><path d="M180 63V28" stroke="#ff7192" stroke-width="3"/><circle cx="180" cy="28" r="5" fill="#ffe5c1"/>${Array.from({length:14},(_,i)=>`<path d="m123 ${151+i*19} 51 24m13-24 49-23" stroke="${i%3===0?'#fa527b':'#4c8eb0'}" stroke-width="${i%3===0?2:1}" opacity=".7"/>`).join('')}<path class="tower-beam" d="m180 65-80-150h160Z" fill="#fa4d7819"/></g></svg>`;
+  if(effect==='card')return '<div class="zero-orbit" aria-hidden="true"></div><div class="zero-art" aria-hidden="true"><span>0</span><svg viewBox="0 0 160 200"><path d="m80 30-40 75 23 62h34l23-62Z" fill="#cfc3ee22" stroke="#b9a3dc"/><circle cx="80" cy="75" r="15" fill="#c9b5e6"/><path d="m40 175 40-65 40 65M28 184h104" fill="none" stroke="#c6a65e" stroke-width="3"/></svg><small>THE FOOL</small></div>';
+  const shapes={
+    chip:'<rect x="50" y="50" width="100" height="100" rx="15"/><rect x="73" y="73" width="54" height="54" rx="7"/><path d="m109 65-30 40h22l-11 31 33-43h-23Z"/>',
+    eye:'<path d="M15 100Q100 12 185 100 100 188 15 100Z"/><circle cx="100" cy="100" r="36"/><circle cx="100" cy="100" r="13"/>',
+    heart:'<path d="M100 160 32 93Q7 40 54 39q28-1 46 26 18-27 46-26 47 1 22 54Z"/><path d="m100 65-12 29 21 18-9 48"/>',
+    book:'<path d="M20 45q40-20 80 12 40-32 80-12v110q-40-20-80 12-40-32-80-12Z"/><path d="M100 57v110M37 72l44 10M37 95l44 10M37 118l44 10m38-46 44-10m-44 33 44-10m-44 33 44-10"/>',
+    sun:'<circle cx="100" cy="100" r="48"/><path d="m100 13 0 21m0 132v21M13 100h21m132 0h21M38 38l15 15m94 94 15 15M38 162l15-15m94-94 15-15"/>',
+    medal:'<path d="m52 20 24 61h48l24-61M100 35v44"/><circle cx="100" cy="122" r="51"/><path d="M88 99v47m24-47v47"/>',
+    eclipse:'<circle cx="100" cy="100" r="52"/><path d="M102 49q-45 52 0 103M24 70l24 14m104 0 24-14M24 130l24-14m104 0 24 14M100 13v19m0 136v19"/>'
+  };
+  return `<svg class="sigil-art" viewBox="0 0 200 200" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round">${shapes[effect]||shapes.medal}</g></svg>`;
+}
+
 export function setupAchievements(engine){
-  let layer=null,timer=null,worldTimer=null,worldMatchId=null,stopDrill=()=>{},identity='',ready=false,shelfKey='';const seen=new Set(),worldSeen=new Set();
+  let layer=null,timer=null,worldTimer=null,worldActive=false,worldMatchId=null,stopDrill=()=>{},identity='',ready=false,shelfKey='';const seen=new Set(),worldSeen=new Set(),queue=[],noticed=new Set();
   try{for(const id of JSON.parse(localStorage.getItem('cq_awards_seen_v1')||'[]'))if(typeof id==='string')seen.add(id)}catch{}
   const close=()=>{clearTimeout(timer);stopDrill();stopDrill=()=>{};layer?.remove();layer=null;document.body.classList.remove('achievement-playing','achievement-notice')};
-  const clearWorld=()=>{clearTimeout(worldTimer);document.body.classList.remove('map-celebrating')};
+  const clearWorld=()=>{clearTimeout(worldTimer);worldActive=false;document.body.classList.remove('map-celebrating');if(!layer&&queue.length&&!document.hidden)play(...queue.shift())};
   const closeExtras=()=>globalThis.dispatchEvent?.(new CustomEvent('cq:close-extras'));
+  const finish=()=>{close();const next=queue.shift();if(next)play(...next)};
+  const enqueue=(award,preview=false,toastOnly=false)=>{if(document.hidden)return;if(layer||worldActive&&!toastOnly&&!preview){if(queue.length<8&&!queue.some(([a])=>a.id===award.id))queue.push([award,preview,toastOnly])}else play(award,preview,toastOnly)};
   function play(award,preview=false,toastOnly=false){
     if(document.hidden)return;close();
     closeExtras();
+    if(award.achievementId&&award.achievementId!=='sky-breaker'){
+      const effect=['gauntlet','tower','card','chip','eye','heart','book','sun','medal','eclipse'].includes(award.effect)?award.effect:'medal',rarity=['perk','legendary','rare','common'].includes(award.rarity)?award.rarity:'common',compact=toastOnly||rarity==='common'||rarity==='rare';
+      layer=document.createElement('div');layer.className=`collection-cinema collection-${effect} rarity-${rarity}${compact?' collection-compact':''}`;layer.setAttribute('aria-label','Достижение: '+award.title);
+      layer.innerHTML=`<div class="collection-aura" aria-hidden="true"></div><div class="collection-art">${collectionArtwork(effect)}</div><aside class="collection-toast" role="status" aria-live="polite"><small>${preview?'ПРЕДПРОСМОТР':rarity==='perk'?'ПЕРК ОТКРЫТ':rarity==='legendary'?'ЛЕГЕНДАРНОЕ ДОСТИЖЕНИЕ':'ДОСТИЖЕНИЕ ПОЛУЧЕНО'}</small><strong>${escapeHTML(award.title)}</strong><span>${escapeHTML(award.recipientName||'')}</span></aside><button type="button" class="achievement-skip">Закрыть ×</button>`;
+      layer.querySelector('button').addEventListener('click',finish);document.body.append(layer);document.body.classList.add(compact?'achievement-notice':'achievement-playing');timer=setTimeout(finish,compact?3600:5600);return;
+    }
     layer=document.createElement('div');layer.className='achievement-cinema';layer.setAttribute('aria-label','Достижение: '+(award.title||'Ты смог, братец'));
     layer.innerHTML=`<div class="sky-atmosphere" aria-hidden="true"></div><div class="sky-speed-lines" aria-hidden="true">${Array.from({length:10},(_,i)=>`<i style="--line:${i}"></i>`).join('')}</div>${skyFractureMarkup()}<div class="sky-contact" aria-hidden="true"><div class="sky-impact"></div><div class="sky-shockwave"></div><div class="sky-shockwave secondary"></div>${Array.from({length:16},(_,i)=>`<i class="sky-spark" style="--spark:${i};--spark-distance:${65+(i*37)%100}px"></i>`).join('')}</div><div class="sky-drill" aria-hidden="true"><div class="sky-drill-aura"></div><div class="sky-exhaust"><i></i><i></i><i></i></div><canvas class="sky-drill-art"></canvas><svg class="sky-drill-fallback" viewBox="0 0 260 390"><defs><linearGradient id="cq-drill-metal"><stop stop-color="#142f38"/><stop offset=".34" stop-color="#b9bb9c"/><stop offset=".45" stop-color="#f0deb4"/><stop offset=".63" stop-color="#556c66"/><stop offset="1" stop-color="#162f38"/></linearGradient></defs><path fill="url(#cq-drill-metal)" d="m130 22 98 311-17 34H49l-17-34Z"/><path d="m124 47 17 12-27 21 40 20-51 27 65 25-78 32 91 31-103 35 118 33-130 39" fill="none" stroke="#c8b888" stroke-width="12" stroke-linejoin="round"/><path d="M45 341h170" stroke="#6de4bd" stroke-width="5"/></svg></div><aside class="achievement-toast" role="status" aria-live="polite"><span class="achievement-emblem"><svg viewBox="0 0 48 56" aria-hidden="true"><path d="M24 3 42 43 36 51H12L6 43Z" fill="#203c3b" stroke="#d4c18d" stroke-width="1.5"/><path d="m22 10 6 5-11 8 16 6-20 9 25 7" fill="none" stroke="#e8d6a0" stroke-width="3"/><path d="M13 49h22" stroke="#70e5bd" stroke-width="2"/></svg></span><div><small>${preview?'ПРЕДПРОСМОТР · ПРОРЫВ':'ДОСТИЖЕНИЕ ПОЛУЧЕНО'}</small><strong>${escapeHTML(award.title||'Ты смог, братец')}</strong><span>${escapeHTML(preview?'Небо — не предел':award.recipientName||'Путь от кризиса к победе')}</span></div></aside><button class="achievement-skip" type="button">Пропустить анимацию ×</button>`;
-    layer.querySelector('button').addEventListener('click',()=>{close();if(toastOnly)clearWorld()});document.body.append(layer);document.body.classList.add(toastOnly?'achievement-notice':'achievement-playing');
+    layer.querySelector('button').addEventListener('click',()=>{finish();if(toastOnly)clearWorld()});document.body.append(layer);document.body.classList.add(toastOnly?'achievement-notice':'achievement-playing');
     if(toastOnly){layer.classList.add('achievement-toast-only');layer.querySelector('button').textContent='Закрыть уведомление ×'}
-    const animate=toastOnly?null:startAchievementDrill(layer.querySelector('canvas'));stopDrill=animate||(()=>{});if(animate)layer.classList.add('has-drill-mesh');timer=setTimeout(close,7800);
+    const animate=toastOnly?null:startAchievementDrill(layer.querySelector('canvas'));stopDrill=animate||(()=>{});if(animate)layer.classList.add('has-drill-mesh');timer=setTimeout(finish,7800);
   }
   const render=state=>{
     if(!state)return;
     const viewer=state.viewer,current=viewer.player?.pid||(viewer.role==='teacher'?'teacher':'guest');
-    if(current!==identity){identity=current;ready=false;shelfKey='';close();clearWorld();worldSeen.clear()}
-    if(worldMatchId!==state.match?.id){worldMatchId=state.match?.id;close();clearWorld();worldSeen.clear()}
+    if(current!==identity){identity=current;ready=false;shelfKey='';queue.length=0;close();clearWorld();worldSeen.clear();noticed.clear()}
+    if(worldMatchId!==state.match?.id){worldMatchId=state.match?.id;queue.length=0;close();clearWorld();worldSeen.clear();noticed.clear()}
     const active=(state.worldAchievements||[]).filter(a=>a.durationMs-(state.serverTime-a.startedAt)-Math.max(0,Date.now()-(state.clientReceivedAt||Date.now()))>0);
     if(!document.hidden&&active.some(a=>!worldSeen.has(a.id))){
-      for(const a of active)worldSeen.add(a.id);closeExtras();document.body.classList.add('map-celebrating');clearTimeout(worldTimer);
-      const remaining=Math.max(...active.map(a=>a.durationMs-(state.serverTime-a.startedAt)-Math.max(0,Date.now()-(state.clientReceivedAt||Date.now()))));worldTimer=setTimeout(clearWorld,remaining);
-      globalThis.dispatchEvent?.(new CustomEvent('cq:world-achievement',{detail:{teamIds:active.map(a=>a.teamId)}}));
+      const freshWorld=active.filter(a=>!worldSeen.has(a.id));for(const a of active)worldSeen.add(a.id);
+      const drills=freshWorld.filter(a=>a.achievementId==='sky-breaker');
+      if(drills.length){closeExtras();worldActive=true;document.body.classList.add('map-celebrating');clearTimeout(worldTimer);const remaining=Math.max(...drills.map(a=>a.durationMs-(state.serverTime-a.startedAt)-Math.max(0,Date.now()-(state.clientReceivedAt||Date.now()))));worldTimer=setTimeout(clearWorld,remaining);globalThis.dispatchEvent?.(new CustomEvent('cq:world-achievement',{detail:{teamIds:drills.map(a=>a.teamId)}}));}
+      for(const a of freshWorld.filter(a=>a.achievementId!=='sky-breaker'))enqueue({...a,recipientName:a.teamName});
     }
-    document.querySelectorAll('[data-achievement-rules]').forEach(node=>node.textContent=ACHIEVEMENTS[0].description);
-    const progress=state.achievementProgress;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;node.textContent=progress?`${progress.hitCrisis?'✓':'○'} Экономика опускалась ниже 30% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} Восстановлена ответами до 100% · ${state.match?.finishedAt!=null&&rank===1?'✓':'○'} Первое место при завершении сессии. Текущее место: ${rank||'—'}.`:''});
-    const awards=engine.mode==='teacher'?(state.match?.awards||[]):state.achievements||[],key=JSON.stringify([awards,state.match?.id]);
+    document.querySelectorAll('[data-achievement-rules]').forEach(node=>node.textContent=engine.mode==='teacher'?'Обычные, редкие и легендарные награды. Секретные условия доступны в пульте ниже.':'Коллекция сохраняется после выхода в этом браузере. Шесть разных легендарных наград открывают перк. Секретные награды появляются после получения.');
+    const progress=state.achievementProgress,counters=state.achievementCounters;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;node.textContent=state.settings?.mode==='solo'&&counters?`Быстрых ответов: ${Math.min(5,counters.fast)}/5 · быстрая верная серия: ${Math.min(3,counters.fastRun)}/3.`:progress?`«Ты смог, братец»: ${progress.hitCrisis?'✓':'○'} экономика ниже 30% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} восстановлена до 100% · ${state.match?.finishedAt!=null&&rank===1?'✓':'○'} первое место в конце. Текущее место: ${rank||'—'}.`:''});
+    const awards=engine.mode==='teacher'?(state.match?.awards||[]):state.achievements||[],catalogue=state.achievementCatalog||ACHIEVEMENTS,collection=state.collection,key=JSON.stringify([awards,catalogue,collection,state.match?.id]);
     if(key!==shelfKey){shelfKey=key;
       document.querySelectorAll('[data-achievement-count]').forEach(node=>node.textContent=String(awards.length));
-      document.querySelectorAll('[data-achievement-shelf]').forEach(node=>{node.innerHTML=awards.length?awards.slice(-20).reverse().map(a=>`<button type="button" class="achievement-card" data-award-replay="${escapeHTML(a.id)}"><span class="achievement-emblem">⟐</span><span><strong>${escapeHTML(a.title)}</strong><small>${escapeHTML(a.recipientName)} · ${a.source==='manual'?'Специальное вручение':'Камбэк · '+(a.reason==='milestone'?'первый до 1000':'итоговый рейтинг')+''}</small></span><span class="achievement-replay">▶</span></button>`).join(''):'<div class="achievement-empty"><span>⟐</span><div><strong>Место для прорыва</strong><p>'+escapeHTML(ACHIEVEMENTS[0].description)+'</p></div></div>'});
+      document.querySelectorAll('[data-collection-stones]').forEach(node=>{node.hidden=!collection;node.innerHTML=collection?`<div class="collection-stones" aria-label="Легендарных достижений: ${collection.stones.length} из 6">${Object.entries(stoneColors).map(([stone,color])=>`<i style="--stone:${color}" class="${collection.stones.includes(stone)?'lit':''}" title="${collection.stones.includes(stone)?'Камень получен':'Камень ещё не открыт'}"></i>`).join('')}</div><p class="small-note ${collection.unlocked?'violet':'mut'}">${collection.unlocked?(collection.active?'∞ Личный перк активен · предел очков снят':'∞ Перк открыт · преподаватель отключил перки'):`${collection.stones.length} / 6 легендарных достижений`}</p>`:''});
+      const owned=new Set(awards.map(a=>a.achievementId)),locked=engine.mode==='teacher'?[]:catalogue.filter(a=>!owned.has(a.id)&&!a.secret);
+      document.querySelectorAll('[data-achievement-shelf]').forEach(node=>{node.innerHTML=awards.slice(-30).reverse().map(a=>`<button type="button" class="achievement-card rarity-${['common','rare','legendary','perk'].includes(a.rarity)?a.rarity:'legendary'}" data-award-replay="${escapeHTML(a.id)}"><span class="achievement-emblem">${escapeHTML(a.icon||'⟐')}</span><span><strong>${escapeHTML(a.title)}</strong><small>${escapeHTML(a.recipientName)} · ${a.source==='manual'?'Специальное вручение':a.rarity==='perk'?'Перк · полная коллекция':'Получено в игре'}</small><small>${escapeHTML(a.description||'')}</small></span><span class="achievement-replay">▶</span></button>`).join('')+locked.map(a=>`<article class="achievement-card achievement-locked"><span class="achievement-emblem">${escapeHTML(a.icon||'⟐')}</span><span><strong>${escapeHTML(a.title)}</strong><small>${escapeHTML(a.description)}</small></span></article>`).join('')||'<p class="small-note mut">В этом матче ещё нет наград.</p>'});
     }
     const fresh=awards.filter(award=>!seen.has(award.id));for(const award of awards)seen.add(award.id);
     try{localStorage.setItem('cq_awards_seen_v1',JSON.stringify([...seen].slice(-1000)))}catch{}
-    if(ready&&fresh.length)play(fresh[fresh.length-1],false,true);ready=current!=='guest';
+    if(ready)for(const award of fresh)if(award.achievementId==='sky-breaker'||!worldSeen.has(award.id))enqueue(award,false,award.achievementId==='sky-breaker');ready=current!=='guest';
+    for(const notice of state.achievementNotices||[])if(!noticed.has(notice.id)){noticed.add(notice.id);enqueue({id:notice.id,achievementId:'notice',title:notice.text,rarity:'common',effect:'eye',recipientName:'Полученное достижение остаётся в коллекции.'},false,true)}
   };
-  const preview=()=>play({title:'Ты смог, братец'},true),replay=event=>{const id=event.target.closest('[data-award-replay]')?.dataset.awardReplay;if(!id)return;const state=engine.state,award=(engine.mode==='teacher'?state?.match?.awards:state?.achievements)?.find(a=>a.id===id);if(award)play(award)};
-  const keydown=event=>{if(event.key==='Escape')close()},visibility=()=>{if(document.hidden){close();clearWorld()}};
+  const preview=data=>{queue.length=0;play({...data,title:data?.title||'Ты смог, братец'},true)},replay=event=>{const id=event.target.closest('[data-award-replay]')?.dataset.awardReplay;if(!id)return;const state=engine.state,award=(engine.mode==='teacher'?state?.match?.awards:state?.achievements)?.find(a=>a.id===id);if(award){queue.length=0;play(award)}};
+  const keydown=event=>{if(event.key==='Escape'){queue.length=0;close()}},visibility=()=>{if(document.hidden){queue.length=0;close();clearWorld()}};
   document.addEventListener('click',replay);document.addEventListener('keydown',keydown);document.addEventListener('visibilitychange',visibility);engine.socket.on('achievement:preview',preview);
   const off=engine.onChange(render),tools=document.getElementById('achievement-tools'),stopTools=tools?setupAchievementControls(engine,tools):null;
-  return()=>{close();clearWorld();off();stopTools?.();document.removeEventListener('click',replay);document.removeEventListener('keydown',keydown);document.removeEventListener('visibilitychange',visibility);engine.socket.off('achievement:preview',preview)};
+  return()=>{queue.length=0;close();clearWorld();off();stopTools?.();document.removeEventListener('click',replay);document.removeEventListener('keydown',keydown);document.removeEventListener('visibilitychange',visibility);engine.socket.off('achievement:preview',preview)};
 }
 
 export class GameEngine {
@@ -234,6 +271,10 @@ export class GameEngine {
       Object.defineProperty(state,'clientReceivedAt',{value:Date.now(),enumerable:false});
       if(mode==='student')try{if(state.viewer.player)localStorage.setItem('cq_session_v3',JSON.stringify({playerId:state.viewer.player.pid,teamId:state.viewer.player.regionId,mode:state.settings.mode||'team',name:state.viewer.player.name}));else localStorage.removeItem('cq_session_v3');localStorage.removeItem('isDevTelemetry')}catch{}
       if(changed){this.chatMeta=null;this.chatView=null;this.emitChat()}
+      if(mode==='student'&&this.cookieSessions&&state.viewer.player&&this.httpProof&&this.collectionConnection!==this.socket.id&&!this.collectionPending){
+        const connection=this.socket.id;this.collectionPending=true;
+        this.httpRequest('/api/collection',{}).then(()=>{this.collectionConnection=connection}).catch(()=>{}).finally(()=>{this.collectionPending=false});
+      }
       this.offset = state.serverTime - Date.now();
       if(!this.legacyToken){if(mode==='student'&&!state.viewer.player){setToken('cq_player_token_v2',null);saveCreatorToken(null)}if(mode==='teacher'&&state.viewer.role!=='teacher')setToken('cq_teacher_token_v2',null)}
       this.emit();
@@ -311,6 +352,7 @@ export class GameEngine {
   revokeAdminInvite(id){return this.request('revokeAdminInvite',{id})}
   rotateAccessKey(){return this.request('rotateAccessKey')}
   finishMatch(){return this.request('finishMatch')}
+  setPerksEnabled(enabled){return this.request('setPerksEnabled',{enabled})}
   grantAchievement(achievementId,scope,targetId){return this.request('grantAchievement',{achievementId,scope,targetId})}
   previewAchievement(achievementId='sky-breaker'){return this.request('previewAchievement',{achievementId})}
   castVote(optionIdx) { return this.request("castVote", { optionIdx, roundId: this.state?.round?.id }); }

@@ -93,8 +93,8 @@ function labelSprite() {
   sprite.center.set(.5,0);
   return { sprite, canvas, texture, key: "" };
 }
-function paintLabel(label, meta, points, economy) {
-  const key = `${meta.name}:${points}:${economy}`; if (label.key === key) return; label.key = key;
+function paintLabel(label, meta, points, economy, scoreLimit = RESOURCE_CAP) {
+  const key = `${meta.name}:${points}:${economy}:${scoreLimit}`; if (label.key === key) return; label.key = key;
   const ctx = label.canvas.getContext("2d"), done = points >= RESOURCE_CAP, crisis = economy < CRISIS_THRESHOLD;
   const color = crisis ? "#ff7468" : done ? "#ffe2a1" : meta.glow;
   ctx.clearRect(0, 0, 768, 192); ctx.fillStyle = "rgba(5,18,25,.93)"; ctx.strokeStyle = color; ctx.lineWidth = 2;
@@ -102,8 +102,8 @@ function paintLabel(label, meta, points, economy) {
   ctx.fillStyle = color; ctx.font = "700 42px sans-serif"; ctx.textAlign = "center";
   ctx.fillText(meta.name + (done ? "  ✦" : ""), 384, 65);
   ctx.fillStyle = "#d8e8e7"; ctx.font = "25px sans-serif";
-  ctx.fillText(`${points} / 1000   ·   ${economy}%   ·   ${developmentFor(points).name}`, 384, 113);
-  ctx.fillStyle = "#203c43"; ctx.fillRect(40, 143, 688, 7); ctx.fillStyle = color; ctx.fillRect(40, 143, 688 * points / RESOURCE_CAP, 7);
+  ctx.fillText(`${points} / ${scoreLimit===null?'∞':'1000'}   ·   ${economy}%   ·   ${developmentFor(points).name}`, 384, 113);
+  ctx.fillStyle = "#203c43"; ctx.fillRect(40, 143, 688, 7); ctx.fillStyle = color; ctx.fillRect(40, 143, 688 * Math.min(points,RESOURCE_CAP) / RESOURCE_CAP, 7);
   label.texture.needsUpdate = true;
 }
 
@@ -356,6 +356,7 @@ export function createScene(canvas, opts = {}) {
     if(worldMatch!==state.match?.id){clearWorld();seenWorld.clear();worldMatch=state.match?.id}
     if(state.viewer&&!state.viewer.player&&!['teacher','creator'].includes(state.viewer.role)){clearWorld();return}
     let created=false;for(const award of state.worldAchievements||[]){
+      if(award.achievementId!=='sky-breaker')continue;
       if(seenWorld.has(award.id))continue;seenWorld.add(award.id);if(seenWorld.size>1000)seenWorld.delete(seenWorld.values().next().value);
       const elapsed=Math.max(0,(state.serverTime||Date.now())-award.startedAt+Math.max(0,Date.now()-(state.clientReceivedAt||Date.now())));if(elapsed>=7800)continue;
       const team=state.regions.find(t=>t.id===award.teamId),base=team&&metadataFor(team).baseRegionId,region=regions.find(r=>r.meta.id===base);if(!region)continue;
@@ -409,7 +410,7 @@ export function createScene(canvas, opts = {}) {
   let stateKey='';
   function update(state, selectedRegionId) {
     syncWorldAchievements(state);
-    latestState=state;if(selectedRegionId!==lastFocusId){mapPreview=selectedRegionId||null;lastFocusId=selectedRegionId}const previewId=mapPreview,key=JSON.stringify([previewId,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.cityId,r.points,r.economy,r.occupied??r.members.length])]);if(key===stateKey)return;stateKey=key;
+    latestState=state;if(selectedRegionId!==lastFocusId){mapPreview=selectedRegionId||null;lastFocusId=selectedRegionId}const previewId=mapPreview,key=JSON.stringify([previewId,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.cityId,r.points,r.economy,r.scoreLimit,r.occupied??r.members.length])]);if(key===stateKey)return;stateKey=key;
     const cityOptions=state.regions.filter(t=>t.cityId).map(t=>`<option value="${t.id}">${String(t.name).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</option>`).join('');if(regionSelect.dataset?.cities!==cityOptions){const value=regionSelect.value;regionSelect.innerHTML='<option value="">Найти регион…</option>'+REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')+(cityOptions?'<optgroup label="Команды городов · территория области">'+cityOptions+'</optgroup>':'');if(regionSelect.dataset)regionSelect.dataset.cities=cityOptions;regionSelect.value=value;regionSelect.title='Города команд показываются на территории своей области.';}
     const selectedTeam = state.regions.find(t=>t.id===previewId);
     const selectedBase = selectedTeam ? metadataFor(selectedTeam).baseRegionId : null;
@@ -425,7 +426,7 @@ export function createScene(canvas, opts = {}) {
       for (const border of region.borders) { border.material.color.set(crisis ? 0xff655b : region.points === RESOURCE_CAP ? 0xffdf94 : region.meta.glow); border.material.opacity = region.meta.id === selectedBase || crisis || region.points === RESOURCE_CAP ? .95 : .5; }
       region.victoryRing.visible = region.points === RESOURCE_CAP;
       region.hasTeams = state.regions.some(t=>metadataFor(t).baseRegionId===r.id);
-      paintLabel(region.label, selectedBase===r.id?{...region.meta,name:selectedTeam.name}:region.meta, region.points, r.economy);
+      paintLabel(region.label, selectedBase===r.id?{...region.meta,name:selectedTeam.name}:region.meta, r.points, r.economy,r.scoreLimit);
     }
     wake(1500);
   }

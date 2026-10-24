@@ -8,6 +8,7 @@ import {readFile} from 'node:fs/promises';
 import { Server } from "socket.io";
 import { GameLogic, GameError, hashToken } from "./game-logic.js";
 import { createStore } from "./storage.js";
+import {awardDefinition,PROFILE_RETENTION_MS} from "./achievement-system.js";
 import { analyzeSyllabus, generateSyllabusQuestions } from "./syllabus-engine.js";
 import { CREATOR_TEAM_ID, CREATOR_NAMES, PRIVACY_VERSION } from "./game-config.js";
 import { ChatEngine, chatIdentity } from "./chat-engine.js";
@@ -182,6 +183,24 @@ export async function createGameServer(options = {}) {
       });broadcast();res.json({ok:true});
     }catch(error){res.status(error instanceof GameError?400:503).json({ok:false,error:error instanceof GameError?error.message:'Сессия не сохранена. Повторите вход.',code:error.code||'STORAGE_ERROR'})}
   });
+  app.post('/api/collection',httpSocket,express.json({limit:'1kb'}),async(req,res)=>{
+    try{
+      const socket=req.gameSocket,jar=cookies(req),playerToken=jar[cookieName('player')];
+      if(typeof playerToken!=='string'||hashToken(playerToken)!==socket.data.playerHash)throw new GameError('Войдите в игру заново.','SESSION_EXPIRED');
+      if(Date.now()-(socket.data.collectionRequestAt||0)<2000){res.setHeader('Retry-After','2');return res.status(429).json({ok:false,error:'Подождите две секунды.',code:'RATE_LIMIT'})}
+      socket.data.collectionRequestAt=Date.now();
+      let collectionToken;
+      await enqueue(async()=>{
+        await maintainIdleSessions();const before=structuredClone(game.state);
+        try{
+          const player=game.findPlayer(hashToken(playerToken));if(!player||!playerActive(player))throw new GameError('Сессия завершена.','SESSION_EXPIRED');
+          collectionToken=game.collectionCookie(player.pid,jar[cookieName('collection')]);
+          await store.save(game.state);publishedGame=new GameLogic(game.state);socket.data.collectionHash=hashToken(collectionToken);
+        }catch(error){game=new GameLogic(before);throw error}
+      });
+      cookie(res,'collection',collectionToken,PROFILE_RETENTION_MS);broadcast();res.json({ok:true});
+    }catch(error){res.status(error instanceof GameError?403:503).json({ok:false,error:error instanceof GameError?error.message:'Коллекция временно недоступна. Повторите после подключения.',code:error.code||'STORAGE_ERROR'})}
+  });
   app.post('/api/bulk/:action',httpSocket,(req,res,next)=>{const socket=req.gameSocket,jar=cookies(req),surface=req.headers['x-cq-surface'],identity=actor(socket),player=publishedGame.findPlayer(socket.data.playerHash);const permitted=surface==='teacher'&&validTeacherToken(jar[cookieName('teacher')])&&equal(jar[cookieName('teacher')],socket.data.teacherToken)||typeof jar[cookieName('player')]==='string'&&hashToken(jar[cookieName('player')])===socket.data.playerHash;const authorized=['teacher','creator'].includes(identity.role)||identity.role==='delegate'&&publishedGame.adminCan(player?.pid,req.params.action);if(!bulkActions.has(req.params.action)||!permitted||!authorized)return res.status(403).json({ok:false,error:'Нужна действующая административная сессия.',code:'FORBIDDEN'});next()},express.json({limit:'8mb'}),(req,res)=>{const action=req.gameSocket.data.bulkHandlers?.get(req.params.action);if(!action)return res.status(400).json({ok:false,error:'Действие недоступно.'});action(req.body,value=>res.json(value))});
   app.use((error,_req,res,next)=>{if(res.headersSent)return next(error);if(error.type==='entity.too.large')return res.status(413).json({ok:false,error:'Файл или запрос слишком большой.',code:'PAYLOAD_TOO_LARGE'});if(error.type==='entity.parse.failed')return res.status(400).json({ok:false,error:'Некорректный JSON запроса.',code:'INVALID_ACTION'});console.error('HTTP запрос не выполнен:',error.name);res.status(500).json({ok:false,error:'Сервер не обработал запрос.',code:'SERVER_ERROR'})});
   app.use((_req,res)=>res.status(404).type('text').send('Страница не найдена.'));
@@ -238,6 +257,7 @@ export async function createGameServer(options = {}) {
     if(legacy){if(validTeacherToken(auth.teacherToken))teacherToken=auth.teacherToken;if(typeof auth.playerToken==='string'&&auth.playerToken.length<=200&&publishedGame.findPlayer(hashToken(auth.playerToken)))playerToken=auth.playerToken;socket.data.refreshLegacy=validTeacherToken(teacherToken)||!!(playerToken&&publishedGame.findPlayer(hashToken(playerToken)))}
     socket.data.teacherToken=validTeacherToken(teacherToken)?teacherToken:null;
     socket.data.playerHash=typeof playerToken==='string'&&playerToken.length<=200?hashToken(playerToken):null;
+    const collectionToken=jar[cookieName('collection')];socket.data.collectionHash=typeof collectionToken==='string'&&collectionToken.length<=200?hashToken(collectionToken):null;
     next();
   });
 
@@ -286,7 +306,7 @@ export async function createGameServer(options = {}) {
             const oldLogContext=game.logContext;
             game.logContext=['teacher','creator','delegate'].includes(identity.role)&&!['startRound','resolveRound','endRound','finishMatch','castVote','confirmVote','cancelVote','teamSubmit','voteLeader','chatSend','chatSubscribe','offerTrade','settleTrade'].includes(name)?'admin':null;
             try{result = await fn(data, player)}finally{game.logContext=oldLogContext}
-            if(result?.playerToken&&result.player)game.state.accessControl.activity.players[result.player.pid]=sessionNow();
+            if(result?.playerToken&&result.player){game.ensureCollection(result.player.pid,socket.data.collectionHash);game.state.accessControl.activity.players[result.player.pid]=sessionNow();}
             if(result?.teacherToken){const payload=JSON.parse(Buffer.from(result.teacherToken.split('.')[0],'base64url').toString());game.state.accessControl.activity.teachers[hashToken(result.teacherToken)]={at:sessionNow(),expiresAt:payload.expires};game.touch()}
             for(const member of before.regions.flatMap(t=>t.members).filter(m=>m.creatorId)){
               const current=game.findPlayer(member.tokenHash);
@@ -342,7 +362,8 @@ export async function createGameServer(options = {}) {
     handle('cancelVote','student',(data,p)=>game.cancelVote(p.regionId,p.pid,data.roundId));
     handle('setGameMode','teacher',data=>game.setGameMode(data.mode));
     handle('renameSelf','creator',(data,p)=>game.renamePlayer(p.pid,data.name));
-    handle('adjustCapital','teacher',data=>{const member=game.state.regions.flatMap(t=>t.members).find(m=>m.pid===data.pid);if(!member||!Number.isSafeInteger(data.delta)||Math.abs(data.delta)>1000)throw new GameError('Некорректное изменение рейтинга.');member.capital=Math.min(1000,Math.max(0,(member.capital||0)+data.delta));game.touch()});
+    handle('adjustCapital','teacher',data=>game.adjustCapital(data.pid,data.delta));
+    handle('setPerksEnabled','teacher',data=>game.setPerksEnabled(data.enabled));
     handle("teamSubmit", "student", (data, p) => game.teamSubmit(p.regionId, p.pid, data.roundId));
     handle("freeSlot", "teacher", data => {
       const target=game.member(data.regionId,data.pid);
@@ -407,7 +428,7 @@ export async function createGameServer(options = {}) {
     handle("endRound", "teacher", () => game.endRound());
     handle('finishMatch','teacher',()=>game.finishMatch());
     handle('grantAchievement','teacher',data=>game.grantAchievement(data.achievementId,data.scope,data.targetId));
-    handle('previewAchievement','teacher',data=>{if(!['sky-breaker'].includes(data.achievementId))throw new GameError('Неизвестное достижение.');return {achievementId:data.achievementId}},result=>socket.emit('achievement:preview',result));
+    handle('previewAchievement','teacher',data=>{const definition=awardDefinition(data.achievementId);if(!definition)throw new GameError('Неизвестное достижение.');return {...definition,achievementId:data.achievementId}},result=>socket.emit('achievement:preview',result));
     handle("adjustPoints", "teacher", data => game.adjustPoints(data.regionId, data.delta));
     handle("adjustEconomy", "teacher", data => game.adjustEconomy(data.regionId, data.delta));
     handle("addCustomQuestion", "teacher", data => game.addCustomQuestion(data.text, data.options, data.correctIdx, data.points));

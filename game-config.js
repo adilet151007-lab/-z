@@ -1,6 +1,6 @@
 // Только публичные настройки. Банк правильных ответов остаётся на сервере.
 export const SEAT_LIMIT = 4;
-export const PRIVACY_VERSION = '2026-10-23';
+export const PRIVACY_VERSION = '2026-10-24';
 export const DEFAULT_SUBJECT = 'Мәдениеттану';
 export const DEFAULT_BRANDING = {university:'Учебный проект',title:'Мәдениеттану 3D',subject:DEFAULT_SUBJECT,subjects:[DEFAULT_SUBJECT],accent:'#3FE0D0',gold:'#F3C25D',logo:'',operator:'',privacyContact:''};
 export const MAX_TEAMS = 50;
@@ -114,6 +114,6 @@ export function mapRegionsFor(teams, focusedTeamId = null) {
     const selected = focused && metadataFor(focused).baseRegionId === base.id ? [focused] : peers;
     const occupied = selected.filter(t => (t.occupied??t.members.length)>0||t.members.length>0);
     const source = occupied.length ? occupied : selected;
-    return { id: base.id, points: source.length ? Math.round(source.reduce((sum, t) => sum + t.points, 0) / source.length) : 0, economy: source.length ? Math.round(source.reduce((sum, t) => sum + t.economy, 0) / source.length) : 100 };
+    return { id: base.id,scoreLimit:source.some(t=>t.scoreLimit===null)?null:RESOURCE_CAP, points: source.length ? Math.round(source.reduce((sum, t) => sum + t.points, 0) / source.length) : 0, economy: source.length ? Math.round(source.reduce((sum, t) => sum + t.economy, 0) / source.length) : 100 };
   });
 }
