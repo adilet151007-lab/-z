@@ -422,15 +422,15 @@ export function createScene(canvas, opts = {}) {
       if(Object.hasOwn(ANIMATION_MODULES,award.achievementId)){
         const group=new THREE.Group();region.group.add(group);let cancelled=false,animation=null,normalizer=null;
         const started=performance.now()-elapsed;
-        const effect={group,started,update(seconds){if(seconds*1000>=duration)return false;if(animation){animation.update(seconds,1/30);group.visible=true;}return true},dispose(){cancelled=true;animation?.dispose?.();if(animation)disposeAnimationScene(animation.scene);group.removeFromParent()}};
+        const effect={group,started,update(seconds){if(seconds*1000>=duration)return false;if(animation){try{animation.update(seconds,1/30);group.visible=true;}catch(error){console.error('Ошибка анимации на карте:',error);return false;}}return true},dispose(){cancelled=true;animation?.dispose?.();if(animation)disposeAnimationScene(animation.scene);group.removeFromParent()}};
         worldEffects.set(award.id,effect);newEffects.push({region,award});wake(duration-elapsed);
         import(ANIMATION_MODULES[award.achievementId]).then(module=>{
           if(cancelled||disposed)return;
-          animation=module.createAnimation({THREE,reducedMotion:window.matchMedia('(prefers-reduced-motion: reduce)').matches,lowPower:true});
+          animation=module.createAnimation({THREE,reducedMotion:window.matchMedia('(prefers-reduced-motion: reduce)').matches,lowPower:true,mapMode:true});
           animation.update(Math.min(6.8,duration/1000),0);
-          const box=new THREE.Box3().setFromObject(animation.scene),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
+          const box=(animation.mapBounds||new THREE.Box3().setFromObject(animation.scene)),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
           const scale=12/Math.max(size.x,size.y,size.z,1);normalizer=new THREE.Group();normalizer.scale.setScalar(scale);normalizer.position.set(-center.x*scale,.8-box.min.y*scale,-center.z*scale);
-          normalizer.add(animation.scene);group.add(normalizer);animation.scene.background=null;animation.scene.fog=null;
+          normalizer.add(animation.scene);group.add(normalizer);animation.scene.background=null;
           animation.update(Math.max(0,(performance.now()-started)/1000),0);wake(duration);
         }).catch(error=>{console.error('Не удалось загрузить сцену достижения:',error);effect.dispose();worldEffects.delete(award.id)});
         continue;
@@ -440,8 +440,8 @@ export function createScene(canvas, opts = {}) {
       region.group.add(effect.group);worldEffects.set(award.id,effect);newEffects.push({region,award});wake(duration-elapsed);
     }
     if(newEffects.length){selected=null;mapPreview=null;regionSelect.value='';const distance=Math.max(44,44/(Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect));
-      if(newEffects.length===1&&newEffects[0].award.achievementId!=='sky-breaker'){
-        const region=newEffects[0].region;moveCamera(new THREE.Vector3(region.data.city[0],region.group.position.y+4,region.data.city[1]),42);
+      if(newEffects.length===1){
+        const region=newEffects[0].region;moveCamera(new THREE.Vector3(region.data.city[0],region.group.position.y+6,region.data.city[1]),Math.max(18,14/Math.max(.45,camera.aspect)));
       }else moveCamera(new THREE.Vector3(0,4,0),Math.min(138,distance));
     }
   }

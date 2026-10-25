@@ -1,6 +1,6 @@
 export const durationMs=8000;
 export const captionAtMs=6600;
-export function createAnimation({THREE:T, reducedMotion=false, lowPower=false}={}){
+export function createAnimation({THREE:T, reducedMotion=false, lowPower=false,mapMode=false}={}){
   const DUR=8, cl=(x,a,b)=>Math.min(b,Math.max(a,x));
   const ss=(a,b,x)=>{x=cl((x-a)/(b-a),0,1);return x*x*(3-2*x)};
   let seed=7;const rnd=()=>{seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296};
@@ -156,6 +156,7 @@ export function createAnimation({THREE:T, reducedMotion=false, lowPower=false}={
     cp[i*3]=x;cp[i*3+1]=Math.hypot(x,z)<18?-50:.7;cp[i*3+2]=z}
    cg.attributes.position.needsUpdate=true;
   }
+  if(mapMode){for(const object of [sky,stars,ground,city,cars,...clouds.map(c=>c.s)])object.visible=false;}
   update(0,0);
-  return {scene,camera,update,resize,setPointer};
+  return {scene,camera,update,resize,setPointer,mapBounds:mapMode?new T.Box3(new T.Vector3(-18,0,-18),new T.Vector3(18,160,18)):null};
 }
