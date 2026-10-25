@@ -62,6 +62,7 @@ test('релиз: адресный эффект получает только в
 
 test('релиз: ограничения помех индивидуальны для делегатов, Адилет не получает cooldown',async t=>{
  const f=await fixture(t),owner=await f.join(config.creatorCodes.adilet),a=await f.join('Делегат А'),b=await f.join('Делегат Б');
+ await f.teacher();
  for(const p of [a,b])await cmd(owner.socket,'grantAdmin',{pid:p.player.pid,permissions:{effects:true},effectDuration:700,unlimitedEffects:false});
  assert.equal((await cmd(a.socket,'presentationEffect')).duration,700);assert.equal((await cmd(a.socket,'presentationEffect')).code,'RATE_LIMIT');assert.equal((await cmd(b.socket,'presentationEffect')).ok,true);
  assert.equal((await cmd(owner.socket,'presentationEffect')).ok,true);assert.equal((await cmd(owner.socket,'presentationEffect')).ok,true);

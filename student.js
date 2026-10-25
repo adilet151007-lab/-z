@@ -43,7 +43,7 @@ function renderRegistration(state) {
   const key=JSON.stringify([state.settings.mode,state.regions,engine.connected,joining,selectedArea,$('name-input').value,$('team-search').value]);
   if(key===registrationKey)return;registrationKey=key;
   const solo=state.settings.mode==='solo';
-  const code=$('name-input').value.trim().split(/\s/,1)[0],tokenCandidate=code.length===26||code.startsWith('CQO-'),invite=code.startsWith('CQI-');
+  const code=$('name-input').value.trim().split(/\s/,1)[0],tokenCandidate=code.length===26||code.startsWith('CQO-'),invite=/^(CQI|CQL)-/.test(code);
   $('join-session').hidden=!solo&&!invite;$('join-session').textContent=invite?'Продолжить вход по приглашению':'Присоединиться';$('join-session').disabled=!engine.connected||joining;$('region-grid').hidden=solo;$('area-back').hidden=solo||!selectedArea;
   $('registration-instruction').textContent=solo?'Жеке сайыс · введите имя и присоединитесь.':selectedArea?'Выберите команду области или её города.':'Шаг 1 · выберите область. Города находятся внутри неё.';
   if(solo){$('team-search').hidden=true;$('registration-capacity').textContent=`${state.regions.reduce((n,t)=>n+(t.occupied??t.members.length),0)} участников · личный рейтинг`;$('join-session').disabled=!engine.connected||joining;return}
@@ -66,7 +66,7 @@ $('access-details-form').addEventListener('submit',async e=>{e.preventDefault();
 async function join(regionId,detailsConfirmed=false) {
   if(joining||!engine.connected)return;
   if(!$('privacy-consent').checked){$('reg-error').textContent='Подтвердите согласие на обработку данных перед входом.';$('privacy-consent').focus();return;}
-  const value=$('name-input').value.trim(),code=value.split(/\s/,1)[0];if(code.startsWith('CQI-')&&!detailsConfirmed&&(!value.slice(code.length).trim()||engine.state.settings.mode!=='solo'&&!regionId)){openAccessDetails(regionId);return}
+  const value=$('name-input').value.trim(),code=value.split(/\s/,1)[0];if(/^(CQI|CQL)-/.test(code)&&!detailsConfirmed&&(!value.slice(code.length).trim()||engine.state.settings.mode!=='solo'&&!regionId)){openAccessDetails(regionId);return}
   joining=true;$("reg-error").textContent="Подключение…";renderRegistration(engine.state);
   try{await engine.joinTeam(regionId,$("name-input").value.trim(),true);$("name-input").value="";$("reg-error").textContent="";$('access-details').close();pendingInvite=''}
   catch(error){$("reg-error").textContent=error.message;if($('access-details').open)$('access-error').textContent=error.message}

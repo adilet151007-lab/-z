@@ -15,6 +15,7 @@ function ensure(condition, message, code) {
 export const hashToken = token => createHash("sha256").update(String(token)).digest("hex");
 const integer = (value, min, max) => Number.isSafeInteger(value) && value >= min && value <= max;
 const ADMIN_LOG_PATTERN=/^(Системное изменение|Ресурс «|Экономика «|Настройки команды|Вместимость|Установлено команд|Создана команда|Команда «.*удалена|Административный доступ|Делегированный административный|Обновлены оформление|Преподаватель применил|Преподаватель перезапустил|Игра восстановлена|Игра сброшена|В банк добавлен|Вопрос (?:обновлён|удалён)|Добавлено вопросов из силлабуса|Оператор инфраструктуры|Включен[аы] |Назначен лидер|Формат:|Активный вопрос заменён|.*: перенос из «|.*: имя исправлено на «|.*: место в команде освобождено|.*вошёл в команду создателей|Автовыход после.*сессий преподавателя)/;
+const LOCAL_ADMIN_ACTIONS = new Set(['renameSelf','exportSummary','freeSlot','movePlayer','renamePlayer','updatePlayer','startRound','switchQuestion','pauseRound','resetTimer','resolveRound','endRound','adjustPoints','adjustEconomy','adjustCapital']);
 const cleanText = (value, min, max, label,stored=false) => {
   ensure(typeof value === "string", `${label}: ожидается текст.`);
   const text = value.normalize("NFC").trim();
@@ -113,7 +114,7 @@ function restoreSnapshot(raw) {
   state.schemaVersion = 5;
   if(state.exitRequests!==undefined)ensure(Array.isArray(state.exitRequests)&&state.exitRequests.length<=40&&state.exitRequests.every(r=>typeof r.id==='string'&&typeof r.pid==='string'&&typeof r.name==='string'&&Number.isFinite(r.at)&&['pending','accepted','declined'].includes(r.status)), 'Повреждены запросы выхода.');
   if(state.presentationEffectsEnabled!==undefined)ensure(typeof state.presentationEffectsEnabled==='boolean','Повреждена настройка эффектов.');
-  if(state.delegatedAdmins!==undefined)ensure(Array.isArray(state.delegatedAdmins)&&state.delegatedAdmins.length<=MAX_PLAYERS&&state.delegatedAdmins.every(a=>a&&typeof a.pid==='string'&&/^[\w-]{1,80}$/.test(a.pid)&&a.permissions&&typeof a.permissions==='object'&&Object.keys(a.permissions).every(k=>['players','questions','game','effects'].includes(k)&&typeof a.permissions[k]==='boolean')&&Number.isInteger(a.effectDuration)&&a.effectDuration>=100&&a.effectDuration<=60000&&typeof a.unlimitedEffects==='boolean'&&(!a.expiresAt||Number.isSafeInteger(a.expiresAt))),'Повреждены делегированные права.');
+  if(state.delegatedAdmins!==undefined)ensure(Array.isArray(state.delegatedAdmins)&&state.delegatedAdmins.length<=MAX_PLAYERS&&state.delegatedAdmins.every(a=>a&&typeof a.pid==='string'&&/^[\w-]{1,80}$/.test(a.pid)&&(a.tier===undefined||a.tier==='local')&&a.permissions&&typeof a.permissions==='object'&&Object.keys(a.permissions).every(k=>['players','questions','game','effects'].includes(k)&&typeof a.permissions[k]==='boolean')&&Number.isInteger(a.effectDuration)&&a.effectDuration>=100&&a.effectDuration<=60000&&typeof a.unlimitedEffects==='boolean'&&(!a.expiresAt||Number.isSafeInteger(a.expiresAt))),'Повреждены делегированные права.');
   if(state.accessControl!==undefined)ensure(state.accessControl&&typeof state.accessControl==='object'&&state.accessControl.keyOverrides&&Object.keys(state.accessControl.keyOverrides).every(k=>Object.hasOwn(CREATOR_NAMES,k)&&/^[a-f0-9]{64}$/.test(state.accessControl.keyOverrides[k]))&&Array.isArray(state.accessControl.invitations)&&state.accessControl.invitations.length<=MAX_PLAYERS,'Повреждены настройки доступа.');
   ensure(typeof state.settings.perksEnabled==='boolean','Повреждена настройка перков.');
   validateAwardState(state,ensure);
@@ -260,6 +261,7 @@ export class GameLogic {
   adminCan(pid, action) {
     const grant = this.adminGrantFor(pid);
     if (!grant || !this.state.regions.some(t => t.members.some(m => m.pid === pid))) return false;
+    if (grant.tier === 'local') return LOCAL_ADMIN_ACTIONS.has(action);
     if (action === 'renameSelf' || action === 'exportSummary') return Object.values(grant.permissions).some(value => value === true);
     if(action==='resetGame'||action==='grantAchievement')return grant.permissions.game===true&&grant.permissions.players===true;
     if(action==='previewAchievement'||action==='finishMatch')return grant.permissions.game===true;
@@ -268,6 +270,13 @@ export class GameLogic {
       : /^(addCustomQuestion|editQuestion|deleteQuestion|clearQuestions|importQuestions|analyzeSyllabus|generateQuestions)$/.test(action) ? 'questions'
       : /^(startRound|switchQuestion|pauseRound|resetTimer|resolveRound|endRound|adjustPoints|adjustEconomy|adjustCapital|setGameMode|setSessionMode|setTeamRules|setPerksEnabled)$/.test(action) ? 'game' : null;
     return !!(scope && grant.permissions[scope] === true);
+  }
+  joinLocalAdmin(regionId, name) {
+    ensure(typeof name==='string'&&name.trim().length>=2,'Введите своё имя и выберите команду.','NAME_REQUIRED');
+    const result=this.joinTeam(regionId,name);
+    const grant=this.grantAdmin(result.player.pid,{players:true,game:true});
+    grant.tier='local';grant.label='Универсал';
+    return result;
   }
   grantAdmin(pid, permissions = {}, effectDuration = 3000, unlimitedEffects = false, expiresAt = null) {
     const member = this.state.regions.flatMap(t => t.members).find(m => m.pid === pid);
@@ -862,7 +871,7 @@ export class GameLogic {
       revision: this.state.revision, phase: this.state.phase, serverTime: this.now(),
       settings: {...this.state.settings},
       branding:frame.branding,
-      viewer: { role: creator ? "creator" : teacher ? "teacher" : delegated ? "delegate" : player ? "student" : "guest", isCreator:creator,isDevTelemetry:creator||!!delegated,isProAdmin:creator&&player?.creatorId==='adilet',canGrantAdmin:creator&&player?.creatorId==='adilet',canTriggerPresentationEffect:creator&&player?.creatorId==='adilet'||!!(player&&this.adminCan(player.pid,'presentationEffect')),adminGrant:delegated, player: player ? { pid: player.pid, name: player.name, regionId: player.regionId,capital:player.capital??0,streak:player.streak??0,scoreLimit:this.scoreLimit('player',player.pid)>RESOURCE_CAP?null:RESOURCE_CAP } : null },
+      viewer: { role: creator ? "creator" : teacher ? "teacher" : delegated ? "delegate" : player ? "student" : "guest", isCreator:creator,isDevTelemetry:creator||!!delegated,isProAdmin:creator&&player?.creatorId==='adilet',canGrantAdmin:creator&&player?.creatorId==='adilet',canTriggerPresentationEffect:creator&&player?.creatorId==='adilet'||!!(player&&this.adminCan(player.pid,'presentationEffect')),adminGrant:delegated,...(delegated?.tier==='local'?{allowedAdminActions:[...LOCAL_ADMIN_ACTIONS]}:{}), player: player ? { pid: player.pid, name: player.name, regionId: player.regionId,capital:player.capital??0,streak:player.streak??0,scoreLimit:this.scoreLimit('player',player.pid)>RESOURCE_CAP?null:RESOURCE_CAP } : null },
       regions: frame.regions,
       leaderboard:frame.leaderboard,teamLeaderboard:frame.teamLeaderboard,
       questions: teacher || delegated?.permissions.questions ? structuredClone(this.state.questions) : delegated?.permissions.game ? this.state.questions.map(({id,text,options,points,version,topic,subject})=>({id,text,options:[...options],points,version,topic,subject})) : [],
@@ -884,7 +893,7 @@ export class GameLogic {
       const rank=finished?(stats.finishRank??stats.finalRank??null):currentRank;
       view.achievementEligibility={foresight:{modeAllowed:solo,fastRun:view.achievementCounters.fastRun},nearVictory:{finished,rank,gap:finished?(stats.finishGap??(rank===1?0:null)):currentGap,completed:match?.completedQuestionIds.length||0,contestants:rows.length}};
     }
-    if(adminView)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>m.pid)),effectTargetIds:this.state.regions.flatMap(t=>t.members.filter(m=>!m.creatorId&&!this.adminGrantFor(m.pid)&&onlinePlayers.has(m.pid)).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,delegatedAdmins:creator&&player?.creatorId==='adilet'?structuredClone(this.state.delegatedAdmins||[]):[],...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
+    if(adminView)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId||delegated?.tier==='local'&&m.pid!==player.pid&&this.adminGrantFor(m.pid)).map(m=>m.pid)),effectTargetIds:this.state.regions.flatMap(t=>t.members.filter(m=>!m.creatorId&&!this.adminGrantFor(m.pid)&&onlinePlayers.has(m.pid)).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,delegatedAdmins:creator&&player?.creatorId==='adilet'?structuredClone(this.state.delegatedAdmins||[]):[],...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
     if(creator)view.viewer.exitRequest=structuredClone(this.state.exitRequests?.find(r=>r.pid===player.pid&&r.status==='pending')||null);
     if(creator&&player.creatorId==='adilet')view.sessionControl.invitations=this.state.accessControl.invitations.map(({id,permissions,minutes,createdAt,expiresAt,usedAt,revokedAt})=>({id,permissions,minutes,createdAt,expiresAt,usedAt,revokedAt}));
     view.trades=(this.state.trades||[]).filter(t=>(teacher||t.from===player?.regionId||t.to===player?.regionId)&&t.status==='pending'&&t.expiresAt>this.now()).map(t=>({...t}));

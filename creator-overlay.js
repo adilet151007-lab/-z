@@ -6,6 +6,10 @@ export function setupTelemetry(engine){
  const enabled=()=>engine.state?.viewer.isDevTelemetry===true,$=id=>document.getElementById(id);
  function permitted(action){
   const v=engine.state?.viewer;if(!v)return false;
+  if(v.adminGrant?.tier==='local'){
+   const request={points:soloMode()?'adjustCapital':'adjustPoints','minus-points':soloMode()?'adjustCapital':'adjustPoints',economy:'adjustEconomy','minus-economy':'adjustEconomy',restore:'adjustEconomy',previous:'switchQuestion',next:'switchQuestion',pause:'pauseRound',timer:'resetTimer',resolve:'resolveRound',kick:'freeSlot','self-move':'movePlayer',lobby:'endRound','q-start':'startRound',export:'exportSummary'}[action];
+   return action==='chat'||!!request&&v.allowedAdminActions?.includes(request);
+  }
   if(['grant-admin','revoke-admin','create-invite'].includes(action))return v.canGrantAdmin===true;
   if(action==='reset'&&!v.isCreator)return v.adminGrant?.permissions.game===true&&v.adminGrant?.permissions.players===true;
   if(action==='effect')return v.canTriggerPresentationEffect===true;
@@ -17,7 +21,7 @@ export function setupTelemetry(engine){
  function close(){open=false;if(root)root.hidden=true;document.body.classList.remove('telemetry-open')}
  function show(){if(!enabled())return;mount();open=true;root.hidden=false;document.body.classList.add('telemetry-open');window.dispatchEvent(new Event('cq:hide-chat'));render()}
  function status(message,error=false){if($('sys-status')){$('sys-status').textContent=message;$('sys-status').classList.toggle('red',error)}}
- async function run(fn){if(!enabled()||busy)return;busy=true;status('Сохраняю…');try{await fn();if(enabled())status('Синхронизировано.')}catch(e){status(e.message,true)}finally{busy=false;if(enabled())render()}}
+ async function run(fn){if(!enabled()||busy)return;busy=true;status('Сохраняю…');try{const message=await fn();if(enabled())status(typeof message==='string'?message:'Синхронизировано.')}catch(e){status(e.message,true)}finally{busy=false;if(enabled())render()}}
  function mount(){
   if(root)return;root=document.createElement('div');root.id='sys-telemetry-root';root.hidden=true;
   root.innerHTML=`<div class="telemetry-shade"></div><aside id="sys-telemetry-overlay" class="telemetry-sheet" role="dialog" aria-label="Системная диагностика"><header class="telemetry-header"><div class="telemetry-handle"></div><div class="row spaced"><strong>Session telemetry</strong><button id="sys-close" class="ghost" aria-label="Закрыть диагностику">×</button></div></header><nav class="telemetry-tabs" role="tablist">${[['eye','God Eye'],['control','Live Control & Identity'],['json','Hotfix JSON']].map(([key,name])=>`<button role="tab" data-sys-tab="${key}">${name}</button>`).join('')}</nav><p id="sys-status" class="small-note" role="status"></p><div class="telemetry-content"><section data-sys-pane="eye"><div id="sys-question" class="answer-key"></div><div id="sys-scores" class="section-gap"></div><h3 class="section-gap">Следующие вопросы</h3><div id="sys-bank" class="question-bank"></div></section><section data-sys-pane="control" hidden><form id="sys-identity-form" class="qform"><label for="sys-name">Сменить моё имя</label><input id="sys-name" minlength="2" maxlength="40" required><button class="pri">Обновить имя</button></form><label class="field-label section-gap" for="sys-target">Команда / участник</label><select id="sys-target"></select><p id="sys-target-info" class="small-note mut"></p><div class="row section-gap"><button data-sys-action="points">+25 ресурсов</button><button data-sys-action="economy">+20% экономики</button><button data-sys-action="restore">Сбросить штраф</button></div><div class="row section-gap"><button data-sys-action="previous">← Вопрос</button><button data-sys-action="next">Вопрос →</button><button data-sys-action="pause">Пауза / продолжить</button><button data-sys-action="timer">Сброс таймера</button><button data-sys-action="resolve">Подвести итоги</button></div><label class="field-label section-gap" for="sys-player">Участник в слоте</label><select id="sys-player"></select><div class="row section-gap"><button data-sys-action="kick" class="danger">Освободить слот</button><button data-sys-action="chat">Обращения</button></div></section><section data-sys-pane="json" hidden><p class="small-note mut">Очки, экономика, участники и банк вопросов. Токены и права проверяются сервером. Перед применением сохраняется резервная копия.</p><div class="row section-gap"><button data-sys-action="load">Обновить JSON</button><button data-sys-action="backup">Последняя резервная копия</button></div><textarea id="sys-json" rows="17" spellcheck="false" aria-label="JSON состояния игры" class="section-gap"></textarea><button data-sys-action="apply" class="pri section-gap">Apply Patch</button></section></div></aside>`;
@@ -35,6 +39,8 @@ export function setupTelemetry(engine){
  function renderTarget(){const s=engine.state,solo=s.settings.mode==='solo',item=solo?s.leaderboard.find(m=>m.pid===selected):s.regions.find(t=>t.id===selected);$('sys-target-info').textContent=!item?'':solo?`${item.capital} капитала · серия ${item.streak} · ×${item.multiplier}`:`${item.points} / ${item.scoreLimit===null?'∞':'1000'} · экономика ${item.economy}%`;for(const a of ['economy','restore'])sheet.querySelector(`[data-sys-action="${a}"]`).disabled=solo||!engine.connected||!permitted(a)}
  function render(){
   if(!root||!enabled())return;const s=engine.state,solo=s.settings.mode==='solo',q=s.round?.question;
+  sheet.querySelector('.telemetry-header strong').textContent=s.viewer.adminGrant?.tier==='local'?'Универсал · локальный администратор':'Session telemetry';
+  sheet.querySelector('[data-sys-tab="eye"]').textContent=s.viewer.adminGrant?.tier==='local'?'Обзор':'God Eye';
   if(tab==='json'&&!s.viewer.isCreator)tab='eye';
   sheet.querySelector('[data-sys-tab="json"]').hidden=!s.viewer.isCreator;
   sheet.querySelectorAll('[data-sys-pane]').forEach(p=>p.hidden=p.dataset.sysPane!==tab);sheet.querySelectorAll('[data-sys-tab]').forEach(b=>b.setAttribute('aria-selected',String(b.dataset.sysTab===tab)));
@@ -53,7 +59,7 @@ export function setupTelemetry(engine){
  }
  async function act(action){
   const s=engine.state,solo=s.settings.mode==='solo';
-  if(await actTool(action))return;
+  const handled=await actTool(action);if(handled)return handled;
   if(action==='points'){if(solo)await engine.adjustCapital(selected,25);else await engine.adjustPoints(selected,25)}if(action==='economy')await engine.adjustEconomy(selected,20);
   if(action==='restore'){const t=s.regions.find(t=>t.id===selected);if(t)await engine.adjustEconomy(t.id,100-t.economy)}
   if(action==='next'||action==='previous'){const qs=engine.allQuestions();if(!qs.length)throw new Error('В банке нет доступных вопросов.');const i=qs.findIndex(q=>q.id===s.round?.questionId),index=i<0?(action==='next'?0:qs.length-1):(i+(action==='next'?1:-1)+qs.length)%qs.length;await engine.switchQuestion(qs[index].id,s.round?.duration||60)}
@@ -107,13 +113,15 @@ export function setupTelemetry(engine){
   sheet.querySelectorAll('[data-sys-action]').forEach(button=>{const allowed=permitted(button.dataset.sysAction);button.disabled=!engine.connected||!allowed;button.hidden=!allowed});
   const playerAllowed=s.viewer.isCreator||s.viewer.adminGrant?.permissions.players;
   const questionsAllowed=s.viewer.isCreator||s.viewer.adminGrant?.permissions.questions,gameAllowed=s.viewer.isCreator||s.viewer.adminGrant?.permissions.game;
-  $('sys-player-form').closest('details').hidden=!playerAllowed;$('sys-mode').closest('details').hidden=!gameAllowed;
+  $('sys-player-form').closest('details').hidden=!playerAllowed;$('sys-mode').closest('details').hidden=!gameAllowed||s.viewer.adminGrant?.tier==='local';
   $('sys-question-form').closest('details').hidden=!questionsAllowed&&!gameAllowed;$('sys-question-form').hidden=!questionsAllowed;
   $('syllabus-panel').closest('details').hidden=!questionsAllowed;
   $('sys-player-form').querySelector('button').disabled=!member||!engine.connected||!playerAllowed||!s.viewer.isCreator&&protectedIds.includes(pid);
   $('sys-question-form').querySelector('button').disabled=!engine.connected||!s.viewer.isCreator&&!s.viewer.adminGrant?.permissions.questions;
   sheet.querySelector('[data-sys-action="kick"]').disabled=protectedIds.includes(pid)||!member||!engine.connected||!permitted('kick');
   sheet.querySelector('[data-sys-action="effect"]').disabled=(!s.viewer.isProAdmin&&s.sessionControl?.presentationEffectsEnabled===false)||!permitted('effect')||!engine.connected;
+  for(const id of ['sys-effect-target','sys-effect-duration']){$(id).hidden=!permitted('effect');sheet.querySelector(`label[for="${id}"]`).hidden=!permitted('effect');}
+  $('sys-refresh-scope').hidden=!permitted('refresh');sheet.querySelector('label[for="sys-refresh-scope"]').hidden=!permitted('refresh');
   for(const key of ['pause','timer','resolve'])sheet.querySelector(`[data-sys-action="${key}"]`).disabled||=!s.round||s.round.resolved;
   for(const key of ['economy','minus-economy','restore'])sheet.querySelector(`[data-sys-action="${key}"]`).disabled||=soloMode();
   if($('sys-effect-target')){const targetIds=s.sessionControl?.effectTargetIds||[],previous=$('sys-effect-target').value,missing=previous&&!targetIds.includes(previous),people=s.regions.flatMap(t=>t.members.filter(m=>targetIds.includes(m.pid)).map(m=>({...m,team:t.name})));setOptions('sys-effect-target','<option value="">Только проектор преподавателя</option>'+(missing?`<option value="${h(previous)}" disabled>Выбранный участник сейчас недоступен</option>`:'')+people.map(m=>`<option value="${m.pid}">${h(m.name)} · ${h(m.team)}</option>`).join(''));sheet.querySelector('[data-sys-action="effect"]').disabled||=!!missing;$('sys-effect-duration').disabled=!s.viewer.isProAdmin;if(!s.viewer.isProAdmin)$('sys-effect-duration').value=s.viewer.adminGrant?.effectDuration||3000;}
@@ -134,7 +142,7 @@ export function setupTelemetry(engine){
   else if(action==='mode'){if(confirm('Завершить текущий вопрос и сменить формат у всех участников?'))await engine.setSessionMode($('sys-mode').value)}
   else if(action==='lobby'){if(s.round&&!s.round.resolved){if(!confirm('Подвести итоги вопроса и открыть лобби?'))return true;await engine.resolveRound()}await engine.endRound()}
   else if(action==='refresh'){if(confirm('Перезагрузить выбранные экраны? Вход и принятые ответы сохранятся.'))await engine.refreshClients($('sys-refresh-scope').value)}
-  else if(action==='effect')await engine.presentationEffect(Number($('sys-effect-duration')?.value||3000),$('sys-effect-target')?.value||undefined);
+  else if(action==='effect'){const result=await engine.presentationEffect(Number($('sys-effect-duration')?.value||3000),$('sys-effect-target')?.value||undefined);return `Помеха отправлена на ${result.recipientCount} экр. · ${result.duration/1000} с.`;}
   else if(action==='grant-admin')await engine.grantAdmin($('sys-admin-player').value,{players:$('sys-admin-players').checked,questions:$('sys-admin-questions').checked,game:$('sys-admin-game').checked,effects:$('sys-admin-effects').checked},Number($('sys-admin-duration').value),$('sys-admin-unlimited').checked);
   else if(action==='revoke-admin')await engine.revokeAdmin($('sys-admin-player').value);
   else if(action==='create-invite'){const permissions=Object.fromEntries(['players','questions','game','effects'].map(key=>[key,$('sys-invite-'+key).checked]));const result=await engine.createAdminInvite(permissions,Number($('sys-invite-minutes').value),Number($('sys-invite-duration').value));$('sys-access-once').value=result.code;}

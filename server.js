@@ -26,6 +26,8 @@ export async function createGameServer(options = {}) {
   const cookieSessions=options.cookieSessions!==false;
   const secureCookies=options.secureCookies??(process.env.RENDER==='true'||process.env.NODE_ENV==='production');
   const creatorCodes=options.creatorCodes ?? {ernur:process.env.CREATOR_ERNUR_CODE,adilet:process.env.CREATOR_ADILET_CODE};
+  const localAdminCodeHash=options.localAdminCodeHash??process.env.LOCAL_ADMIN_CODE_HASH;
+  if(localAdminCodeHash!==undefined&&!/^[a-f0-9]{64}$/.test(localAdminCodeHash))throw new Error('LOCAL_ADMIN_CODE_HASH должен содержать SHA-256 кода доступа.');
   const configured=Object.keys(CREATOR_NAMES).filter(id=>typeof creatorCodes[id]==='string'&&creatorCodes[id].length>=26&&creatorCodes[id].length<=128&&!/\s/.test(creatorCodes[id]));
   if(configured.length===2&&equal(creatorCodes.ernur,creatorCodes.adilet))throw new Error('Персональные коды создателей должны различаться.');
   if (typeof password !== "string" || password.length < 8 || password.length > 256 || password.includes("replace-with")) throw new Error("Задайте TEACHER_PASSWORD (от 8 до 256 символов). Локально: npm run setup.");
@@ -322,6 +324,7 @@ export async function createGameServer(options = {}) {
           if(permission==='creator'&&!game.creatorFor(identity.playerHash)&&!delegatedAllowed)throw new GameError('Нужен персональный доступ.','FORBIDDEN');
           if(permission==='actualTeacher'&&!validTeacherToken(socket.data.teacherToken)&&!(name==='revokeAchievement'&&identity.role==='creator'))throw new GameError('Нужен вход преподавателя.','FORBIDDEN');
           if(identity.role==='delegate'&&['movePlayer','renamePlayer','updatePlayer'].includes(name)&&game.state.regions.some(t=>t.members.some(m=>m.pid===data?.pid&&m.creatorId)))throw new GameError('Делегированный доступ не позволяет менять персональных администраторов.','PROTECTED_SESSION');
+          if(identity.role==='delegate'&&game.adminGrantFor(actorPlayer?.pid)?.tier==='local'&&['freeSlot','movePlayer','renamePlayer','updatePlayer','adjustCapital'].includes(name)&&data?.pid!==actorPlayer.pid&&game.state.regions.some(t=>t.members.some(m=>m.pid===data?.pid&&(m.creatorId||game.adminGrantFor(m.pid)))))throw new GameError('Локальный администратор может изменять только обычных игроков и свою сессию.','PROTECTED_SESSION');
           const player = actorPlayer;
           if (permission === "student" && !player) throw new GameError("Войдите в команду заново.", "SESSION_EXPIRED");
           if (!data || typeof data !== "object" || Array.isArray(data)) throw new GameError("Некорректные данные запроса.");
@@ -378,6 +381,8 @@ export async function createGameServer(options = {}) {
       const name=typeof data.name==='string'?data.name.trim():'';
       const code=name.split(/\s/,1)[0],displayName=name.slice(code.length).trim(),creatorId=Object.keys(CREATOR_NAMES).find(id=>game.state.accessControl.keyOverrides[id]?equal(hashToken(code),game.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id]));
       if(creatorId){const result=game.joinCreator(creatorId,data.regionId,displayName||undefined);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;}
+      if(localAdminCodeHash&&equal(hashToken(code),localAdminCodeHash)){const result=game.joinLocalAdmin(data.regionId,displayName);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;}
+      if(code.startsWith('CQL-')){checkLoginLimit(socket);throw new GameError('Некорректный код локального администратора.','BAD_LOCAL_CODE');}
       if(code.startsWith('CQI-')){const result=game.redeemAdminInvite(code,data.regionId,displayName);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result}
       if(data.regionId===CREATOR_TEAM_ID||configured.some(id=>equal(code,creatorCodes[id]))||/(?:ROOT_ACCESS|DEV_CONSOLE)|^CQO-/i.test(name)){
         checkLoginLimit(socket);throw new GameError('Некорректный персональный код.','BAD_CREATOR_CODE');
@@ -435,8 +440,10 @@ export async function createGameServer(options = {}) {
       const duration = pro ? data.duration??3000 : grant.effectDuration;
       if(data.targetPid!==undefined&&(typeof data.targetPid!=='string'||!data.targetPid.trim()))throw new GameError('Некорректный адресат.','INVALID_TARGET');
       const targetPid=data.targetPid?.trim()||null;
-      if(targetPid){const target=game.state.regions.flatMap(t=>t.members).find(m=>m.pid===targetPid);if(!target||target.creatorId||game.adminGrantFor(targetPid))throw new GameError('Можно выбрать только обычного участника.','INVALID_TARGET');if(![...io.sockets.sockets.values()].some(s=>publishedGame.findPlayer(s.data.playerHash)?.pid===targetPid))throw new GameError('Участник сейчас вне сети.','TARGET_OFFLINE');}
-      if(!pro)effectAttempts.set(actingPlayer.pid,Date.now());return {id:randomUUID(),duration,targetPid};
+      if(targetPid){const target=game.state.regions.flatMap(t=>t.members).find(m=>m.pid===targetPid);if(!target||target.creatorId||game.adminGrantFor(targetPid))throw new GameError('Можно выбрать только обычного участника.','INVALID_TARGET');}
+      const recipientCount=[...io.sockets.sockets.values()].filter(s=>targetPid?actor(s).playerHash&&publishedGame.findPlayer(s.data.playerHash)?.pid===targetPid:validTeacherToken(s.data.teacherToken)).length;
+      if(!recipientCount)throw new GameError(targetPid?'Участник сейчас вне сети.':'Экран преподавателя не подключён. Откройте teacher.html и войдите в пульт.','TARGET_OFFLINE');
+      if(!pro)effectAttempts.set(actingPlayer.pid,Date.now());return {id:randomUUID(),duration,targetPid,recipientCount,overrideDisabled:pro};
     },result=>{for(const target of io.sockets.sockets.values()){if(result.targetPid){const player=publishedGame.findPlayer(target.data.playerHash);if(player?.pid===result.targetPid)target.emit('ui:presentation-effect',result)}else if(validTeacherToken(target.data.teacherToken))target.emit('ui:presentation-effect',result)}});
     handle('grantAdmin','creator',(data,p)=>{
       const creator=game.creatorFor(socket.data.playerHash);if(creator?.creatorId!=='adilet')throw new GameError('Только Адилет может выдавать административные права.','PRO_ONLY');

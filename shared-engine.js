@@ -21,20 +21,20 @@ const saveCreatorToken=value=>setToken('cq_creator_session_v1',value);
 
 // A timed visual simulation only: no camera, screen capture or CPU-heavy canvas noise.
 export function setupPresentationEffects(engine) {
-  let box=null,timer=null,previousFocus=null,locked=[];
+  let box=null,timer=null,previousFocus=null,locked=[],overrideDisabled=false;
   function stop(){
-    clearTimeout(timer);box?.remove();box=null;document.body.classList.remove('presentation-signal');
+    clearTimeout(timer);box?.remove();box=null;overrideDisabled=false;document.body.classList.remove('presentation-signal');
     for(const [node,wasInert] of locked)node.inert=wasInert;locked=[];
     if(previousFocus?.isConnected&&document.visibilityState!=='hidden')previousFocus.focus({preventScroll:true});previousFocus=null;
   }
   const receive=event=>{
     const viewer=engine.state?.viewer;
     if(!viewer||(!viewer.player&&viewer.role!=='teacher'))return;
-    if(viewer.role==='teacher'&&engine.state.sessionControl?.presentationEffectsEnabled===false)return;
+    if(viewer.role==='teacher'&&engine.state.sessionControl?.presentationEffectsEnabled===false&&event?.overrideDisabled!==true)return;
     if(event?.targetPid&&event.targetPid!==viewer.player?.pid)return;
     const duration=Number(event?.duration);
     if(!Number.isInteger(duration)||duration<100||duration>60000)return;
-    stop();previousFocus=document.activeElement;
+    stop();overrideDisabled=event.overrideDisabled===true;previousFocus=document.activeElement;
     box=document.createElement('div');box.className='presentation-blocker';box.tabIndex=-1;box.setAttribute('role','alert');
     box.setAttribute('aria-label','Временный визуальный эффект. Запись экрана не ведётся.');
     box.innerHTML=`<div class="recording-hud"><span class="recording-dot">● REC · SIM</span><span>FRAME LOSS</span><span>${Math.ceil(duration/1000)}s</span></div><div class="recording-noise"></div><div class="recording-center">NO SIGNAL<br><small>ВИЗУАЛЬНЫЙ ЭФФЕКТ · ЗАПИСЬ НЕ ВЕДЁТСЯ</small></div>`;
@@ -43,7 +43,7 @@ export function setupPresentationEffects(engine) {
     timer=setTimeout(stop,duration);
   };
   engine.socket.on('ui:presentation-effect',receive);
-  const off=engine.onChange(state=>{if(box&&(!state?.viewer.player&&state?.viewer.role!=='teacher'||state?.viewer.role==='teacher'&&state.sessionControl?.presentationEffectsEnabled===false))stop()});
+  const off=engine.onChange(state=>{if(box&&(!state?.viewer.player&&state?.viewer.role!=='teacher'||state?.viewer.role==='teacher'&&state.sessionControl?.presentationEffectsEnabled===false&&!overrideDisabled))stop()});
   return ()=>{stop();off();engine.socket.off('ui:presentation-effect',receive)};
 }
 
@@ -66,7 +66,7 @@ export function setupAchievementControls(engine,host){
   let busy=false;
   const target=host.querySelector('[data-award-target]'),status=host.querySelector('[data-award-status]'),kind=host.querySelector('[data-award-kind]'),perks=host.querySelector('[data-award-perks]');
   const render=state=>{
-    const viewer=state?.viewer,full=viewer?.isCreator||viewer?.role==='teacher',game=full||viewer?.adminGrant?.permissions.game,canGrant=full||game&&viewer?.adminGrant?.permissions.players;
+    const viewer=state?.viewer,full=viewer?.isCreator||viewer?.role==='teacher',game=full||viewer?.adminGrant?.tier!=='local'&&viewer?.adminGrant?.permissions.game,canGrant=full||game&&viewer?.adminGrant?.permissions.players;
     host.hidden=!game;const shell=host.closest('[data-award-tools-shell]');if(shell)shell.hidden=!game;if(!game)return;
     const catalogue=state.achievementCatalog||ACHIEVEMENTS,catalogueKey=JSON.stringify(catalogue);
     if(kind.dataset.key!==catalogueKey){const value=kind.value;kind.innerHTML=catalogue.map(a=>`<option value="${escapeHTML(a.id)}">${escapeHTML(a.title)}${a.secret?' · секретное':''}</option>`).join('');kind.dataset.key=catalogueKey;if(catalogue.some(a=>a.id===value))kind.value=value}
