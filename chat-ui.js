@@ -1,7 +1,29 @@
 import {escapeHTML as h,setupAmbientAudio} from './shared-engine.js';
 
-const getSaved=key=>{try{return localStorage.getItem(key)}catch{return null}};
-const save=(key,value)=>{try{localStorage.setItem(key,value)}catch{}};
+const getSaved=key=>{for(const storage of ['localStorage','sessionStorage'])try{const value=globalThis[storage].getItem(key);if(value!==null)return value}catch{}return null};
+const save=(key,value)=>{for(const storage of ['localStorage','sessionStorage'])try{globalThis[storage].setItem(key,value)}catch{}};
+export class ChatReadState{
+ constructor(get=getSaved,put=save){this.get=get;this.put=put;this.reset()}
+ reset(){this.key='';this.legacyId='';this.marks={}}
+ load(key){try{const value=JSON.parse(this.get('cq_chat_read_'+key)||'{}');if(value&&typeof value==='object'&&!Array.isArray(value))return Object.fromEntries(Object.entries(value).filter(([room,sequence])=>/^(global|team:[\w-]{1,80}|support:[\w-]{1,80})$/.test(room)&&Number.isSafeInteger(sequence)&&sequence>=0))}catch{}return {}}
+ bind(metadata){
+  if(!metadata?.enabled||!metadata.identity?.id)return;
+  const key=metadata.readKey||metadata.identity.id;
+  const changed=key!==this.key;
+  if(changed){this.key=key;this.marks=this.load(key)}
+  if(changed||this.legacyId!==metadata.identity.id){
+   const legacy=this.load(metadata.identity.id);let migrated=false;
+   for(const [room,sequence] of Object.entries(legacy))if(sequence>(this.marks[room]||0)){this.marks[room]=sequence;migrated=true}
+   if(migrated)this.persist();this.legacyId=metadata.identity.id;
+  }
+ }
+ persist(){if(this.key){for(const [room,sequence] of Object.entries(this.load(this.key)))this.marks[room]=Math.max(this.marks[room]||0,sequence);this.put('cq_chat_read_'+this.key,JSON.stringify(this.marks))}}
+ mark(room,sequence){
+  if(!this.key||!/^(global|team:[\w-]{1,80}|support:[\w-]{1,80})$/.test(room)||!Number.isSafeInteger(sequence)||sequence<=0||sequence<=(this.marks[room]||0))return false;
+  this.marks[room]=sequence;this.persist();return true;
+ }
+ unread(descriptor){return !!descriptor&&descriptor.lastSequence>(this.marks[descriptor.id]||0)}
+}
 export function setupCommunication(engine){
  setupAmbientAudio();
  const host=document.createElement('div');host.id='cq-chat-root';host.hidden=true;
@@ -13,8 +35,8 @@ export function setupCommunication(engine){
  const awardButton=document.createElement('button');awardButton.type='button';awardButton.className='utility-button';awardButton.innerHTML='⟐ Достижения <span data-achievement-count>0</span>';
  const mapButton=document.createElement('button');mapButton.type='button';mapButton.className='utility-button';mapButton.dataset.mapReview='';mapButton.textContent='↗ Обзор карты';mapButton.setAttribute('aria-pressed','false');utilities.append(awardButton,mapButton);
  const $=id=>document.getElementById(id),panel=$('cq-chat-panel'),list=$('cq-chat-messages'),input=$('cq-chat-input');
- let open=false,kind='global',room=null,meta=null,view=null,identityKey='',scopeKey='',epoch=0,requestId=0,sending=false,loading=false,renderedRoom=null,renderKey='',pickerKey='',pendingDraft=null,readMarks={},creditsDismissed=false;
- const drafts=new Map(),nodes=new Map();
+ let open=false,kind='global',room=null,meta=null,view=null,identityKey='',scopeKey='',epoch=0,requestId=0,sending=false,loading=false,renderedRoom=null,renderKey='',pickerKey='',pendingDraft=null,creditsDismissed=false;
+ const drafts=new Map(),nodes=new Map(),reads=new ChatReadState();
  let wasConnected=engine.connected,creditsTouched=false;
  function allowed(){const v=engine.state?.viewer;return !!v&&(v.role==='teacher'||!!v.player)}
  function notice(text='',error=false){$('cq-chat-notice').textContent=text;$('cq-chat-notice').classList.toggle('red',error)}
@@ -29,16 +51,17 @@ export function setupCommunication(engine){
  function requestOpen(channel=kind){window.dispatchEvent(new CustomEvent('cq:show-chat',{detail:{channel}}))}
  function setOpen(value){if(value&&!allowed())return;if(value){creditsDismissed=true;closeShelves()}open=value;panel.hidden=!open;$('cq-chat-toggle').setAttribute('aria-expanded',String(open));updateCredits();if(open){draw();if(room&&view?.room===room)markRead();input.focus()}}
  $('cq-chat-toggle').addEventListener('click',()=>{if(open)setOpen(false);else requestOpen()});$('cq-chat-close').addEventListener('click',()=>setOpen(false));
- window.addEventListener('cq:show-chat',e=>{if(!allowed())return;setOpen(true);chooseKind(e.detail?.channel||kind)});
+ window.addEventListener('cq:show-chat',e=>{if(!allowed())return;chooseKind(e.detail?.channel||kind);setOpen(true)});
  window.addEventListener('cq:hide-chat',()=>setOpen(false));
  window.addEventListener('cq:close-extras',()=>closeExtras());
  for(const shelf of document.querySelectorAll('.achievement-panel'))shelf.addEventListener('toggle',()=>{if(shelf.open)closeExtras(false)});
  awardButton.addEventListener('click',()=>{closeExtras();const shelf=document.querySelector('.achievement-panel');if(shelf){shelf.open=true;shelf.scrollIntoView({block:'start',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})}});
  mapButton.addEventListener('click',()=>{closeExtras();const active=document.body.classList.toggle('map-review-mode');mapButton.textContent=active?'← Вернуться к игре':'↗ Обзор карты';mapButton.setAttribute('aria-pressed',String(active));window.dispatchEvent(new Event('cq:map-review-change'));if(active)document.querySelector('.stage-wrap,.atlas-projector')?.scrollIntoView({block:'start'})});
  panel.addEventListener('keydown',e=>{if(e.key==='Escape'){e.stopPropagation();setOpen(false);$('cq-chat-toggle').focus()}});
- function persistRead(){if(meta?.identity)save('cq_chat_read_'+meta.identity.id,JSON.stringify(readMarks))}
- function markRead(){if(!room||view?.room!==room)return;readMarks[room]=Math.max(readMarks[room]||0,view.latestSequence||0);persistRead();drawBadges()}
- function unread(desc){return desc&&desc.lastSequence>(readMarks[desc.id]||0)}
+ function markRead(){if(!open||document.visibilityState==='hidden'||!room||view?.room!==room)return;if(reads.mark(room,view.latestSequence||0))draw();else drawBadges()}
+ function unread(desc){return reads.unread(desc)}
+ document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')markRead()});
+ window.addEventListener('storage',event=>{if(event.key==='cq_chat_read_'+reads.key&&meta?.enabled){reads.reset();reads.bind(meta);draw()}});
  function drawBadges(){
   const entries=[...(meta?.rooms||[]),...(meta?.inbox||[])],any=entries.some(unread);$('cq-chat-unread').hidden=!any;$('cq-chat-toggle').setAttribute('aria-label',any?'Открыть чат: есть новые сообщения':'Открыть чат');
   for(const button of panel.querySelectorAll('[data-chat-kind]')){const type=button.dataset.chatKind,candidates=type==='global'?entries.filter(r=>r.id==='global'):type==='team'?entries.filter(r=>r.id.startsWith('team:')):entries.filter(r=>r.id.startsWith('support:'));button.classList.toggle('has-unread',candidates.some(unread))}
@@ -106,13 +129,14 @@ export function setupCommunication(engine){
   $('cq-chat-support-tab').hidden=identity?.role==='teacher';$('cq-chat-support-tab').textContent=identity?.role==='creator'?'Обращения':'Создатели';
   for(const button of panel.querySelectorAll('[data-chat-kind]')){const selected=button.dataset.chatKind===kind;button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected))}
   const options=candidates(),showPicker=options.length>1||(kind==='support'&&identity?.role==='creator');$('cq-chat-picker').hidden=!showPicker;
-  const optionsKey=JSON.stringify([options,room,kind]);if(optionsKey!==pickerKey){pickerKey=optionsKey;$('cq-chat-picker-label').textContent=kind==='team'?'Команда':'Личное обращение';$('cq-chat-target').innerHTML=options.map(r=>`<option value="${h(r.id)}" ${r.id===room?'selected':''}>${unread(r)?'● ':''}${h(r.title)}${r.team?' · '+h(r.team):''}${r.active===false?' · вышел из игры':''}</option>`).join('');$('cq-chat-target').disabled=!options.length}
+  const optionsKey=JSON.stringify([options,room,kind,reads.marks]);if(optionsKey!==pickerKey){pickerKey=optionsKey;$('cq-chat-picker-label').textContent=kind==='team'?'Команда':'Личное обращение';$('cq-chat-target').innerHTML=options.map(r=>`<option value="${h(r.id)}" ${r.id===room?'selected':''}>${unread(r)?'● ':''}${h(r.title)}${r.team?' · '+h(r.team):''}${r.active===false?' · вышел из игры':''}</option>`).join('');$('cq-chat-target').disabled=!options.length}
   const description=kind==='global'?'Общий разговор всех участников и преподавателя.':kind==='team'?identity?.role==='teacher'||identity?.role==='creator'?'Канал выбранной команды. Команда создателей доступна только Ернуру и Адилету.':'Здесь общается ваша команда. Преподаватель и создатели могут помогать в чате.':identity?.role==='creator'?'Личное обращение студента. Другие студенты и преподаватель его не видят.':'Личный чат с Ернуром и Адилетом. Другие участники и преподаватель его не видят.';
   const creators=kind==='support'&&identity?.role==='student'?' '+(meta?.creators||[]).map(c=>`${c.name}: ${c.online?'в сети':'не в сети'}`).join(' · '):'';
   $('cq-chat-description').textContent=description+creators;renderMessages();drawBadges();updateComposer();
  }
  engine.onChat((metadata,chatView)=>{
   meta=metadata;
+  reads.bind(metadata);
   if(!metadata?.enabled){view=null;room=null;list.replaceChildren();nodes.clear();renderedRoom=null;renderKey='';return}
   if(chatView?.room===room)view=chatView;
   reconcile();if(open&&view?.room===room)markRead();
@@ -120,7 +144,7 @@ export function setupCommunication(engine){
  engine.onChange(state=>{
   const v=state?.viewer,identity=v?.role==='teacher'?'teacher':v?.player?.pid||'',nextScope=identity+':'+(v?.role||'')+':'+(v?.player?.regionId||'');
   host.hidden=!allowed();host.classList.toggle('teacher-private',engine.mode==='teacher');credits.classList.toggle('teacher-private',engine.mode==='teacher');
-  if(identityKey!==identity){identityKey=identity;epoch++;requestId++;drafts.clear();pendingDraft=null;input.value='';room=null;view=null;meta=null;renderedRoom=null;renderKey='';pickerKey='';nodes.clear();list.replaceChildren();kind='global';try{const parsed=JSON.parse(getSaved('cq_chat_read_'+identity)||'{}');readMarks=parsed&&typeof parsed==='object'&&!Array.isArray(parsed)?parsed:{}}catch{readMarks={}};if(!identity)setOpen(false)}
+  if(identityKey!==identity){identityKey=identity;epoch++;requestId++;drafts.clear();pendingDraft=null;input.value='';room=null;view=null;meta=null;renderedRoom=null;renderKey='';pickerKey='';nodes.clear();list.replaceChildren();kind='global';reads.reset();if(!identity)setOpen(false)}
   if(scopeKey!==nextScope){scopeKey=nextScope;epoch++;requestId++;room=null;view=null;meta=null;renderKey='';list.replaceChildren();nodes.clear()}
   if(wasConnected&&!engine.connected){epoch++;requestId++;loading=false}
   const reconnected=!wasConnected&&engine.connected;wasConnected=engine.connected;

@@ -12,6 +12,13 @@ export function chatIdentity(game,actor){
  const team=game.region(player.regionId),creator=!!game.creatorFor(actor.playerHash);
  return {id:player.pid,name:player.name,role:creator?'creator':'student',teamId:team.id,teamName:team.name};
 }
+export function chatReadKey(game,identity){
+ if(!identity)return null;
+ if(identity.role==='teacher')return 'teacher';
+ const member=game.state.regions.flatMap(team=>team.members).find(player=>player.pid===identity.id);
+ if(identity.role==='creator'&&member?.creatorId)return 'creator:'+member.creatorId;
+ return member?.profileId?'profile:'+member.profileId:identity.id;
+}
 export class ChatEngine{
  constructor(saved=null,clock=()=>Date.now()){
   this.now=clock;
@@ -60,7 +67,7 @@ export class ChatEngine{
    inbox.sort((a,b)=>b.lastSequence-a.lastSequence||a.name.localeCompare(b.name,'ru'));
   }
   const creators=Object.entries(CREATOR_NAMES).map(([id,name])=>{const member=game.state.regions.flatMap(t=>t.members).find(m=>m.creatorId===id);return {name:game.state.settings.universal&&id==='adilet'?'Адлет':name,online:!!member&&online.has(member.pid)}});
-  return {enabled:true,identity,rooms,inbox,creators,historyLimit:CHAT_HISTORY_LIMIT};
+  return {enabled:true,identity,readKey:chatReadKey(game,identity),rooms,inbox,creators,historyLimit:CHAT_HISTORY_LIMIT};
  }
  view(game,identity,room){
   this.requireRoom(game,identity,room);
