@@ -5,7 +5,7 @@ import {ACHIEVEMENTS,RESOURCE_CAP} from './game-config.js';
 export const AWARD_CATALOG=[
  {...ACHIEVEMENTS[0],rarity:'legendary',stone:'power',effect:'drill',world:true},
  {id:'neon-summit',title:'Смотри, мама, я здесь... На самой вершине башни Арасака.',description:'Первым в сессии заработать 500 ресурсов команды или личного капитала ответами. Все одновременные первые получают награду.',rarity:'legendary',stone:'space',effect:'tower',icon:'▥',secret:true,world:true},
- {id:'zero-card',title:'Нулевая карта',description:'После половины сессии занимать последнее место, а на последнем вопросе впервые после середины выйти на первое. Не меньше 10 разных вопросов и 4 соревнующихся команд или игроков.',rarity:'legendary',stone:'reality',effect:'card',icon:'0',secret:true,world:true},
+ {id:'zero-card',title:'Нулевая карта',description:'На середине сессии занимать последнее место, а на последнем вопросе впервые после середины выйти на первое. Разделённое первое место засчитывается. Не меньше 10 разных вопросов и 4 соревнующихся команд или игроков.',rarity:'legendary',stone:'reality',effect:'card',icon:'0',secret:true,world:true},
  {id:'scenario-reader',title:'Этот сценарий я уже читал',description:'За сессию верно решить 3 разных вопроса, в каждом из которых ошиблись не менее 80% ответивших соперников. На вопрос должны ответить минимум 5 команд или игроков.',rarity:'legendary',stone:'mind',effect:'book',icon:'▤',secret:true,world:true},
  {id:'determination',title:'Ты всё ещё полон решимости',description:'После трёх неверных ответов подряд правильно ответить на 10 разных вопросов подряд в той же сессии.',rarity:'legendary',stone:'soul',effect:'heart',icon:'♥',secret:true,world:true},
  {id:'daily-training',title:'Обычная тренировка',description:'Правильно решить 100 разных вопросов за всё время. В командной игре учитывается личный правильный выбор. Повтор того же вопроса не увеличивает счётчик.',rarity:'legendary',stone:'time',effect:'sun',icon:'✹',secret:true,world:true},
@@ -139,6 +139,8 @@ export function evaluateAwardRound(g){
  for(const m of members(g)){
   const a=personalAnswer(g,m),correct=a.answered&&a.chosen===r.questionSnapshot.correct,s=statsFor(match,'p:'+m.pid),hadForesight=s.foresight;
   const fresh=track(s,key,correct,a.answered,a.answered&&Number.isFinite(a.ms)&&a.ms<=5000);
+  s.lastAnswerMs=a.answered&&Number.isFinite(a.ms)?Math.round(a.ms):null;
+  s.lastAnswerStatus=!fresh?'repeat':!a.answered?'missing':!correct?'wrong':a.ms>5000?'slow':'fast';
   if(!fresh)continue;
   const p=ensurePlayerProfile(g,m.pid);if(correct&&!earned(p,'daily-training')&&!p.studied.includes(key)){p.studied.push(key);p.updatedAt=g.now();if(p.studied.length>=100){g.grantAchievement('daily-training','player',m.pid,'earned','training');p.studied=[]}}
   if(s.fast>=5)g.grantAchievement('basic-implant','player',m.pid,'earned','speed');

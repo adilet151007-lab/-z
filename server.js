@@ -47,6 +47,12 @@ export async function createGameServer(options = {}) {
   if(revokedCreators.length){game.state.exitRequests=(game.state.exitRequests||[]).filter(request=>!revokedCreators.some(session=>session.pid===request.pid));game.log(`Оператор инфраструктуры завершил персональные сессии: ${revokedCreators.length}.`,'admin')}
   if (!saved||game.state.revision!==saved.revision) await store.save(game.state);
   let publishedGame = game.snapshotCopy();
+  async function persistGame(){
+    game.stageRoundPublication(publishedGame.state.round?.id);
+    await store.save(game.state);
+    const activated=game.activateRoundPublication();publishedGame=game.snapshotCopy();
+    if(activated)broadcast(true);
+  }
   let lastActivityFlush=sessionNow();
   const playerActive=member=>!!member&&sessionNow()-Math.max(publishedGame.state.accessControl.activity.players[member.pid]??publishedGame.state.accessControl.activity.startedAt,pendingPlayerActivity.get(member.pid)||0)<SESSION_IDLE_MS;
   const teacherActivity=token=>{const hash=hashToken(token);return pendingTeacherActivity.get(hash)||publishedGame.state.accessControl.activity.teachers[hash]};
@@ -62,7 +68,7 @@ export async function createGameServer(options = {}) {
   flushInputs=async()=>{
     if(!inputBatch)return;
     clearTimeout(inputTimer);inputTimer=null;const batch=inputBatch;inputBatch=null;
-    try{await store.save(game.state);publishedGame=game.snapshotCopy();broadcast();for(const done of batch.replies)done(true)}
+    try{await persistGame();broadcast();for(const done of batch.replies)done(true)}
     catch(error){game=new GameLogic(batch.before);for(const done of batch.replies)done(false);console.error('Ответы не сохранены:',error.message)}
   };
   const app = express();
@@ -148,7 +154,7 @@ export async function createGameServer(options = {}) {
       for(const member of expired){const team=game.state.regions.find(t=>t.members.some(m=>m.pid===member.pid));game.leaveTeam(team.id,member.pid);delete activity.players[member.pid]}
       for(const hash of expiredTeachers)delete activity.teachers[hash];
       if(expired.length||expiredTeachers.length){game.log(`Автовыход после 30 минут бездействия: ${expired.length} участников, ${expiredTeachers.length} сессий преподавателя.`,expiredTeachers.length||expired.some(m=>m.creatorId)?'admin':'game');if(game.state.revision===before.revision)game.touch()}
-      await store.save(game.state);publishedGame=game.snapshotCopy();lastActivityFlush=at;
+      await persistGame();lastActivityFlush=at;
       for(const [pid,time]of playersCopy)if((pendingPlayerActivity.get(pid)||0)<=time)pendingPlayerActivity.delete(pid);
       for(const [hash,record]of teachersCopy)if((pendingTeacherActivity.get(hash)?.at||0)<=record.at)pendingTeacherActivity.delete(hash);
       const hashes=new Set(expired.map(m=>m.tokenHash)),teacherHashes=new Set(expiredTeachers);
@@ -180,7 +186,7 @@ export async function createGameServer(options = {}) {
             const replacement=signed({role:'teacher',epoch:game.state.accessControl.teacherEpoch||0,sessionId:randomUUID(),expires:data.expires,passwordVersion:createHmac('sha256',secret).update(password).digest('hex')});
             game.state.accessControl.revokedTeacherTokens=[...(game.state.accessControl.revokedTeacherTokens||[]).filter(t=>t.expiresAt>Date.now()),{hash:hashToken(token),expiresAt:data.expires}];
             delete game.state.accessControl.activity.teachers[hashToken(token)];game.state.accessControl.activity.teachers[hashToken(replacement)]=record;
-            game.touch();await store.save(game.state);publishedGame=game.snapshotCopy();pendingTeacherActivity.delete(hashToken(token));
+            game.touch();await persistGame();pendingTeacherActivity.delete(hashToken(token));
             for(const s of io.sockets.sockets.values())if(s!==req.gameSocket&&s.data.teacherToken===token)s.disconnect(true);
             req.gameSocket.data.teacherToken=replacement;cookie(res,role,replacement,Math.max(0,data.expires-Date.now()));
           }catch(error){game=new GameLogic(before);throw error}
@@ -188,7 +194,7 @@ export async function createGameServer(options = {}) {
       }
       await enqueue(async()=>{
         await maintainIdleSessions();const before=structuredClone(game.state);
-        try{const player=game.findPlayer(hashToken(token));if(!player||!playerActive(player))throw new GameError('Сессия недействительна.','SESSION_EXPIRED');const replacement=randomBytes(32).toString('base64url'),newHash=hashToken(replacement);game.member(player.regionId,player.pid).tokenHash=newHash;game.touch();await store.save(game.state);publishedGame=game.snapshotCopy();for(const s of io.sockets.sockets.values())if(s!==req.gameSocket&&s.data.playerHash===player.tokenHash)s.disconnect(true);req.gameSocket.data.playerHash=newHash;cookie(res,role,replacement,30*86400000)}catch(error){game=new GameLogic(before);throw error}
+        try{const player=game.findPlayer(hashToken(token));if(!player||!playerActive(player))throw new GameError('Сессия недействительна.','SESSION_EXPIRED');const replacement=randomBytes(32).toString('base64url'),newHash=hashToken(replacement);game.member(player.regionId,player.pid).tokenHash=newHash;game.touch();await persistGame();for(const s of io.sockets.sockets.values())if(s!==req.gameSocket&&s.data.playerHash===player.tokenHash)s.disconnect(true);req.gameSocket.data.playerHash=newHash;cookie(res,role,replacement,30*86400000)}catch(error){game=new GameLogic(before);throw error}
       });broadcast();res.json({ok:true});
     }catch(error){res.status(error instanceof GameError?400:503).json({ok:false,error:error instanceof GameError?error.message:'Сессия не сохранена. Повторите вход.',code:error.code||'STORAGE_ERROR'})}
   });
@@ -204,7 +210,7 @@ export async function createGameServer(options = {}) {
         try{
           const player=game.findPlayer(hashToken(playerToken));if(!player||!playerActive(player))throw new GameError('Сессия завершена.','SESSION_EXPIRED');
           collectionToken=game.collectionCookie(player.pid,jar[cookieName('collection')]);
-          await store.save(game.state);publishedGame=game.snapshotCopy();socket.data.collectionHash=hashToken(collectionToken);
+          await persistGame();socket.data.collectionHash=hashToken(collectionToken);
         }catch(error){game=new GameLogic(before);throw error}
       });
       cookie(res,'collection',collectionToken,PROFILE_RETENTION_MS);broadcast();res.json({ok:true});
@@ -239,14 +245,15 @@ export async function createGameServer(options = {}) {
   }
   // Сотни одновременных голосов объединяются в одну рассылку раз в 40 мс.
   let broadcastTimer = null;
-  const broadcast = () => {
-    if (closing || broadcastTimer) return;
-    broadcastTimer = setTimeout(() => {
-      broadcastTimer = null; if (closing) return;
-      const players = online(),topology=chatTopology(players),frame=publishedGame.publicFrame(players);
-      for (const socket of io.sockets.sockets.values()){socket.emit("state", publishedGame.view(actor(socket), players,frame));sendChatScope(socket,false,players,topology)}
-    }, 40);
-    broadcastTimer.unref();
+  const broadcast = (urgent=false) => {
+    if(closing)return;
+    const send=()=>{
+      broadcastTimer=null;if(closing)return;
+      const players=online(),topology=chatTopology(players),frame=publishedGame.publicFrame(players);
+      for(const socket of io.sockets.sockets.values()){socket.emit('state',publishedGame.view(actor(socket),players,frame));sendChatScope(socket,false,players,topology)}
+    };
+    if(urgent){clearTimeout(broadcastTimer);send();return;}
+    if(broadcastTimer)return;broadcastTimer=setTimeout(send,40);broadcastTimer.unref();
   };
   const attempts = new Map();
   const chatAttempts=new Map();
@@ -335,7 +342,7 @@ export async function createGameServer(options = {}) {
               if((!current||current.pid!==member.pid||current.creatorId!==member.creatorId)&&!voluntary)throw new GameError('Персональную сессию можно завершить только по согласию её владельца. Используйте запрос на выход.','PROTECTED_SESSION');
             }
             if (game.state.revision !== before.revision) {
-              if(!fastInput){await store.save(game.state);publishedGame = game.snapshotCopy();}
+              if(!fastInput){await persistGame();}
               else if(!inputBatch){const rollback=game.snapshotCopy().state;rollback.round=before.round;rollback.revision=before.revision;inputBatch={before:rollback,replies:[]};}
             }
           } catch (error) {
@@ -523,7 +530,7 @@ export async function createGameServer(options = {}) {
     timerBusy = true;
     enqueue(async () => {
       const before = structuredClone(game.state);
-      try {game.expireAdminGrants();game.resumeAwardPauseIfDue();game.advanceIfDue();if(game.state.round&&!game.state.round.resolved&&!game.state.round.paused){if(round?.id===game.state.round.id&&scheduledAt>=game.state.round.deadline)game.resolveRound();else if(game.remainingMs()>0)game.flushProposals()}game.advanceIfDue();if(game.state.revision===before.revision)return;await store.save(game.state);publishedGame=game.snapshotCopy();broadcast();}
+      try {game.expireAdminGrants();game.resumeAwardPauseIfDue();game.advanceIfDue();if(game.state.round&&!game.state.round.resolved&&!game.state.round.paused){if(round?.id===game.state.round.id&&scheduledAt>=game.state.round.deadline)game.resolveRound();else if(game.remainingMs()>0)game.flushProposals()}game.advanceIfDue();if(game.state.revision===before.revision)return;await persistGame();broadcast();}
       catch (error) { game = new GameLogic(before); console.error("Итоги раунда не сохранены; повторная попытка автоматически:", error.message); }
     }).catch(error=>{if(error.code!=='SERVER_BUSY')console.error('Таймер:',error.message)}).finally(() => { timerBusy = false; });
   }, 250);
@@ -540,6 +547,7 @@ export async function createGameServer(options = {}) {
     async checkInactiveSessions(){return enqueue(()=>maintainIdleSessions(true))},
     async listen(port = Number(process.env.PORT) || 3000, host = "0.0.0.0") {
       await new Promise((resolve, reject) => { httpServer.once("error", reject); httpServer.listen(port, host, resolve); });
+      if(game.activateRoundPublication()){publishedGame=game.snapshotCopy();broadcast(true);}
       return httpServer.address().port;
     },
     async close() {

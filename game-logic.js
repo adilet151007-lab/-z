@@ -135,6 +135,7 @@ function restoreSnapshot(raw) {
     ensure(typeof r.id === "string" && typeof r.questionId === "string" && typeof r.ballots === "object" && r.ballots !== null && !Array.isArray(r.ballots) && typeof r.submitted === "object" && r.submitted !== null && typeof r.results === "object" && r.results !== null, "Повреждён раунд.");
     ensure(integer(r.duration, 5, 3600) && integer(r.remainingMs, 0, 3600000) && typeof r.paused === "boolean" && typeof r.resolved === "boolean", "Повреждён таймер раунда.");
     ensure((r.paused || r.resolved) ? r.deadline === null : Number.isFinite(r.deadline), "Повреждена отметка времени.");
+    if(r.publicationPending!==undefined)ensure(r.publicationPending===true&&r.paused&&!r.resolved&&!Object.keys(r.ballots).length&&!Object.keys(r.submitted).length,'Повреждён запуск таймера.');
     validateQuestions([r.questionSnapshot]);
     for (const [pid, option] of Object.entries(r.ballots)) ensure(/^[\w-]{1,80}$/.test(pid) && integer(option, 0, 3), "Повреждены голоса.");
   }
@@ -155,6 +156,17 @@ export class GameLogic {
   // Server-owned, already validated state only. Imports and restores use the constructor.
   snapshotCopy() {
     const copy=Object.create(GameLogic.prototype);copy.now=this.now;copy.state=structuredClone(this.state);return copy;
+  }
+  stageRoundPublication(previousRoundId) {
+    const r=this.state.round;
+    if(!r||r.id===previousRoundId||r.paused||r.resolved||Object.keys(r.ballots).length||Object.keys(r.submitted).length||Object.keys(r.proposals||{}).length||Object.keys(r.leaderChoices||{}).length)return false;
+    r.publicationPending=true;r.paused=true;r.deadline=null;r.remainingMs=r.duration*1000;
+    return true;
+  }
+  activateRoundPublication() {
+    const r=this.state.round;if(!r?.publicationPending)return false;
+    const at=this.now();delete r.publicationPending;r.paused=false;r.startedAt=at;r.deadline=at+r.remainingMs;
+    r.awardClock={elapsed:0,runningSince:at};this.touch();return true;
   }
   touch() { this.state.revision++; }
   scoreLimit(scope,id){return scoreLimit(this,scope,id)}
@@ -863,7 +875,7 @@ export class GameLogic {
     const match=this.state.match;
     view.match=match?{id:match.id,completedCount:match.completedQuestionIds.length,totalQuestions:match.questionIds.length,currentIsFinal:this.state.round?.questionId===match.questionIds.at(-1),finishedAt:match.finishedAt,winnerTeamIds:[...match.winnerTeamIds],awards:adminView?awards.filter(a=>a.matchId===match.id):view.achievements.filter(a=>a.matchId===match.id)}:null;
     view.achievementProgress=player?{...(Object.hasOwn(match?.stats||{},player.regionId)?match.stats[player.regionId]:{hitCrisis:false,recoveredByQuiz:false}),resources:this.region(player.regionId).points,economy:this.region(player.regionId).economy}:null;
-    view.achievementCounters=player?{fast:this.state.match?.questStats?.['p:'+player.pid]?.fast||0,fastRun:this.state.match?.questStats?.['p:'+player.pid]?.fastRun||0,studied:view.collection.studied}:null;
+    view.achievementCounters=player?{fast:this.state.match?.questStats?.['p:'+player.pid]?.fast||0,fastRun:this.state.match?.questStats?.['p:'+player.pid]?.fastRun||0,studied:view.collection.studied,lastAnswerMs:this.state.match?.questStats?.['p:'+player.pid]?.lastAnswerMs??null,lastAnswerStatus:this.state.match?.questStats?.['p:'+player.pid]?.lastAnswerStatus??null}:null;
     if(adminView)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>m.pid)),effectTargetIds:this.state.regions.flatMap(t=>t.members.filter(m=>!m.creatorId&&!this.adminGrantFor(m.pid)&&onlinePlayers.has(m.pid)).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,delegatedAdmins:creator&&player?.creatorId==='adilet'?structuredClone(this.state.delegatedAdmins||[]):[],...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
     if(creator)view.viewer.exitRequest=structuredClone(this.state.exitRequests?.find(r=>r.pid===player.pid&&r.status==='pending')||null);
     if(creator&&player.creatorId==='adilet')view.sessionControl.invitations=this.state.accessControl.invitations.map(({id,permissions,minutes,createdAt,expiresAt,usedAt,revokedAt})=>({id,permissions,minutes,createdAt,expiresAt,usedAt,revokedAt}));
