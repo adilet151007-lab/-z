@@ -259,12 +259,12 @@ export class GameEngine {
     this.connected = false;
     this.error = "";
     this.sessionNotice = "";
-    this.offset = 0;
+    this.offset = 0;this.clockRtt=Infinity;this.lastClockSync=0;this.clockSyncing=false;this.inputStatus=null;
     this.listeners = new Set();
     this.chatListeners=new Set();this.chatMeta=null;this.chatView=null;
     this.cookieSessions=typeof document!=='undefined';this.legacyToken=this.cookieSessions?(mode==='student'?creatorToken()||getToken('cq_player_token_v2'):getToken('cq_teacher_token_v2')):null;
-    this.socket = io({ autoConnect: false,reconnection:true,reconnectionDelay:2000,reconnectionDelayMax:2000,randomizationFactor:0,timeout:30000, auth: callback => callback({surface:mode,activityVersion:1,...(!this.cookieSessions?{playerToken:mode==='student'?creatorToken()||getToken('cq_player_token_v2'):undefined,teacherToken:mode==='teacher'?getToken('cq_teacher_token_v2'):undefined}:{})}) });
-    this.socket.on('connect',async()=>{this.httpProof=null;this.connected=!this.legacyToken;this.error=this.legacyToken?'Восстанавливаем вашу сессию…':'';this.emit();if(this.legacyToken&&!this.migrationTried){this.migrationTried=true;try{await this.bindSession(mode==='teacher'?'teacher':'player',this.legacyToken);this.legacyToken=null;this.clearLegacyTokens();this.socket.disconnect().connect()}catch(error){if(error.code==='SESSION_EXPIRED'){this.legacyToken=null;this.clearLegacyTokens();this.connected=true;this.error=''}else this.error='Не удалось восстановить прежний вход. Обновите страницу после подключения.';this.emit()}}});
+    this.socket = io({ autoConnect: false,transports:['websocket','polling'],tryAllTransports:true,reconnection:true,reconnectionDelay:2000,reconnectionDelayMax:2000,randomizationFactor:0,timeout:30000, auth: callback => callback({surface:mode,activityVersion:1,...(!this.cookieSessions?{playerToken:mode==='student'?creatorToken()||getToken('cq_player_token_v2'):undefined,teacherToken:mode==='teacher'?getToken('cq_teacher_token_v2'):undefined}:{})}) });
+    this.socket.on('connect',async()=>{this.clockRtt=Infinity;this.lastClockSync=0;this.syncClock();this.httpProof=null;this.connected=!this.legacyToken;this.error=this.legacyToken?'Восстанавливаем вашу сессию…':'';this.emit();if(this.legacyToken&&!this.migrationTried){this.migrationTried=true;try{await this.bindSession(mode==='teacher'?'teacher':'player',this.legacyToken);this.legacyToken=null;this.clearLegacyTokens();this.socket.disconnect().connect()}catch(error){if(error.code==='SESSION_EXPIRED'){this.legacyToken=null;this.clearLegacyTokens();this.connected=true;this.error=''}else this.error='Не удалось восстановить прежний вход. Обновите страницу после подключения.';this.emit()}}});
     this.socket.on('session:ready',data=>{this.httpProof=data.proof});
     this.socket.on('session:expired',data=>{
       this.sessionNotice='Сессия завершена после 30 минут бездействия. Войдите заново.';
@@ -273,10 +273,14 @@ export class GameEngine {
       if(data?.roles?.includes('teacher'))setToken('cq_teacher_token_v2',null);
       this.emit();
     });
-    this.socket.on("disconnect", () => {this.httpProof=null;this.connected = false; this.emit(); });
+    this.socket.on('answer:received',data=>{
+      if(this.inputStatus?.requestId===data?.requestId){this.inputStatus={...this.inputStatus,status:'received'};this.emit();}
+    });
+    this.socket.on("disconnect", () => {this.clockSyncing=false;this.clockRtt=Infinity;this.httpProof=null;this.connected = false; this.emit(); });
     this.socket.on("connect_error", () => { this.connected = false; this.error = "Подключение к серверу... (пробуждение инстанса может занять до 30 сек)"; this.emit(); });
     this.socket.on("state", state => {
       const previous=this.state?.viewer,changed=previous?.role!==state.viewer.role||previous?.player?.pid!==state.viewer.player?.pid||previous?.player?.regionId!==state.viewer.player?.regionId;
+      if(this.inputStatus?.roundId!==state.round?.id)this.inputStatus=null;
       this.state = state;
       Object.defineProperty(state,'clientReceivedAt',{value:Date.now(),enumerable:false});
       if(mode==='student')try{if(state.viewer.player)localStorage.setItem('cq_session_v3',JSON.stringify({playerId:state.viewer.player.pid,teamId:state.viewer.player.regionId,mode:state.settings.mode||'team',name:state.viewer.player.name}));else localStorage.removeItem('cq_session_v3');localStorage.removeItem('isDevTelemetry')}catch{}
@@ -285,7 +289,8 @@ export class GameEngine {
         const connection=this.socket.id;this.collectionPending=true;
         this.httpRequest('/api/collection',{}).then(()=>{this.collectionConnection=connection}).catch(()=>{}).finally(()=>{this.collectionPending=false});
       }
-      this.offset = state.serverTime - Date.now();
+      if(!Number.isFinite(this.clockRtt))this.offset=state.serverTime-Date.now();
+      if(Date.now()-this.lastClockSync>30000)this.syncClock();
       if(!this.legacyToken){if(mode==='student'&&!state.viewer.player){setToken('cq_player_token_v2',null);saveCreatorToken(null)}if(mode==='teacher'&&state.viewer.role!=='teacher')setToken('cq_teacher_token_v2',null)}
       this.emit();
     });
@@ -318,16 +323,28 @@ export class GameEngine {
   subscribeChat(room){return this.request('chatSubscribe',{room})}
   sendChat(room,text,clientId){return this.request('chatSend',{room,text,clientId})}
   deleteChatMessage(messageId){return this.request('chatDelete',{messageId})}
+  syncClock(){
+    if(this.clockSyncing||!this.socket.connected)return;
+    this.clockSyncing=true;const connection=this.socket.id,sentAt=Date.now();this.lastClockSync=sentAt;
+    this.socket.timeout(4000).emit('clock:sync',(error,data)=>{
+      if(connection!==this.socket.id)return;this.clockSyncing=false;const receivedAt=Date.now(),rtt=receivedAt-sentAt;
+      if(!error&&Number.isFinite(data?.serverTime)&&rtt>=0&&rtt<=4000){this.clockRtt=rtt;this.offset=data.serverTime-(sentAt+receivedAt)/2;}
+    });
+  }
   request(event, data = {}) {
     if (!this.connected||this.legacyToken) return Promise.reject(new Error(this.legacyToken?'Идёт восстановление прежнего входа. Дождитесь подключения.':'Нет связи с сервером. Дождитесь подключения.'));
     if(this.cookieSessions&&['applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions'].includes(event))return this.httpRequest('/api/bulk/'+event,data);
+    const input=['castVote','confirmVote','cancelVote','voteLeader','teamSubmit'].includes(event);
+    if(input){const requestId=globalThis.crypto?.randomUUID?.()||('req_'+Date.now()+'_'+Math.random().toString(36).slice(2));data={...data,requestId};this.inputStatus={requestId,roundId:data.roundId,optionIdx:data.optionIdx,status:'sending'};this.emit();}
+    const inputDone=status=>{if(input&&this.inputStatus?.requestId===data.requestId){this.inputStatus={...this.inputStatus,status};this.emit();}};
     return new Promise((resolve, reject) => this.socket.timeout(20000).emit(event, data, (error, response) => {
-      if (error) { reject(new Error("Сервер не подтвердил действие. Проверьте состояние перед повтором.")); return; }
+      if (error) {inputDone('error');reject(new Error("Сервер не подтвердил действие. Проверьте состояние перед повтором.")); return; }
       if (!response?.ok) {
+        inputDone('error');
         if (response?.code === "FORBIDDEN" && this.mode === "teacher") { setToken("cq_teacher_token_v2", null); this.socket.disconnect().connect(); }
         reject(Object.assign(new Error(response?.error || 'Действие не выполнено.'),{code:response?.code})); return;
       }
-      resolve(response);
+      inputDone('saved');resolve(response);
     }));
   }
   async httpRequest(path,data){if(!this.httpProof)await new Promise((resolve,reject)=>{const ready=()=>{clearTimeout(wait);resolve()},wait=setTimeout(()=>{this.socket.off('session:ready',ready);reject(new Error('Подключение ещё не готово. Повторите действие.'))},5000);this.socket.once('session:ready',ready)});if(!this.socket.connected)throw new Error('Нет связи с сервером.');const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const response=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CQ-Client':'1','X-CQ-Socket':this.socket.id,'X-CQ-Proof':this.httpProof,'X-CQ-Surface':this.mode},body:JSON.stringify(data),signal:controller.signal});const result=await response.json();if(!result.ok)throw Object.assign(new Error(result.error||'Запрос не выполнен.'),{code:result.code});return result}finally{clearTimeout(timer)}}

@@ -10,8 +10,9 @@ test('клиент: fallback хранилища, согласие, перепо�
  class Socket{
   events=new Map();response={ok:true,playerToken:'opaque-session-token',player:{pid:'player-id'}};
   on(name,fn){this.events.set(name,fn);return this}off(name){this.events.delete(name)}
-  connect(){this.events.get('connect')?.();return this}disconnect(){this.events.get('disconnect')?.();return this}
-  timeout(){return this}emit(name,data,callback){this.last={name,data};callback(null,this.response)}
+  connected=false;
+  connect(){this.connected=true;this.events.get('connect')?.();return this}disconnect(){this.connected=false;this.events.get('disconnect')?.();return this}
+  timeout(){return this}emit(name,data,callback){if(name==='clock:sync'){data(null,{serverTime:Date.now()});return;}this.last={name,data};if(data.requestId)this.events.get('answer:received')?.({requestId:data.requestId,roundId:data.roundId});callback(null,this.response)}
  }
  let options,socket;globalThis.__cqIo=value=>{options=value;socket=new Socket();return socket};
  let source=await readFile(new URL('../shared-engine.js',import.meta.url),'utf8');source=source.replace(/^import .*\n/gm,'').replace(/^export \{ .*from .*\n/gm,'');
@@ -26,5 +27,7 @@ test('клиент: fallback хранилища, согласие, перепо�
  const oldError=console.error;console.error=()=>{};try{engine.emit()}finally{console.error=oldError}assert.equal(updates,3);engine.listeners.delete(bad);
  socket.events.get('state')({viewer:{role:'student',player:{pid:'player-id',regionId:'saryarka',name:'Алия'}},settings:{mode:'team'},serverTime:Date.now(),branding:{subject:'История'},questions:[{id:'a',subject:'История'},{id:'b'}]});
  assert.deepEqual(engine.allQuestions().map(q=>q.id),['a']);
+ assert.deepEqual(options.transports,['websocket','polling']);assert.ok(Number.isFinite(engine.clockRtt));
+ engine.state.round={id:'client-round'};await engine.castVote(0);assert.equal(engine.inputStatus.status,'saved');assert.equal(socket.last.data.requestId,engine.inputStatus.requestId);
  socket.events.get('state')({viewer:{role:'guest',player:null},settings:{mode:'team'},serverTime:Date.now()});assert.equal(saved.has('cq_player_token_v2'),false);
 });

@@ -113,7 +113,7 @@ export function prepareAwardRound(g){
  round.awardClock={elapsed:0,runningSince:g.now()};round.ballotTimes={};
  round.awardPriorRanks=Object.fromEntries(ranking(g).map((row,_,all)=>[row.id,rankOf(all,row)]));
 }
-export function answerElapsed(g){const r=g.state.round,c=r?.awardClock;return c?Math.max(0,c.elapsed+(r.paused?0:g.now()-c.runningSince)):Infinity}
+export function answerElapsed(g){const r=g.state.round,c=r?.awardClock;return c?Math.max(0,c.elapsed+(r.paused?0:(g.inputTiming?.receivedAt??g.now())-c.runningSince)):Infinity}
 export function pauseAwardClock(g,pausing){const c=g.state.round?.awardClock;if(!c)return;if(pausing)c.elapsed=answerElapsed(g);else c.runningSince=g.now()}
 function personalAnswer(g,m){
  const r=g.state.round;

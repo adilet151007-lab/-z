@@ -106,7 +106,7 @@ function restoreSnapshot(raw) {
   state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT,perksEnabled:state.settings?.perksEnabled??true,autoAdvance:state.settings?.autoAdvance===true,autoDuration:state.settings?.autoDuration||60,...(state.settings?.universal?{universal:true,mode:state.settings.mode}:{}),...(state.settings?.flexibleTeams?{flexibleTeams:true,teamDecision:state.settings.teamDecision||'consensus',tradeEnabled:state.settings.tradeEnabled===true}:{}) };
   if(state.settings.universal){
     ensure(['team','solo'].includes(state.settings.mode)&&(state.settings.flexibleTeams||state.regions.length===10)&&!state.regions.some(isCreatorTeam)&&state.regions.every(t=>(state.settings.flexibleTeams||t.capacity===4)&&t.economy>=15),'Повреждены настройки формата игры.');
-    if(state.settings.flexibleTeams)ensure(['consensus','leader'].includes(state.settings.teamDecision),'Неизвестный способ ответа команды.');
+    if(state.settings.flexibleTeams)ensure(['consensus','leader','instant'].includes(state.settings.teamDecision),'Неизвестный способ ответа команды.');
     for(const m of state.regions.flatMap(t=>t.members))ensure(integer(m.capital,0,SAFE_SCORE)&&integer(m.streak,0,100000),'Повреждён личный рейтинг.');
   }
   ensure(integer(state.settings.teamCapacity, 1, MAX_TEAM_CAPACITY), "Повреждена настройка вместимости.");
@@ -151,6 +151,10 @@ export class GameLogic {
     for(const team of this.state.regions)team.recoveryAnswers??=0;
     initializeAwards(this);
     if(snapshot&&(!Object.hasOwn(snapshot,'achievements')||snapshot.regions.some(t=>(t.recoveryAnswers??0)!==0)||Object.values(snapshot.match?.stats||{}).some(s=>Object.hasOwn(s,'hitFloor'))))this.touch();
+  }
+  // Server-owned, already validated state only. Imports and restores use the constructor.
+  snapshotCopy() {
+    const copy=Object.create(GameLogic.prototype);copy.now=this.now;copy.state=structuredClone(this.state);return copy;
   }
   touch() { this.state.revision++; }
   scoreLimit(scope,id){return scoreLimit(this,scope,id)}
@@ -215,7 +219,7 @@ export class GameLogic {
     this.state.settings.mode=mode;this.state.match=null;this.state.phase='lobby';this.log('Формат: '+MODE_NAMES[mode]);this.touch();
   }
   enableFlexibleTeams(){if(this.state.settings.flexibleTeams)return;this.state.settings.flexibleTeams=true;this.state.settings.teamDecision='consensus';this.state.settings.tradeEnabled=false;this.state.accessControl.legacyHandshakeUntil=this.now()+86400000;this.log('Включены настраиваемые команды областей и городов.');this.touch()}
-  setTeamRules(decision,tradeEnabled){ensure(this.state.settings.flexibleTeams,'Обновите формат сессии.');ensure(!this.state.round||this.state.round.resolved,'Завершите текущий вопрос перед изменением правил.');ensure(['consensus','leader'].includes(decision)&&typeof tradeEnabled==='boolean','Проверьте правила команды.');this.state.settings.teamDecision=decision;this.state.settings.tradeEnabled=tradeEnabled;this.state.trades=[];this.touch()}
+  setTeamRules(decision,tradeEnabled){ensure(this.state.settings.flexibleTeams,'Обновите формат сессии.');ensure(!this.state.round||this.state.round.resolved,'Завершите текущий вопрос перед изменением правил.');ensure(['consensus','leader','instant'].includes(decision)&&typeof tradeEnabled==='boolean','Проверьте правила команды.');this.state.settings.teamDecision=decision;this.state.settings.tradeEnabled=tradeEnabled;this.state.trades=[];this.touch()}
   leaderFor(team){return team.members.find(m=>m.pid===team.leaderPid)?.pid||team.members.find(m=>!m.creatorId)?.pid||team.members[0]?.pid||null}
   setLeader(teamId,pid){const team=this.region(teamId);this.member(teamId,pid);team.leaderPid=pid;if(this.state.round?.leaderChoices)delete this.state.round.leaderChoices[teamId];this.log('Назначен лидер команды «'+team.name+'».');this.touch()}
   requireTrading(regionId,pid){const team=this.region(regionId);ensure(this.state.settings.tradeEnabled&&this.state.settings.mode==='team','Обмен ресурсами отключён.');ensure(!this.state.round||this.state.round.resolved,'Обмен доступен между вопросами.');ensure(this.leaderFor(team)===pid,'Предложения обмена подтверждает лидер команды.','LEADER_ONLY');return team}
@@ -462,7 +466,11 @@ export class GameLogic {
   requireRound(roundId, voting = false) {
     const round = this.state.round;
     ensure(round && !round.resolved && round.id === roundId, "Этот вопрос уже завершён или сменился.");
-    if (voting) ensure(!round.paused && this.remainingMs() > 0, "Голосование приостановлено или время истекло.");
+    if (voting) {
+      const timing=this.inputTiming;
+      ensure(!timing||timing.roundId===round.id&&timing.deadline===round.deadline,'Таймер или вопрос изменился. Выберите ответ заново.');
+      ensure(!round.paused&&round.deadline>(timing?.receivedAt??this.now()),'Голосование приостановлено или время истекло.');
+    }
     return round;
   }
   remainingMs() {
@@ -485,9 +493,9 @@ export class GameLogic {
     ensure(integer(optionIdx, 0, 3), "Вариант ответа должен быть от 0 до 3.");
     ensure(round.submitted[this.state.settings.mode==='solo'?pid:regionId] === undefined, "Ответ уже отправлен.");
     if(this.state.settings.mode==='team'&&this.state.settings.teamDecision==='leader'){ensure(this.leaderFor(this.region(regionId))===pid,'В этом режиме вариант выбирает лидер команды.','LEADER_ONLY');round.leaderChoices??={};if(round.leaderChoices[regionId]?.option===optionIdx&&round.leaderChoices[regionId].by===pid)return;round.leaderChoices[regionId]={option:optionIdx,by:pid,votes:{[pid]:true},elapsedMs:answerElapsed(this),voteTimes:{[pid]:answerElapsed(this)}};this.touch();return}
-    if(this.state.settings.universal&&this.state.settings.mode==='team'){
+    if(this.state.settings.universal&&this.state.settings.mode==='team'&&this.state.settings.teamDecision!=='instant'){
       if(round.proposals[pid]?.option===optionIdx)return;
-      round.proposals[pid]={option:optionIdx,remainingAt:this.remainingMs(),elapsedMs:answerElapsed(this)};this.touch();return;
+      round.proposals[pid]={option:optionIdx,remainingAt:round.deadline-(this.inputTiming?.receivedAt??this.now()),elapsedMs:answerElapsed(this)};this.touch();return;
     }
     if (round.ballots[pid] === optionIdx) return;
     round.ballots[pid] = optionIdx;round.ballotTimes??={};round.ballotTimes[pid]=answerElapsed(this);
@@ -739,7 +747,7 @@ export class GameLogic {
     const round=this.state.round,match=this.state.match;
     if(!this.state.settings.autoAdvance||!round?.resolved||!match||match.finishedAt!==null)return;
     const lastAward=Math.max(0,...this.state.achievements.filter(a=>a.matchId===match.id).map(a=>a.earnedAt+(ANIMATION_DURATIONS[a.achievementId]??7800)));
-    if(this.now()<Math.max((round.resolvedAt||this.now())+8000,lastAward))return;
+    if(this.now()<lastAward)return;
     const next=match.questionIds.find(id=>!match.completedQuestionIds.includes(id)&&this.state.questions.some(q=>q.id===id));
     if(next)this.startRound(next,this.state.settings.autoDuration||60);else this.finishMatch();
   }

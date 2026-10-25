@@ -13,8 +13,8 @@ test('отзыв перка возвращает предел и обновля�
 test('очистка сохраняет резервную копию и пустой банк переживает перезапуск',()=>{
  const g=new GameLogic(),count=g.state.questions.length;g.clearQuestions();assert.equal(g.state.questions.length,0);assert.equal(g.state.restorePoints[0].snapshot.questions.length,count);assert.equal(new GameLogic(g.state).state.questions.length,0);
 });
-test('автопереход работает на сервере после паузы и не повторяет последний вопрос',()=>{
- let now=1000;const g=new GameLogic(null,()=>now);g.state.questions=g.state.questions.slice(0,2);g.joinTeam('saryarka','Игрок');g.setAutoAdvance(true,30);g.startRound(g.state.questions[0].id,30);g.resolveRound();now+=7999;g.advanceIfDue();assert.equal(g.state.round.resolved,true);now++;g.advanceIfDue();assert.equal(g.state.round.questionId,g.state.questions[1].id);assert.equal(g.state.round.resolved,false);g.resolveRound();now+=20000;g.advanceIfDue();assert.notEqual(g.state.match.finishedAt,null);
+test('автопереход работает без паузы и не повторяет последний вопрос',()=>{
+ let now=1000;const g=new GameLogic(null,()=>now);g.state.questions=g.state.questions.slice(0,2);g.joinTeam('saryarka','Игрок');g.setAutoAdvance(true,30);g.startRound(g.state.questions[0].id,30);g.resolveRound();g.advanceIfDue();assert.equal(g.state.round.questionId,g.state.questions[1].id);assert.equal(g.state.round.resolved,false);g.resolveRound();now+=20000;g.advanceIfDue();assert.notEqual(g.state.match.finishedAt,null);
 });
 test('пара одновременных голосов сохраняется одной записью; ошибка БД откатывает всю пачку',async t=>{
  let writes=0,fail=false;const store={kind:'memory',async load(){return null},async save(){writes++;if(fail)throw Error('test-storage-failure')},async close(){}};
