@@ -232,7 +232,22 @@ export function setupAchievements(engine){
       for(const a of freshWorld.filter(a=>a.achievementId!=='sky-breaker'&&!ownAwards.has(a.id)))enqueue({...a,recipientName:a.teamName},false,true);
     }
     document.querySelectorAll('[data-achievement-rules]').forEach(node=>node.textContent=engine.mode==='teacher'?'Обычные, редкие и легендарные награды. Секретные условия доступны в пульте ниже.':'Коллекция сохраняется после выхода в этом браузере. Шесть разных легендарных наград открывают перк. Секретные награды появляются после получения.');
-    const progress=state.achievementProgress,counters=state.achievementCounters;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;node.textContent=state.settings?.mode==='solo'&&counters?`Быстрых ответов: ${Math.min(5,counters.fast)}/5 · быстрая верная серия: ${Math.min(3,counters.fastRun)}/3.${counters.lastAnswerStatus?` Последний ответ: ${counters.lastAnswerMs===null?'не получен':(counters.lastAnswerMs/1000).toFixed(2)+' с'} · ${{fast:'верно, в пределах 5 секунд',slow:'верно, но дольше 5 секунд',wrong:'неверно',repeat:'повтор вопроса — серия не засчитывается',missing:'пропуск'}[counters.lastAnswerStatus]||''}.`:''}`:progress?`«Ты смог, братец»: ${progress.hitCrisis?'✓':'○'} экономика ниже 30% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} восстановлена до 100% · ${state.match?.finishedAt!=null&&rank===1?'✓':'○'} первое место в конце. Текущее место: ${rank||'—'}.`:''});
+    const progress=state.achievementProgress,counters=state.achievementCounters;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;const base=state.settings?.mode==='solo'&&counters?`Быстрых ответов: ${Math.min(5,counters.fast)}/5 · быстрая верная серия: ${Math.min(3,counters.fastRun)}/3.${counters.lastAnswerStatus?` Последний ответ: ${counters.lastAnswerMs===null?'не получен':(counters.lastAnswerMs/1000).toFixed(2)+' с'} · ${{fast:'верно, в пределах 5 секунд',slow:'верно, но дольше 5 секунд',wrong:'неверно',repeat:'повтор вопроса — серия не засчитывается',missing:'пропуск'}[counters.lastAnswerStatus]||''}.`:''}`:progress?`«Ты смог, братец»: ${progress.hitCrisis?'✓':'○'} экономика ниже 30% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} восстановлена до 100% · ${state.match?.finishedAt!=null&&rank===1?'✓':'○'} первое место в конце. Текущее место: ${rank||'—'}.`:'';
+      const eligibility=state.achievementEligibility,notes=[];
+      if(eligibility){
+        const owned=new Set((state.collection?.awards||[]).map(a=>a.achievementId));
+        if(!owned.has('foresight')&&!eligibility.foresight.modeAllowed)notes.push('Предвидение: доступно только в Solo; скорость в командном режиме не выдаёт эту награду.');
+        const near=eligibility.nearVictory;
+        if(owned.has('near-victory'))notes.push('«Ты почти смог, Джо»: получено.');
+        else if(!near.finished)notes.push('«Джо»: проверка в конце сессии — второе место и разрыв 1–25 очков рейтинга.');
+        else if(near.completed<5)notes.push(`«Джо»: завершено ${near.completed} из 5 необходимых вопросов.`);
+        else if(near.rank!==2)notes.push(`«Джо»: итоговое место ${near.rank??'не определено'}, нужно второе. Пустые команды не участвуют.`);
+        else if(near.gap===null)notes.push('«Джо»: в истории этого матча не сохранён итоговый разрыв.');
+        else if(near.gap<1||near.gap>25)notes.push(`«Джо»: итоговый разрыв ${near.gap}, нужен от 1 до 25 очков рейтинга.`);
+        else notes.push('Условия «Джо» выполнены; проверьте коллекцию наград.');
+      }
+      node.textContent=[base,...notes].filter(Boolean).join(' ');
+    });
     const awards=engine.mode==='teacher'?(state.match?.awards||[]):state.achievements||[],catalogue=state.achievementCatalog||ACHIEVEMENTS,collection=state.collection,key=JSON.stringify([awards,catalogue,collection,state.match?.id]);
     if(key!==shelfKey){shelfKey=key;
       document.querySelectorAll('[data-achievement-count]').forEach(node=>node.textContent=String(awards.length));

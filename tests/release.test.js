@@ -68,8 +68,8 @@ test('релиз: ограничения помех индивидуальны �
 });
 
 test('релиз: CSV и рейтинг используют один порядок, Solo JSON-патч сохраняет принятый ответ',()=>{
- const g=new GameLogic();g.enableUniversal();g.adjustPoints('saryarka',100);g.adjustEconomy('saryarka',-80);g.adjustPoints('jetisu',50);
- assert.deepEqual(g.exportSummary().map(t=>t.region),g.teamRanking().map(t=>t.name));assert.equal(g.teamRanking()[0].teamId,'jetisu');
+ const g=new GameLogic();g.enableUniversal();g.joinTeam('saryarka','Первый');g.joinTeam('jetisu','Второй');g.adjustPoints('saryarka',100);g.adjustEconomy('saryarka',-80);g.adjustPoints('jetisu',50);
+ assert.deepEqual(g.exportSummary().map(t=>t.region),g.teamRanking().filter(t=>t.rank!==null).map(t=>t.name));assert.equal(g.teamRanking()[0].teamId,'jetisu');
  g.setGameMode('solo');const joined=g.joinTeam(null,'Алия'),pid=joined.player.pid;g.startRound('q1',30);g.castVote(joined.player.regionId,pid,0,g.state.round.id);g.teamSubmit(joined.player.regionId,pid,g.state.round.id);
  const patch=g.editorSnapshot();patch.regions[0].economy=80;g.applyRawState(patch);assert.equal(g.state.round.submitted[pid],0);
 });

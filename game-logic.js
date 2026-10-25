@@ -847,7 +847,7 @@ export class GameLogic {
       branding:this.publicBranding(),
       regions:this.state.regions.map(r=>({...r,scoreLimit:this.scoreLimit('team',r.id)>RESOURCE_CAP?null:RESOURCE_CAP,leaderPid:this.leaderFor(r),members:r.members.map(({pid,name,capital,streak})=>({pid,name,online:onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak,scoreLimit:this.scoreLimit('player',pid)>RESOURCE_CAP?null:RESOURCE_CAP}:{})})),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length}:{})})),
       leaderboard:this.state.settings.mode==='solo'?this.ranking():[],
-      teamLeaderboard:this.state.settings.mode==='team'?this.teamRanking():[],
+      teamLeaderboard:this.state.settings.mode==='team'?this.teamRanking().filter(row=>row.rank!==null):[],
       votes:this.state.round?Object.fromEntries(this.state.regions.map(r=>[r.id,this.votesFor(r.id)])):{}
     };
   }
@@ -876,6 +876,14 @@ export class GameLogic {
     view.match=match?{id:match.id,completedCount:match.completedQuestionIds.length,totalQuestions:match.questionIds.length,currentIsFinal:this.state.round?.questionId===match.questionIds.at(-1),finishedAt:match.finishedAt,winnerTeamIds:[...match.winnerTeamIds],awards:adminView?awards.filter(a=>a.matchId===match.id):view.achievements.filter(a=>a.matchId===match.id)}:null;
     view.achievementProgress=player?{...(Object.hasOwn(match?.stats||{},player.regionId)?match.stats[player.regionId]:{hitCrisis:false,recoveredByQuiz:false}),resources:this.region(player.regionId).points,economy:this.region(player.regionId).economy}:null;
     view.achievementCounters=player?{fast:this.state.match?.questStats?.['p:'+player.pid]?.fast||0,fastRun:this.state.match?.questStats?.['p:'+player.pid]?.fastRun||0,studied:view.collection.studied,lastAnswerMs:this.state.match?.questStats?.['p:'+player.pid]?.lastAnswerMs??null,lastAnswerStatus:this.state.match?.questStats?.['p:'+player.pid]?.lastAnswerStatus??null}:null;
+    if(player){
+      const solo=this.state.settings.mode==='solo',rows=solo?frame.leaderboard:frame.teamLeaderboard;
+      const own=rows.find(row=>solo?row.pid===player.pid:row.teamId===player.regionId),score=row=>solo?row.capital:row.rating;
+      const currentRank=own?1+rows.filter(row=>score(row)>score(own)).length:null,currentGap=own?score(rows[0])-score(own):null;
+      const stats=match?.questStats?.[(solo?'p:':'t:')+(solo?player.pid:player.regionId)]||{},finished=match?.finishedAt!=null;
+      const rank=finished?(stats.finishRank??stats.finalRank??null):currentRank;
+      view.achievementEligibility={foresight:{modeAllowed:solo,fastRun:view.achievementCounters.fastRun},nearVictory:{finished,rank,gap:finished?(stats.finishGap??(rank===1?0:null)):currentGap,completed:match?.completedQuestionIds.length||0,contestants:rows.length}};
+    }
     if(adminView)view.sessionControl={protectedPlayerIds:this.state.regions.flatMap(t=>t.members.filter(m=>m.creatorId).map(m=>m.pid)),effectTargetIds:this.state.regions.flatMap(t=>t.members.filter(m=>!m.creatorId&&!this.adminGrantFor(m.pid)&&onlinePlayers.has(m.pid)).map(m=>m.pid)),presentationEffectsEnabled:this.state.presentationEffectsEnabled!==false,delegatedAdmins:creator&&player?.creatorId==='adilet'?structuredClone(this.state.delegatedAdmins||[]):[],...(actor.role==='teacher'?{exitRequests:structuredClone(this.state.exitRequests||[])}:{})};
     if(creator)view.viewer.exitRequest=structuredClone(this.state.exitRequests?.find(r=>r.pid===player.pid&&r.status==='pending')||null);
     if(creator&&player.creatorId==='adilet')view.sessionControl.invitations=this.state.accessControl.invitations.map(({id,permissions,minutes,createdAt,expiresAt,usedAt,revokedAt})=>({id,permissions,minutes,createdAt,expiresAt,usedAt,revokedAt}));
@@ -913,6 +921,6 @@ export class GameLogic {
   }
   exportSummary() {
     if(this.state.settings.mode==='solo')return this.ranking().map(m=>({region:m.name,members:m.name,points:m.capital,economy:100,development:`Серия ${m.streak} · ×${m.multiplier}`,status:'личный рейтинг'}));
-    return this.teamRanking().map(row => {const r=this.region(row.teamId);return {region:r.name,members:r.members.map(m=>m.name).join(', '),points:r.points,economy:r.economy,rating:row.rating,development:row.development,status:r.economy<CRISIS_THRESHOLD?'кризис':'норма'}});
+    return this.teamRanking().filter(row=>row.rank!==null).map(row => {const r=this.region(row.teamId);return {region:r.name,members:r.members.map(m=>m.name).join(', '),points:r.points,economy:r.economy,rating:row.rating,development:row.development,status:r.economy<CRISIS_THRESHOLD?'кризис':'норма'}});
   }
 }

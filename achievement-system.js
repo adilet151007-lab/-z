@@ -171,6 +171,7 @@ export function evaluateAwardFinish(g){
  const match=g.state.match,solo=g.state.settings.mode==='solo',scope=solo?'player':'team',prefix=solo?'p:':'t:',rows=ranking(g),total=match.questionIds.length,final=g.state.round?.questionId===match.questionIds.at(-1);
  for(const row of rows){
   const s=statsFor(match,prefix+row.id),rank=rankOf(rows,row),gap=rows[0].score-row.score;
+  s.finishRank=rank;s.finishGap=gap;
   if(rank===2&&gap>=1&&gap<=25&&match.completedQuestionIds.length>=5)g.grantAchievement('near-victory',scope,row.id,'earned','ranking');
   if(final&&total>=10&&match.completedQuestionIds.length===total&&s.initial&&s.seen.length===total&&s.correct===total)g.grantAchievement('perfect-form',scope,row.id,'earned','perfect');
   if(final&&total>=10&&match.completedQuestionIds.length===total&&rows.length>=4&&s.initial&&s.midLast&&!s.ledAfterMid&&s.previousRank>1&&rank===1)g.grantAchievement('zero-card',scope,row.id,'earned','ranking');
