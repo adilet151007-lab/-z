@@ -94,6 +94,8 @@ export function mountAchievementAnimation(host, award, options = {}) {
       renderer.shadowMap.enabled=!mobile&&!reducedMotion;
       loaded = module.createAnimation({ THREE, reducedMotion, lowPower: mobile }); animation = loaded;
       if (!animation?.scene || !animation?.camera || typeof animation.update !== 'function') throw new Error('Invalid animation module');
+      animation.prepareEnvironment?.(renderer);
+      if(animation.caption)caption.hidden=true;
       const duration = Math.max(500, Math.min(15000, Number(module.durationMs) || 6000));
       const captionAt = Math.max(0, Math.min(duration, Number(module.captionAtMs) || 0));
       resize(); loading.hidden = true;

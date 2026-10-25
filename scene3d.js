@@ -427,6 +427,7 @@ export function createScene(canvas, opts = {}) {
         import(ANIMATION_MODULES[award.achievementId]).then(module=>{
           if(cancelled||disposed)return;
           animation=module.createAnimation({THREE,reducedMotion:window.matchMedia('(prefers-reduced-motion: reduce)').matches,lowPower:true,mapMode:true});
+          animation.prepareEnvironment?.(renderer);
           animation.update(Math.min(6.8,duration/1000),0);
           const box=(animation.mapBounds||new THREE.Box3().setFromObject(animation.scene)),size=box.getSize(new THREE.Vector3()),center=box.getCenter(new THREE.Vector3());
           const scale=12/Math.max(size.x,size.y,size.z,1);normalizer=new THREE.Group();normalizer.scale.setScalar(scale);normalizer.position.set(-center.x*scale,.8-box.min.y*scale,-center.z*scale);

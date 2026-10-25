@@ -4,17 +4,18 @@ import * as THREE from 'three';
 import {readFile} from 'node:fs/promises';
 import {disposeAnimationScene} from '../achievement-player.js';
 const gradient={addColorStop(){}};
-const context=new Proxy({}, {get:(_,key)=>key==='createLinearGradient'||key==='createRadialGradient'?()=>gradient:key==='measureText'?()=>({width:30}):()=>{},set:()=>true});
+const context=new Proxy({}, {get:(_,key)=>key==='createImageData'?(w,h)=>({data:new Uint8ClampedArray(w*h*4)}):key==='createLinearGradient'||key==='createRadialGradient'?()=>gradient:key==='measureText'?()=>({width:30}):()=>{},set:()=>true});
 test('общая карта: книга обновляется без падения; башня без города имеет собственные границы',async()=>{
  const previous=globalThis.document;globalThis.document={createElement:()=>({width:1,height:1,getContext:()=>context})};
  try{
-  for(const id of ['scenario-reader','neon-summit','determination','daily-training']){
+  for(const id of ['scenario-reader','neon-summit','determination','daily-training','infinity-gauntlet']){
    const module=await import('../award-'+id+'.js'),animation=module.createAnimation({THREE,reducedMotion:false,lowPower:true,mapMode:true});
    try{
     animation.update(6.8,0);const bounds=animation.mapBounds||new THREE.Box3().setFromObject(animation.scene);
     const scale=12/Math.max(...bounds.getSize(new THREE.Vector3()).toArray(),1);assert.ok(Number.isFinite(scale)&&scale>0);
     const parent=new THREE.Group();parent.scale.setScalar(scale);parent.add(animation.scene);
     for(const time of [0,1,3,5.5,6.8,7.9])assert.doesNotThrow(()=>animation.update(time,1/30),id);
+    if(id==='infinity-gauntlet'){assert.equal(module.durationMs,11000);animation.update(8.6,0);assert.equal(animation.inspect().background,null);assert.equal(animation.scene.userData.installedCount,6);assert.equal(animation.scene.userData.limitRemoved,true);animation.update(2,0);assert.equal(animation.scene.userData.limitRemoved,false);}
     if(id==='neon-summit'){
      assert.equal(bounds.max.y,160);assert.equal(animation.scene.children.find(o=>o.geometry?.type==='SphereGeometry'&&o.geometry.parameters.radius===900).visible,false);
      assert.ok(scale>.07,'башня не уменьшается до размера сферы неба');
