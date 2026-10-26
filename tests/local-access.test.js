@@ -84,7 +84,8 @@ test('помеха на клиенте: PRO-сигнал виден при ст�
  let cleanup=()=>{};t.after(()=>{cleanup();globalThis.document=priorDocument});
  let changed;const engine={state:{viewer:{role:'teacher'},sessionControl:{presentationEffectsEnabled:false}},socket:{on:(name,handler)=>handlers.set(name,handler),off:name=>handlers.delete(name)},onChange:handler=>{changed=handler;return ()=>{}}};
  let source=await readFile(new URL('../shared-engine.js',import.meta.url),'utf8');source=source.slice(source.indexOf('export function setupPresentationEffects'),source.indexOf('export function setupAmbientAudio'));
- const {setupPresentationEffects}=await import('data:text/javascript;base64,'+Buffer.from(source).toString('base64'));cleanup=setupPresentationEffects(engine);
+ const prefix="const uiText=value=>String(value);const uiTpl=(parts,...values)=>parts.map((part,index)=>part+(index<values.length?values[index]:'')).join('');\n";
+ const {setupPresentationEffects}=await import('data:text/javascript;base64,'+Buffer.from(prefix+source).toString('base64'));cleanup=setupPresentationEffects(engine);
  const receive=handlers.get('ui:presentation-effect');receive({duration:100,overrideDisabled:false});assert.equal(children.length,0);
  receive({duration:100,overrideDisabled:true});assert.equal(children.length,1);assert.equal(nodes[0].inert,true);changed(engine.state);assert.equal(children.length,1);
  await new Promise(resolve=>setTimeout(resolve,120));assert.equal(children.length,0);assert.equal(nodes[0].inert,false);assert.equal(classes.size,0);

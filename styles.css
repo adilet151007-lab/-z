@@ -9,8 +9,8 @@
   --panel-brd-hi:rgba(125,200,255,0.4);
   --ink:#E9F4FA;
   --mut:#7FA0B2;
-  --cyan:#3FE0D0;
-  --gold:#F3C25D;
+  --cyan:var(--brand-accent,#3FE0D0);
+  --gold:var(--brand-gold,#F3C25D);
   --red:#FF6B5E;
   --violet:#9C8CF0;
   --radius:16px;
@@ -442,4 +442,41 @@ body.telemetry-open,body.presentation-signal{overflow:hidden}
 .award-caption{position:absolute;bottom:max(70px,env(safe-area-inset-bottom));left:12px;right:12px;text-align:center;color:#fff;opacity:0;transform:translateY(8px);transition:opacity .6s,transform .6s;pointer-events:none}
 .award-caption.on{opacity:1;transform:none}.award-caption small,.award-caption span{display:block;color:#cfc6e6;font-size:12px}.award-caption strong{display:block;margin:8px 0;font:700 clamp(22px,5vw,32px)/1.2 Georgia,serif;text-shadow:0 0 20px #b48cff}
 .award-static{display:none}.award-fallback .award-static{display:block;position:absolute;inset:25% 30% 35%;border:2px solid #c8993a;border-radius:14px;text-align:center;color:#f8e199;font:100px Georgia,serif}.award-fallback canvas{display:none}
+
+/* Personal appearance settings; the atlas and cinematic artwork keep their own lighting. */
+.ui-preferences{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:none;min-width:0}.reg-card>.ui-preferences{width:100%;margin-bottom:16px;flex:none}.ui-preferences select{width:100px;min-height:40px;font-size:12px;padding:7px 8px}.ui-theme-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:7px 10px;white-space:nowrap;font-size:12px}.ui-theme-button>span:first-child{font-size:19px;line-height:1}.topbar>.ui-preferences{margin-left:2px}
+:root[data-theme="light"]{--bg-0:#e8f0f5;--bg-1:#f8fbfd;--panel:rgba(255,255,255,.91);--panel-brd:rgba(36,84,111,.18);--panel-brd-hi:rgba(20,97,112,.48);--ink:#163347;--mut:#496676;--cyan:color-mix(in srgb,var(--brand-accent,#3FE0D0) 30%,#00352f);--gold:color-mix(in srgb,var(--brand-gold,#F3C25D) 24%,#653500);--red:#b52f2f;--violet:#7046a2;--shadow:0 14px 38px rgba(26,64,88,.12);color-scheme:light}
+[data-theme="light"] body{background:radial-gradient(1000px 700px at 0 0,#ccede44d,transparent 65%),linear-gradient(160deg,var(--bg-1),var(--bg-0))}
+[data-theme="light"] .topbar{background:rgba(255,255,255,.91)}
+[data-theme="light"] :is(input[type="text"],input[type="password"],input[type="number"],input[type="search"],select,textarea){color:var(--ink);background:#fff;border-color:var(--panel-brd)}
+[data-theme="light"] :is(input,textarea)::placeholder{color:#607d8c;opacity:1}
+[data-theme="light"] option{color:var(--ink);background:#fff}
+[data-theme="light"] button:not(.pri):not(.danger){color:var(--ink)}
+[data-theme="light"] button:not(.pri):hover:not(:disabled){background:#dfeef3}
+[data-theme="light"] button.pri{background:linear-gradient(120deg,#07594f,#157467);color:#fff;border-color:#07594f}
+[data-theme="light"] button.ghost{color:var(--mut)}
+[data-theme="light"] button.danger{color:var(--red);border-color:#bd45457d}
+[data-theme="light"] .violet{color:var(--violet)}
+[data-theme="light"] :is(.admin-dialog,.telemetry-sheet,.teacher-action-menu,.chat-panel,.project-credits,.session-refresh-toast,.presentation-notice){color:var(--ink);background:linear-gradient(145deg,#fff,#f1f7fa);border-color:var(--panel-brd-hi);box-shadow:var(--shadow)}
+[data-theme="light"] :is(.session-utilities,.roster-table th){background:#edf4f8}
+[data-theme="light"] :is(.chat-launcher,.utility-button,.leader-card,.draft,.topic-check,.achievement-card,.achievement-locked){background:#f4f9fc;color:var(--ink);border-color:var(--panel-brd)}
+[data-theme="light"] :is(.chat-tabs button.active,.opt.chosen,.vote-proposal,.answer-key,.draft-options .draft-correct input){background:#dcefe9;border-color:#126f6159;color:#174c40}
+[data-theme="light"] .opt.correct{background:#daf1df;border-color:#297941;color:#184827}
+[data-theme="light"] .opt.wrong{background:#f9e5e4;border-color:#b52f2f;color:#842626}
+[data-theme="light"] :is(.bar,.timer-bar,.development-track){background:#dae5ed}
+[data-theme="light"] :is(.chat-header h2,.chat-message-meta strong,.telemetry-header strong,.development-heading,.achievement-card strong,.achievement-card.rarity-perk strong){color:var(--ink)}
+[data-theme="light"] :is(.chat-header small,.chat-description,.chat-message time,.chat-delete,.credits-copy>span,.session-utilities .product-signature){color:var(--mut)}
+[data-theme="light"] .chat-message{background:#e9f1f8;border-color:#a6c1d355}
+[data-theme="light"] .chat-message.mine{background:#e0f0e9;border-color:#80b6a866}
+[data-theme="light"] .achievement-card.rarity-rare{background:#e8effd;border-color:#8ca7d1}
+[data-theme="light"] .achievement-card.rarity-perk{background:#f1e8fb;border-color:#a674d6}
+[data-theme="light"] .achievement-locked{opacity:.8}
+[data-theme="light"] :is(.credits-copy strong,.credits-copy small,#cq-credits-contact){color:#755017}
+[data-theme="light"] :is(.region-card .rname,#my-region-tag,#team-panel>h2[style]){filter:brightness(.65)}
+[data-theme="light"] :is(.atlas-projector,.stage-wrap){background:#07151e}
+[data-theme="light"] :is(.atlas-projector,.stage-wrap) :is(.hint,.map-credit,.map-caption,.map-team-picker){color:#b2cbd2}
+[data-theme="light"] :is(.atlas-projector,.stage-wrap) select{color:#e2f2f4;background:#102b36;border-color:#5b8593}
+[data-theme="light"] .telemetry-shade,[data-theme="light"] .admin-dialog::backdrop{background:rgba(15,36,52,.36)}
+[data-theme="light"] .presentation-blocker{color:#d6eeec}
+@media(max-width:600px){.ui-preferences{gap:4px}.ui-preferences select{width:90px;font-size:12px;min-height:40px}.topbar .ui-theme-button{min-width:40px;min-height:40px;padding:7px}.topbar .theme-word{display:none}.topbar>.ui-preferences{margin-left:auto}.reg-card>.ui-preferences{margin-bottom:12px}}
 @media(prefers-reduced-motion:reduce){.award-caption{transition:none}}

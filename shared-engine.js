@@ -1,3 +1,4 @@
+import {t as uiText,tx as uiTpl} from './ui-preferences.js';
 import {has2DAnimation,mount2DAnimation} from './award-2d.js';
 import { io } from "/socket.io/socket.io.esm.min.js";
 import { hasAchievementAnimation, mountAchievementAnimation } from './achievement-player.js';
@@ -8,10 +9,10 @@ export const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char 
 
 export function setupBranding(engine){
   let key='';engine.onChange(state=>{const b=state?.branding;if(!b)return;const next=JSON.stringify(b);if(key===next)return;key=next;
-    document.documentElement.style.setProperty('--cyan',b.accent);document.documentElement.style.setProperty('--gold',b.gold);
-    document.querySelectorAll('[data-brand-title]').forEach(node=>node.textContent=b.title);document.querySelectorAll('[data-brand-university]').forEach(node=>node.textContent=b.university);document.querySelectorAll('[data-brand-subject]').forEach(node=>node.textContent=b.subject);
+    document.documentElement.style.setProperty('--brand-accent',b.accent);document.documentElement.style.setProperty('--brand-gold',b.gold);
+    document.querySelectorAll('[data-brand-title]').forEach(node=>node.textContent=b.title);document.querySelectorAll('[data-brand-university]').forEach(node=>node.textContent=b.university==='Учебный проект'?uiText(b.university):b.university);document.querySelectorAll('[data-brand-subject]').forEach(node=>node.textContent=b.subject);
     document.querySelectorAll('[data-brand-logo]').forEach(node=>{node.hidden=!b.logoUrl;if(b.logoUrl&&node.getAttribute('src')!==b.logoUrl)node.src=b.logoUrl});
-    document.title=b.subject+' · '+b.university;
+    document.title=b.subject+' · '+(b.university==='Учебный проект'?uiText(b.university):b.university);
   });
 }
 const getToken = key => { for (const storage of ['localStorage','sessionStorage']) try { const value=globalThis[storage].getItem(key);if(value)return value; } catch {} };
@@ -36,8 +37,8 @@ export function setupPresentationEffects(engine) {
     if(!Number.isInteger(duration)||duration<100||duration>60000)return;
     stop();overrideDisabled=event.overrideDisabled===true;previousFocus=document.activeElement;
     box=document.createElement('div');box.className='presentation-blocker';box.tabIndex=-1;box.setAttribute('role','alert');
-    box.setAttribute('aria-label','Временный визуальный эффект. Запись экрана не ведётся.');
-    box.innerHTML=`<div class="recording-hud"><span class="recording-dot">● REC · SIM</span><span>FRAME LOSS</span><span>${Math.ceil(duration/1000)}s</span></div><div class="recording-noise"></div><div class="recording-center">NO SIGNAL<br><small>ВИЗУАЛЬНЫЙ ЭФФЕКТ · ЗАПИСЬ НЕ ВЕДЁТСЯ</small></div>`;
+    box.setAttribute('aria-label', uiText('Временный визуальный эффект. Запись экрана не ведётся.'));
+    box.innerHTML= uiTpl`<div class="recording-hud"><span class="recording-dot">● REC · SIM</span><span>FRAME LOSS</span><span>${Math.ceil(duration/1000)}s</span></div><div class="recording-noise"></div><div class="recording-center">NO SIGNAL<br><small>ВИЗУАЛЬНЫЙ ЭФФЕКТ · ЗАПИСЬ НЕ ВЕДЁТСЯ</small></div>`;
     for(const node of document.querySelectorAll('#teacher-app,#app,#cq-chat-root,#cq-project-credits,#sys-telemetry-root')){locked.push([node,node.inert]);node.inert=true;}
     document.body.classList.add('presentation-signal');document.body.append(box);box.focus({preventScroll:true});
     timer=setTimeout(stop,duration);
@@ -49,30 +50,30 @@ export function setupPresentationEffects(engine) {
 
 export function setupAmbientAudio(){
   const bar=document.querySelector('.app .topbar');if(!bar)return;
-  const controls=document.createElement('div');controls.className='music-controls';controls.innerHTML='<button type="button" data-music-toggle aria-pressed="false">♫ Музыка</button><label class="sr-only" for="cq-music-volume">Громкость фоновой музыки</label><input id="cq-music-volume" type="range" min="0" max="30" value="8" aria-label="Громкость музыки">';bar.append(controls);
+  const controls=document.createElement('div');controls.className='music-controls';controls.innerHTML= uiText('<button type="button" data-music-toggle aria-pressed="false">♫ Музыка</button><label class="sr-only" for="cq-music-volume">Громкость фоновой музыки</label><input id="cq-music-volume" type="range" min="0" max="30" value="8" aria-label="Громкость музыки">');bar.append(controls);
   const button=controls.querySelector('button'),slider=controls.querySelector('input');try{slider.value=localStorage.getItem('cq_music_volume_v1')||'8'}catch{}
   let context=null,master=null,enabled=false,timer=null,step=0;const voices=new Set(),chords=[[130.81,164.81,196],[110,130.81,164.81],[87.31,130.81,174.61],[98,146.83,196]];
   function chord(){if(!enabled||document.hidden||!context)return;const start=context.currentTime+.05;for(const hz of chords[step++%chords.length]){const wave=context.createOscillator(),gain=context.createGain();wave.type='sine';wave.frequency.value=hz;gain.gain.setValueAtTime(0,start);gain.gain.linearRampToValueAtTime(.07,start+1.6);gain.gain.linearRampToValueAtTime(0,start+6.4);wave.connect(gain);gain.connect(master);voices.add(wave);wave.onended=()=>{voices.delete(wave);wave.disconnect();gain.disconnect()};wave.start(start);wave.stop(start+6.5)}}
   function pause(){clearInterval(timer);timer=null;for(const voice of voices)try{voice.stop()}catch{}voices.clear();context?.suspend().catch(()=>{})}
-  async function play(){if(document.hidden)return;const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw new Error('Браузер не поддерживает звук');context??=new Audio();if(!master){master=context.createGain();master.connect(context.destination)}master.gain.value=Number(slider.value)/100;await context.resume();chord();clearInterval(timer);timer=setInterval(chord,6000)}
-  button.addEventListener('click',async()=>{enabled=!enabled;try{if(enabled)await play();else pause()}catch{enabled=false;pause();button.title='Разрешите воспроизведение звука в браузере.'}button.setAttribute('aria-pressed',String(enabled));button.textContent=enabled?'♫ Выключить':'♫ Музыка'});
+  async function play(){if(document.hidden)return;const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw new Error( uiText('Браузер не поддерживает звук'));context??=new Audio();if(!master){master=context.createGain();master.connect(context.destination)}master.gain.value=Number(slider.value)/100;await context.resume();chord();clearInterval(timer);timer=setInterval(chord,6000)}
+  button.addEventListener('click',async()=>{enabled=!enabled;try{if(enabled)await play();else pause()}catch{enabled=false;pause();button.title= uiText('Разрешите воспроизведение звука в браузере.')}button.setAttribute('aria-pressed',String(enabled));button.textContent=enabled? uiText('♫ Выключить'): uiText('♫ Музыка')});
   slider.addEventListener('input',()=>{if(master)master.gain.setTargetAtTime(Number(slider.value)/100,context.currentTime,.1);try{localStorage.setItem('cq_music_volume_v1',slider.value)}catch{}});
   document.addEventListener('visibilitychange',()=>{if(document.hidden)pause();else if(enabled)play().catch(()=>{})});window.addEventListener('pagehide',pause);
 }
 
 export function setupAchievementControls(engine,host){
   host.classList.add('achievement-tools');
-  host.innerHTML='<h3>Достижения и перки</h3><label class="field-label section-gap">Достижение<select data-award-kind aria-label="Достижение для проверки"></select></label><p data-award-description class="small-note mut section-gap"></p><p class="small-note mut">Предпросмотр виден только вам. Ручное вручение не собирает камни для перка.</p><div class="row section-gap"><button type="button" data-award-preview>▶ Предпросмотр анимации</button><button type="button" data-award-finish>Завершить сессию</button></div><label class="field-label section-gap">Получатель<select data-award-target aria-label="Получатель достижения"></select></label><button type="button" data-award-grant class="pri section-gap">Вручить достижение</button><button type="button" data-award-revoke class="danger section-gap">Отозвать достижение</button><label class="privacy-consent section-gap"><input type="checkbox" data-award-perks><span>Играть с перками · полная коллекция снимает предел 1000 очков</span></label><p data-award-status class="small-note" role="status"></p>';
+  host.innerHTML= uiText('<h3>Достижения и перки</h3><label class="field-label section-gap">Достижение<select data-award-kind aria-label="Достижение для проверки"></select></label><p data-award-description class="small-note mut section-gap"></p><p class="small-note mut">Предпросмотр виден только вам. Ручное вручение не собирает камни для перка.</p><div class="row section-gap"><button type="button" data-award-preview>▶ Предпросмотр анимации</button><button type="button" data-award-finish>Завершить сессию</button></div><label class="field-label section-gap">Получатель<select data-award-target aria-label="Получатель достижения"></select></label><button type="button" data-award-grant class="pri section-gap">Вручить достижение</button><button type="button" data-award-revoke class="danger section-gap">Отозвать достижение</button><label class="privacy-consent section-gap"><input type="checkbox" data-award-perks><span>Играть с перками · полная коллекция снимает предел 1000 очков</span></label><p data-award-status class="small-note" role="status"></p>');
   let busy=false;
   const target=host.querySelector('[data-award-target]'),status=host.querySelector('[data-award-status]'),kind=host.querySelector('[data-award-kind]'),perks=host.querySelector('[data-award-perks]');
   const render=state=>{
     const viewer=state?.viewer,full=viewer?.isCreator||viewer?.role==='teacher',game=full||viewer?.adminGrant?.tier!=='local'&&viewer?.adminGrant?.permissions.game,canGrant=full||game&&viewer?.adminGrant?.permissions.players;
     host.hidden=!game;const shell=host.closest('[data-award-tools-shell]');if(shell)shell.hidden=!game;if(!game)return;
     const catalogue=state.achievementCatalog||ACHIEVEMENTS,catalogueKey=JSON.stringify(catalogue);
-    if(kind.dataset.key!==catalogueKey){const value=kind.value;kind.innerHTML=catalogue.map(a=>`<option value="${escapeHTML(a.id)}">${escapeHTML(a.title)}${a.secret?' · секретное':''}</option>`).join('');kind.dataset.key=catalogueKey;if(catalogue.some(a=>a.id===value))kind.value=value}
+    if(kind.dataset.key!==catalogueKey){const value=kind.value;kind.innerHTML=catalogue.map(a=>`<option value="${escapeHTML(a.id)}">${escapeHTML(a.title)}${a.secret? uiText(' · секретное'):''}</option>`).join('');kind.dataset.key=catalogueKey;if(catalogue.some(a=>a.id===value))kind.value=value}
     host.querySelector('[data-award-description]').textContent=catalogue.find(a=>a.id===kind.value)?.description||'';
     perks.checked=state.settings.perksEnabled!==false;perks.disabled=busy||!engine.connected||!!state.round&&!state.round.resolved;
-    const options=(viewer.player?`<option value="player:${viewer.player.pid}">Себе · ${escapeHTML(viewer.player.name)}</option>`:'')+'<optgroup label="Команды">'+state.regions.filter(t=>t.members.length).map(t=>`<option value="team:${t.id}">${escapeHTML(t.name)}</option>`).join('')+'</optgroup><optgroup label="Участники">'+state.regions.flatMap(t=>t.members.filter(m=>m.pid!==viewer.player?.pid).map(m=>`<option value="player:${m.pid}">${escapeHTML(m.name)} · ${escapeHTML(t.name)}</option>`)).join('')+'</optgroup>';
+    const options=(viewer.player? uiTpl`<option value="player:${viewer.player.pid}">Себе · ${escapeHTML(viewer.player.name)}</option>`:'')+ uiText('<optgroup label="Команды">')+state.regions.filter(t=>t.members.length).map(t=>`<option value="team:${t.id}">${escapeHTML(t.name)}</option>`).join('')+ uiText('</optgroup><optgroup label="Участники">')+state.regions.flatMap(t=>t.members.filter(m=>m.pid!==viewer.player?.pid).map(m=>`<option value="player:${m.pid}">${escapeHTML(m.name)} · ${escapeHTML(t.name)}</option>`)).join('')+'</optgroup>';
     if(target.dataset.key!==options){const value=target.value;target.innerHTML=options;target.dataset.key=options;if([...target.options].some(option=>option.value===value))target.value=value}
     host.querySelector('[data-award-revoke]').hidden=!full;host.querySelector('[data-award-grant]').hidden=!canGrant;target.parentElement.hidden=!canGrant;
     for(const button of host.querySelectorAll('button'))button.disabled=busy||!engine.connected;
@@ -80,12 +81,12 @@ export function setupAchievementControls(engine,host){
     host.querySelector('[data-award-finish]').disabled||=!state.match?.completedCount||state.match.finishedAt!==null||!!state.round&&!state.round.resolved;
   };
   const click=async event=>{const button=event.target.closest('button');if(!button||busy||button.disabled)return;busy=true;render(engine.state);status.textContent='';try{
-    if(button.hasAttribute('data-award-preview')){await engine.previewAchievement(kind.value);status.textContent='Предпросмотр запущен.'}
-    else if(button.hasAttribute('data-award-grant')){const [scope,targetId]=target.value.split(':');const result=await engine.grantAchievement(kind.value,scope,targetId);status.textContent=result.duplicate?'У получателя уже есть эта награда за текущий матч.':'Достижение вручено как специальная награда.'}
-    else if(button.hasAttribute('data-award-revoke')){const [scope,targetId]=target.value.split(':');if(confirm('Отозвать выбранное достижение у получателя?')){await engine.request('revokeAchievement',{achievementId:kind.value,scope,targetId});status.textContent='Достижение отозвано.'}}
-    else if(button.hasAttribute('data-award-finish')){if(confirm('Завершить сессию и зафиксировать итоговый рейтинг? Команды, выполнившие условия достижения «Ты смог, братец», получат награду.'))await engine.finishMatch()}
+    if(button.hasAttribute('data-award-preview')){await engine.previewAchievement(kind.value);status.textContent= uiText('Предпросмотр запущен.')}
+    else if(button.hasAttribute('data-award-grant')){const [scope,targetId]=target.value.split(':');const result=await engine.grantAchievement(kind.value,scope,targetId);status.textContent=result.duplicate? uiText('У получателя уже есть эта награда за текущий матч.'): uiText('Достижение вручено как специальная награда.')}
+    else if(button.hasAttribute('data-award-revoke')){const [scope,targetId]=target.value.split(':');if(confirm( uiText('Отозвать выбранное достижение у получателя?'))){await engine.request('revokeAchievement',{achievementId:kind.value,scope,targetId});status.textContent= uiText('Достижение отозвано.')}}
+    else if(button.hasAttribute('data-award-finish')){if(confirm( uiText('Завершить сессию и зафиксировать итоговый рейтинг? Команды, выполнившие условия достижения «Ты смог, братец», получат награду.')))await engine.finishMatch()}
   }catch(error){status.textContent=error.message}finally{busy=false;render(engine.state)}};
-  const change=async event=>{if(event.target===kind)render(engine.state);if(event.target===perks){const enabled=perks.checked;busy=true;render(engine.state);try{await engine.setPerksEnabled(enabled);status.textContent=enabled?'Перки включены.':'Перки выключены; заработанные очки сохраняются.'}catch(error){status.textContent=error.message}finally{busy=false;render(engine.state)}}};
+  const change=async event=>{if(event.target===kind)render(engine.state);if(event.target===perks){const enabled=perks.checked;busy=true;render(engine.state);try{await engine.setPerksEnabled(enabled);status.textContent=enabled? uiText('Перки включены.'): uiText('Перки выключены; заработанные очки сохраняются.')}catch(error){status.textContent=error.message}finally{busy=false;render(engine.state)}}};
   host.addEventListener('click',click);host.addEventListener('change',change);const off=engine.onChange(render);return()=>{off();host.removeEventListener('click',click);host.removeEventListener('change',change)};
 }
 
@@ -207,14 +208,14 @@ export function setupAchievements(engine){
     }
     if(award.achievementId&&award.achievementId!=='sky-breaker'){
       const effect=['gauntlet','tower','card','chip','eye','heart','book','sun','medal','eclipse'].includes(award.effect)?award.effect:'medal',rarity=['perk','legendary','rare','common'].includes(award.rarity)?award.rarity:'common',compact=toastOnly||rarity==='common'||rarity==='rare';
-      layer=document.createElement('div');layer.className=`collection-cinema collection-${effect} rarity-${rarity}${compact?' collection-compact':''}`;layer.setAttribute('aria-label','Достижение: '+award.title);
-      layer.innerHTML=`<div class="collection-aura" aria-hidden="true"></div><div class="collection-art">${collectionArtwork(effect)}</div><aside class="collection-toast" role="status" aria-live="polite"><small>${preview?'ПРЕДПРОСМОТР':rarity==='perk'?'ПЕРК ОТКРЫТ':rarity==='legendary'?'ЛЕГЕНДАРНОЕ ДОСТИЖЕНИЕ':'ДОСТИЖЕНИЕ ПОЛУЧЕНО'}</small><strong>${escapeHTML(award.title)}</strong><span>${escapeHTML(award.recipientName||'')}</span></aside><button type="button" class="achievement-skip">Закрыть ×</button>`;
+      layer=document.createElement('div');layer.className=`collection-cinema collection-${effect} rarity-${rarity}${compact?' collection-compact':''}`;layer.setAttribute('aria-label', uiText('Достижение: ')+award.title);
+      layer.innerHTML= uiTpl`<div class="collection-aura" aria-hidden="true"></div><div class="collection-art">${collectionArtwork(effect)}</div><aside class="collection-toast" role="status" aria-live="polite"><small>${preview? uiText('ПРЕДПРОСМОТР'):rarity==='perk'? uiText('ПЕРК ОТКРЫТ'):rarity==='legendary'? uiText('ЛЕГЕНДАРНОЕ ДОСТИЖЕНИЕ'): uiText('ДОСТИЖЕНИЕ ПОЛУЧЕНО')}</small><strong>${escapeHTML(award.title)}</strong><span>${escapeHTML(award.recipientName||'')}</span></aside><button type="button" class="achievement-skip">Закрыть ×</button>`;
       layer.querySelector('button').addEventListener('click',finish);document.body.append(layer);document.body.classList.add(compact?'achievement-notice':'achievement-playing');timer=setTimeout(finish,compact?3600:5600);return;
     }
-    layer=document.createElement('div');layer.className='achievement-cinema';layer.setAttribute('aria-label','Достижение: '+(award.title||'Ты смог, братец'));
-    layer.innerHTML=`<div class="sky-atmosphere" aria-hidden="true"></div><div class="sky-speed-lines" aria-hidden="true">${Array.from({length:10},(_,i)=>`<i style="--line:${i}"></i>`).join('')}</div>${skyFractureMarkup()}<div class="sky-contact" aria-hidden="true"><div class="sky-impact"></div><div class="sky-shockwave"></div><div class="sky-shockwave secondary"></div>${Array.from({length:16},(_,i)=>`<i class="sky-spark" style="--spark:${i};--spark-distance:${65+(i*37)%100}px"></i>`).join('')}</div><div class="sky-drill" aria-hidden="true"><div class="sky-drill-aura"></div><div class="sky-exhaust"><i></i><i></i><i></i></div><canvas class="sky-drill-art"></canvas><svg class="sky-drill-fallback" viewBox="0 0 260 390"><defs><linearGradient id="cq-drill-metal"><stop stop-color="#142f38"/><stop offset=".34" stop-color="#b9bb9c"/><stop offset=".45" stop-color="#f0deb4"/><stop offset=".63" stop-color="#556c66"/><stop offset="1" stop-color="#162f38"/></linearGradient></defs><path fill="url(#cq-drill-metal)" d="m130 22 98 311-17 34H49l-17-34Z"/><path d="m124 47 17 12-27 21 40 20-51 27 65 25-78 32 91 31-103 35 118 33-130 39" fill="none" stroke="#c8b888" stroke-width="12" stroke-linejoin="round"/><path d="M45 341h170" stroke="#6de4bd" stroke-width="5"/></svg></div><aside class="achievement-toast" role="status" aria-live="polite"><span class="achievement-emblem"><svg viewBox="0 0 48 56" aria-hidden="true"><path d="M24 3 42 43 36 51H12L6 43Z" fill="#203c3b" stroke="#d4c18d" stroke-width="1.5"/><path d="m22 10 6 5-11 8 16 6-20 9 25 7" fill="none" stroke="#e8d6a0" stroke-width="3"/><path d="M13 49h22" stroke="#70e5bd" stroke-width="2"/></svg></span><div><small>${preview?'ПРЕДПРОСМОТР · ПРОРЫВ':'ДОСТИЖЕНИЕ ПОЛУЧЕНО'}</small><strong>${escapeHTML(award.title||'Ты смог, братец')}</strong><span>${escapeHTML(preview?'Небо — не предел':award.recipientName||'Путь от кризиса к победе')}</span></div></aside><button class="achievement-skip" type="button">Пропустить анимацию ×</button>`;
+    layer=document.createElement('div');layer.className='achievement-cinema';layer.setAttribute('aria-label', uiText('Достижение: ')+(award.title|| uiText('Ты смог, братец')));
+    layer.innerHTML= uiTpl`<div class="sky-atmosphere" aria-hidden="true"></div><div class="sky-speed-lines" aria-hidden="true">${Array.from({length:10},(_,i)=>`<i style="--line:${i}"></i>`).join('')}</div>${skyFractureMarkup()}<div class="sky-contact" aria-hidden="true"><div class="sky-impact"></div><div class="sky-shockwave"></div><div class="sky-shockwave secondary"></div>${Array.from({length:16},(_,i)=>`<i class="sky-spark" style="--spark:${i};--spark-distance:${65+(i*37)%100}px"></i>`).join('')}</div><div class="sky-drill" aria-hidden="true"><div class="sky-drill-aura"></div><div class="sky-exhaust"><i></i><i></i><i></i></div><canvas class="sky-drill-art"></canvas><svg class="sky-drill-fallback" viewBox="0 0 260 390"><defs><linearGradient id="cq-drill-metal"><stop stop-color="#142f38"/><stop offset=".34" stop-color="#b9bb9c"/><stop offset=".45" stop-color="#f0deb4"/><stop offset=".63" stop-color="#556c66"/><stop offset="1" stop-color="#162f38"/></linearGradient></defs><path fill="url(#cq-drill-metal)" d="m130 22 98 311-17 34H49l-17-34Z"/><path d="m124 47 17 12-27 21 40 20-51 27 65 25-78 32 91 31-103 35 118 33-130 39" fill="none" stroke="#c8b888" stroke-width="12" stroke-linejoin="round"/><path d="M45 341h170" stroke="#6de4bd" stroke-width="5"/></svg></div><aside class="achievement-toast" role="status" aria-live="polite"><span class="achievement-emblem"><svg viewBox="0 0 48 56" aria-hidden="true"><path d="M24 3 42 43 36 51H12L6 43Z" fill="#203c3b" stroke="#d4c18d" stroke-width="1.5"/><path d="m22 10 6 5-11 8 16 6-20 9 25 7" fill="none" stroke="#e8d6a0" stroke-width="3"/><path d="M13 49h22" stroke="#70e5bd" stroke-width="2"/></svg></span><div><small>${preview? uiText('ПРЕДПРОСМОТР · ПРОРЫВ'): uiText('ДОСТИЖЕНИЕ ПОЛУЧЕНО')}</small><strong>${escapeHTML(award.title|| uiText('Ты смог, братец'))}</strong><span>${escapeHTML(preview? uiText('Небо — не предел'):award.recipientName|| uiText('Путь от кризиса к победе'))}</span></div></aside><button class="achievement-skip" type="button">Пропустить анимацию ×</button>`;
     layer.querySelector('button').addEventListener('click',()=>{finish();if(toastOnly)clearWorld()});document.body.append(layer);document.body.classList.add(toastOnly?'achievement-notice':'achievement-playing');
-    if(toastOnly){layer.classList.add('achievement-toast-only');layer.querySelector('button').textContent='Закрыть уведомление ×'}
+    if(toastOnly){layer.classList.add('achievement-toast-only');layer.querySelector('button').textContent= uiText('Закрыть уведомление ×')}
     const animate=toastOnly?null:startAchievementDrill(layer.querySelector('canvas'));stopDrill=animate||(()=>{});if(animate)layer.classList.add('has-drill-mesh');timer=setTimeout(finish,7800);
   }
   const render=state=>{
@@ -231,36 +232,36 @@ export function setupAchievements(engine){
       const ownAwards=new Set((state.achievements||[]).map(a=>a.id));
       for(const a of freshWorld.filter(a=>a.achievementId!=='sky-breaker'&&!ownAwards.has(a.id)))enqueue({...a,recipientName:a.teamName},false,true);
     }
-    document.querySelectorAll('[data-achievement-rules]').forEach(node=>node.textContent=engine.mode==='teacher'?'Обычные, редкие и легендарные награды. Секретные условия доступны в пульте ниже.':'Коллекция сохраняется после выхода в этом браузере. Шесть разных легендарных наград открывают перк. Секретные награды появляются после получения.');
-    const progress=state.achievementProgress,counters=state.achievementCounters;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;const base=state.settings?.mode==='solo'&&counters?`Быстрых ответов: ${Math.min(5,counters.fast)}/5 · быстрая верная серия: ${Math.min(3,counters.fastRun)}/3.${counters.lastAnswerStatus?` Последний ответ: ${counters.lastAnswerMs===null?'не получен':(counters.lastAnswerMs/1000).toFixed(2)+' с'} · ${{fast:'верно, в пределах 5 секунд',slow:'верно, но дольше 5 секунд',wrong:'неверно',repeat:'повтор вопроса — серия не засчитывается',missing:'пропуск'}[counters.lastAnswerStatus]||''}.`:''}`:progress?`«Ты смог, братец»: ${progress.hitCrisis?'✓':'○'} экономика ниже 30% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} восстановлена до 100% · ${state.match?.finishedAt!=null&&rank===1?'✓':'○'} первое место в конце. Текущее место: ${rank||'—'}.`:'';
+    document.querySelectorAll('[data-achievement-rules]').forEach(node=>node.textContent=engine.mode==='teacher'? uiText('Обычные, редкие и легендарные награды. Секретные условия доступны в пульте ниже.'): uiText('Коллекция сохраняется после выхода в этом браузере. Шесть разных легендарных наград открывают перк. Секретные награды появляются после получения.'));
+    const progress=state.achievementProgress,counters=state.achievementCounters;document.querySelectorAll('[data-achievement-progress]').forEach(node=>{const rank=state.teamLeaderboard?.find(t=>t.teamId===viewer.player?.regionId)?.rank??0;const base=state.settings?.mode==='solo'&&counters? uiTpl`Быстрых ответов: ${Math.min(5,counters.fast)}/5 · быстрая верная серия: ${Math.min(3,counters.fastRun)}/3.${counters.lastAnswerStatus? uiTpl` Последний ответ: ${counters.lastAnswerMs===null? uiText('не получен'):(counters.lastAnswerMs/1000).toFixed(2)+ uiText(' с')} · ${{fast: uiText('верно, в пределах 5 секунд'),slow: uiText('верно, но дольше 5 секунд'),wrong: uiText('неверно'),repeat: uiText('повтор вопроса — серия не засчитывается'),missing: uiText('пропуск')}[counters.lastAnswerStatus]||''}.`:''}`:progress? uiTpl`«Ты смог, братец»: ${progress.hitCrisis?'✓':'○'} экономика ниже 30% · ${progress.recoveredByQuiz&&progress.economy===100?'✓':'○'} восстановлена до 100% · ${state.match?.finishedAt!=null&&rank===1?'✓':'○'} первое место в конце. Текущее место: ${rank||'—'}.`:'';
       const eligibility=state.achievementEligibility,notes=[];
       if(eligibility){
         const owned=new Set((state.collection?.awards||[]).map(a=>a.achievementId));
-        if(!owned.has('foresight')&&!eligibility.foresight.modeAllowed)notes.push('Предвидение: доступно только в Solo; скорость в командном режиме не выдаёт эту награду.');
+        if(!owned.has('foresight')&&!eligibility.foresight.modeAllowed)notes.push( uiText('Предвидение: доступно только в Solo; скорость в командном режиме не выдаёт эту награду.'));
         const near=eligibility.nearVictory;
-        if(owned.has('near-victory'))notes.push('«Ты почти смог, Джо»: получено.');
-        else if(!near.finished)notes.push('«Джо»: проверка в конце сессии — второе место и разрыв 1–25 очков рейтинга.');
-        else if(near.completed<5)notes.push(`«Джо»: завершено ${near.completed} из 5 необходимых вопросов.`);
-        else if(near.rank!==2)notes.push(`«Джо»: итоговое место ${near.rank??'не определено'}, нужно второе. Пустые команды не участвуют.`);
-        else if(near.gap===null)notes.push('«Джо»: в истории этого матча не сохранён итоговый разрыв.');
-        else if(near.gap<1||near.gap>25)notes.push(`«Джо»: итоговый разрыв ${near.gap}, нужен от 1 до 25 очков рейтинга.`);
-        else notes.push('Условия «Джо» выполнены; проверьте коллекцию наград.');
+        if(owned.has('near-victory'))notes.push( uiText('«Ты почти смог, Джо»: получено.'));
+        else if(!near.finished)notes.push( uiText('«Джо»: проверка в конце сессии — второе место и разрыв 1–25 очков рейтинга.'));
+        else if(near.completed<5)notes.push( uiTpl`«Джо»: завершено ${near.completed} из 5 необходимых вопросов.`);
+        else if(near.rank!==2)notes.push( uiTpl`«Джо»: итоговое место ${near.rank?? uiText('не определено')}, нужно второе. Пустые команды не участвуют.`);
+        else if(near.gap===null)notes.push( uiText('«Джо»: в истории этого матча не сохранён итоговый разрыв.'));
+        else if(near.gap<1||near.gap>25)notes.push( uiTpl`«Джо»: итоговый разрыв ${near.gap}, нужен от 1 до 25 очков рейтинга.`);
+        else notes.push( uiText('Условия «Джо» выполнены; проверьте коллекцию наград.'));
       }
       node.textContent=[base,...notes].filter(Boolean).join(' ');
     });
     const awards=engine.mode==='teacher'?(state.match?.awards||[]):state.achievements||[],catalogue=state.achievementCatalog||ACHIEVEMENTS,collection=state.collection,key=JSON.stringify([awards,catalogue,collection,state.match?.id]);
     if(key!==shelfKey){shelfKey=key;
       document.querySelectorAll('[data-achievement-count]').forEach(node=>node.textContent=String(awards.length));
-      document.querySelectorAll('[data-collection-stones]').forEach(node=>{node.hidden=!collection;node.innerHTML=collection?`<div class="collection-stones" aria-label="Легендарных достижений: ${collection.stones.length} из 6">${Object.entries(stoneColors).map(([stone,color])=>`<i style="--stone:${color}" class="${collection.stones.includes(stone)?'lit':''}" title="${collection.stones.includes(stone)?'Камень получен':'Камень ещё не открыт'}"></i>`).join('')}</div><p class="small-note ${collection.unlocked?'violet':'mut'}">${collection.unlocked?(collection.active?'∞ Личный перк активен · предел очков снят':'∞ Перк открыт · преподаватель отключил перки'):`${collection.stones.length} / 6 легендарных достижений`}</p>`:''});
+      document.querySelectorAll('[data-collection-stones]').forEach(node=>{node.hidden=!collection;node.innerHTML=collection? uiTpl`<div class="collection-stones" aria-label="Легендарных достижений: ${collection.stones.length} из 6">${Object.entries(stoneColors).map(([stone,color])=>`<i style="--stone:${color}" class="${collection.stones.includes(stone)?'lit':''}" title="${collection.stones.includes(stone)? uiText('Камень получен'): uiText('Камень ещё не открыт')}"></i>`).join('')}</div><p class="small-note ${collection.unlocked?'violet':'mut'}">${collection.unlocked?(collection.active? uiText('∞ Личный перк активен · предел очков снят'): uiText('∞ Перк открыт · преподаватель отключил перки')): uiTpl`${collection.stones.length} / 6 легендарных достижений`}</p>`:''});
       const owned=new Set(awards.map(a=>a.achievementId)),locked=engine.mode==='teacher'?[]:catalogue.filter(a=>!owned.has(a.id)&&!a.secret);
-      document.querySelectorAll('[data-achievement-shelf]').forEach(node=>{node.innerHTML=awards.slice(-30).reverse().map(a=>`<button type="button" class="achievement-card rarity-${['common','rare','legendary','perk'].includes(a.rarity)?a.rarity:'legendary'}" data-award-replay="${escapeHTML(a.id)}"><span class="achievement-emblem">${escapeHTML(a.icon||'⟐')}</span><span><strong>${escapeHTML(a.title)}</strong><small>${escapeHTML(a.recipientName)} · ${a.source==='manual'?'Специальное вручение':a.rarity==='perk'?'Перк · полная коллекция':'Получено в игре'}</small><small>${escapeHTML(a.description||'')}</small></span><span class="achievement-replay">▶</span></button>`).join('')+locked.map(a=>`<article class="achievement-card achievement-locked"><span class="achievement-emblem">${escapeHTML(a.icon||'⟐')}</span><span><strong>${escapeHTML(a.title)}</strong><small>${escapeHTML(a.description)}</small></span></article>`).join('')||'<p class="small-note mut">В этом матче ещё нет наград.</p>'});
+      document.querySelectorAll('[data-achievement-shelf]').forEach(node=>{node.innerHTML=awards.slice(-30).reverse().map(a=>`<button type="button" class="achievement-card rarity-${['common','rare','legendary','perk'].includes(a.rarity)?a.rarity:'legendary'}" data-award-replay="${escapeHTML(a.id)}"><span class="achievement-emblem">${escapeHTML(a.icon||'⟐')}</span><span><strong>${escapeHTML(a.title)}</strong><small>${escapeHTML(a.recipientName)} · ${a.source==='manual'? uiText('Специальное вручение'):a.rarity==='perk'? uiText('Перк · полная коллекция'): uiText('Получено в игре')}</small><small>${escapeHTML(a.description||'')}</small></span><span class="achievement-replay">▶</span></button>`).join('')+locked.map(a=>`<article class="achievement-card achievement-locked"><span class="achievement-emblem">${escapeHTML(a.icon||'⟐')}</span><span><strong>${escapeHTML(a.title)}</strong><small>${escapeHTML(a.description)}</small></span></article>`).join('')|| uiText('<p class="small-note mut">В этом матче ещё нет наград.</p>')});
     }
     const fresh=awards.filter(award=>!seen.has(award.id));for(const award of awards)seen.add(award.id);
     try{localStorage.setItem('cq_awards_seen_v1',JSON.stringify([...seen].slice(-1000)))}catch{}
     if(ready)for(const award of fresh)if(engine.mode!=='teacher'||!worldSeen.has(award.id))enqueue(award,false,worldSeen.has(award.id));ready=current!=='guest';
-    for(const notice of state.achievementNotices||[])if(!noticed.has(notice.id)){noticed.add(notice.id);enqueue({id:notice.id,achievementId:'notice',title:notice.text,rarity:'common',effect:'eye',recipientName:'Полученное достижение остаётся в коллекции.'},false,true)}
+    for(const notice of state.achievementNotices||[])if(!noticed.has(notice.id)){noticed.add(notice.id);enqueue({id:notice.id,achievementId:'notice',title:notice.text,rarity:'common',effect:'eye',recipientName: uiText('Полученное достижение остаётся в коллекции.')},false,true)}
   };
-  const preview=data=>{queue.length=0;play({...data,title:data?.title||'Ты смог, братец'},true)},replay=event=>{const id=event.target.closest('[data-award-replay]')?.dataset.awardReplay;if(!id)return;const state=engine.state,award=(engine.mode==='teacher'?state?.match?.awards:state?.achievements)?.find(a=>a.id===id);if(award){queue.length=0;play(award)}};
+  const preview=data=>{queue.length=0;play({...data,title:data?.title|| uiText('Ты смог, братец')},true)},replay=event=>{const id=event.target.closest('[data-award-replay]')?.dataset.awardReplay;if(!id)return;const state=engine.state,award=(engine.mode==='teacher'?state?.match?.awards:state?.achievements)?.find(a=>a.id===id);if(award){queue.length=0;play(award)}};
   const keydown=event=>{if(event.key==='Escape'){queue.length=0;close()}},visibility=()=>{if(document.hidden){queue.length=0;close();clearWorld()}};
   document.addEventListener('click',replay);document.addEventListener('keydown',keydown);document.addEventListener('visibilitychange',visibility);engine.socket.on('achievement:preview',preview);
   const off=engine.onChange(render),tools=document.getElementById('achievement-tools'),stopTools=tools?setupAchievementControls(engine,tools):null;
@@ -279,10 +280,10 @@ export class GameEngine {
     this.chatListeners=new Set();this.chatMeta=null;this.chatView=null;
     this.cookieSessions=typeof document!=='undefined';this.legacyToken=this.cookieSessions?(mode==='student'?creatorToken()||getToken('cq_player_token_v2'):getToken('cq_teacher_token_v2')):null;
     this.socket = io({ autoConnect: false,transports:['websocket','polling'],tryAllTransports:true,reconnection:true,reconnectionDelay:2000,reconnectionDelayMax:2000,randomizationFactor:0,timeout:30000, auth: callback => callback({surface:mode,activityVersion:1,...(!this.cookieSessions?{playerToken:mode==='student'?creatorToken()||getToken('cq_player_token_v2'):undefined,teacherToken:mode==='teacher'?getToken('cq_teacher_token_v2'):undefined}:{})}) });
-    this.socket.on('connect',async()=>{this.clockRtt=Infinity;this.lastClockSync=0;this.syncClock();this.httpProof=null;this.connected=!this.legacyToken;this.error=this.legacyToken?'Восстанавливаем вашу сессию…':'';this.emit();if(this.legacyToken&&!this.migrationTried){this.migrationTried=true;try{await this.bindSession(mode==='teacher'?'teacher':'player',this.legacyToken);this.legacyToken=null;this.clearLegacyTokens();this.socket.disconnect().connect()}catch(error){if(error.code==='SESSION_EXPIRED'){this.legacyToken=null;this.clearLegacyTokens();this.connected=true;this.error=''}else this.error='Не удалось восстановить прежний вход. Обновите страницу после подключения.';this.emit()}}});
+    this.socket.on('connect',async()=>{this.clockRtt=Infinity;this.lastClockSync=0;this.syncClock();this.httpProof=null;this.connected=!this.legacyToken;this.error=this.legacyToken? uiText('Восстанавливаем вашу сессию…'):'';this.emit();if(this.legacyToken&&!this.migrationTried){this.migrationTried=true;try{await this.bindSession(mode==='teacher'?'teacher':'player',this.legacyToken);this.legacyToken=null;this.clearLegacyTokens();this.socket.disconnect().connect()}catch(error){if(error.code==='SESSION_EXPIRED'){this.legacyToken=null;this.clearLegacyTokens();this.connected=true;this.error=''}else this.error= uiText('Не удалось восстановить прежний вход. Обновите страницу после подключения.');this.emit()}}});
     this.socket.on('session:ready',data=>{this.httpProof=data.proof});
     this.socket.on('session:expired',data=>{
-      this.sessionNotice='Сессия завершена после 30 минут бездействия. Войдите заново.';
+      this.sessionNotice= uiText('Сессия завершена после 30 минут бездействия. Войдите заново.');
       this.legacyToken=null;
       if(data?.roles?.includes('player')){setToken('cq_player_token_v2',null);saveCreatorToken(null);setToken('cq_session_v3',null);setToken('isDevTelemetry',null)}
       if(data?.roles?.includes('teacher'))setToken('cq_teacher_token_v2',null);
@@ -292,7 +293,7 @@ export class GameEngine {
       if(this.inputStatus?.requestId===data?.requestId){this.inputStatus={...this.inputStatus,status:'received'};this.emit();}
     });
     this.socket.on("disconnect", () => {this.clockSyncing=false;this.clockRtt=Infinity;this.httpProof=null;this.connected = false; this.emit(); });
-    this.socket.on("connect_error", () => { this.connected = false; this.error = "Подключение к серверу... (пробуждение инстанса может занять до 30 сек)"; this.emit(); });
+    this.socket.on("connect_error", () => { this.connected = false; this.error =  uiText("Подключение к серверу... (пробуждение инстанса может занять до 30 сек)"); this.emit(); });
     this.socket.on("state", state => {
       const previous=this.state?.viewer,changed=previous?.role!==state.viewer.role||previous?.player?.pid!==state.viewer.player?.pid||previous?.player?.regionId!==state.viewer.player?.regionId;
       if(this.inputStatus?.roundId!==state.round?.id)this.inputStatus=null;
@@ -312,7 +313,7 @@ export class GameEngine {
     this.socket.on('chat:meta',meta=>{this.chatMeta=meta;this.emitChat()});
     this.socket.on('ui:refresh',()=>{
       if(this.refreshPending)return;this.refreshPending=true;
-      const notice=document.createElement('div');notice.className='session-refresh-toast';notice.setAttribute('role','status');notice.textContent='Администратор обновляет интерфейс. Ваше место и ответы сохранены.';document.body.append(notice);
+      const notice=document.createElement('div');notice.className='session-refresh-toast';notice.setAttribute('role','status');notice.textContent= uiText('Администратор обновляет интерфейс. Ваше место и ответы сохранены.');document.body.append(notice);
       setTimeout(()=>window.location.reload(),1500);
     });
     this.socket.on('chat:view',view=>{this.chatView=view;this.emitChat()});
@@ -332,9 +333,9 @@ export class GameEngine {
     return ()=>{clearTimeout(timer);off();for(const event of events)document.removeEventListener(event,observe,true)};
   }
   onChange(listener) { this.listeners.add(listener); listener(this.state); return () => this.listeners.delete(listener); }
-  emit() { for (const fn of this.listeners) try{fn(this.state)}catch(error){console.error('Ошибка обновления интерфейса:',error)} }
+  emit() { for (const fn of this.listeners) try{fn(this.state)}catch(error){console.error( uiText('Ошибка обновления интерфейса:'),error)} }
   onChat(listener){this.chatListeners.add(listener);listener(this.chatMeta,this.chatView);return()=>this.chatListeners.delete(listener)}
-  emitChat(){for(const fn of this.chatListeners)try{fn(this.chatMeta,this.chatView)}catch(error){console.error('Ошибка обновления чата:',error)}}
+  emitChat(){for(const fn of this.chatListeners)try{fn(this.chatMeta,this.chatView)}catch(error){console.error( uiText('Ошибка обновления чата:'),error)}}
   subscribeChat(room){return this.request('chatSubscribe',{room})}
   sendChat(room,text,clientId){return this.request('chatSend',{room,text,clientId})}
   deleteChatMessage(messageId){return this.request('chatDelete',{messageId})}
@@ -347,22 +348,22 @@ export class GameEngine {
     });
   }
   request(event, data = {}) {
-    if (!this.connected||this.legacyToken) return Promise.reject(new Error(this.legacyToken?'Идёт восстановление прежнего входа. Дождитесь подключения.':'Нет связи с сервером. Дождитесь подключения.'));
+    if (!this.connected||this.legacyToken) return Promise.reject(new Error(this.legacyToken? uiText('Идёт восстановление прежнего входа. Дождитесь подключения.'): uiText('Нет связи с сервером. Дождитесь подключения.')));
     if(this.cookieSessions&&['applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions'].includes(event))return this.httpRequest('/api/bulk/'+event,data);
     const input=['castVote','confirmVote','cancelVote','voteLeader','teamSubmit'].includes(event);
     if(input){const requestId=globalThis.crypto?.randomUUID?.()||('req_'+Date.now()+'_'+Math.random().toString(36).slice(2));data={...data,requestId};this.inputStatus={requestId,roundId:data.roundId,optionIdx:data.optionIdx,status:'sending'};this.emit();}
     const inputDone=status=>{if(input&&this.inputStatus?.requestId===data.requestId){this.inputStatus={...this.inputStatus,status};this.emit();}};
     return new Promise((resolve, reject) => this.socket.timeout(20000).emit(event, data, (error, response) => {
-      if (error) {inputDone('error');reject(new Error("Сервер не подтвердил действие. Проверьте состояние перед повтором.")); return; }
+      if (error) {inputDone('error');reject(new Error( uiText("Сервер не подтвердил действие. Проверьте состояние перед повтором."))); return; }
       if (!response?.ok) {
         inputDone('error');
         if (response?.code === "FORBIDDEN" && this.mode === "teacher") { setToken("cq_teacher_token_v2", null); this.socket.disconnect().connect(); }
-        reject(Object.assign(new Error(response?.error || 'Действие не выполнено.'),{code:response?.code})); return;
+        reject(Object.assign(new Error(uiText(response?.error || 'Действие не выполнено.')),{code:response?.code})); return;
       }
       inputDone('saved');resolve(response);
     }));
   }
-  async httpRequest(path,data){if(!this.httpProof)await new Promise((resolve,reject)=>{const ready=()=>{clearTimeout(wait);resolve()},wait=setTimeout(()=>{this.socket.off('session:ready',ready);reject(new Error('Подключение ещё не готово. Повторите действие.'))},5000);this.socket.once('session:ready',ready)});if(!this.socket.connected)throw new Error('Нет связи с сервером.');const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const response=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CQ-Client':'1','X-CQ-Socket':this.socket.id,'X-CQ-Proof':this.httpProof,'X-CQ-Surface':this.mode},body:JSON.stringify(data),signal:controller.signal});const result=await response.json();if(!result.ok)throw Object.assign(new Error(result.error||'Запрос не выполнен.'),{code:result.code});return result}finally{clearTimeout(timer)}}
+  async httpRequest(path,data){if(!this.httpProof)await new Promise((resolve,reject)=>{const ready=()=>{clearTimeout(wait);resolve()},wait=setTimeout(()=>{this.socket.off('session:ready',ready);reject(new Error( uiText('Подключение ещё не готово. Повторите действие.')))},5000);this.socket.once('session:ready',ready)});if(!this.socket.connected)throw new Error( uiText('Нет связи с сервером.'));const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const response=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CQ-Client':'1','X-CQ-Socket':this.socket.id,'X-CQ-Proof':this.httpProof,'X-CQ-Surface':this.mode},body:JSON.stringify(data),signal:controller.signal});const result=await response.json();if(!result.ok)throw Object.assign(new Error(uiText(result.error||'Запрос не выполнен.')),{code:result.code});return result}finally{clearTimeout(timer)}}
   bindSession(role,token){return this.httpRequest('/api/session',{role,token})}
   clearLegacyTokens(){for(const key of ['cq_player_token_v2','cq_creator_session_v1','cq_teacher_token_v2','isDevTelemetry'])setToken(key,null)}
   allQuestions() { return (this.state?.questions || []).filter(q=>(q.subject||DEFAULT_SUBJECT)===(this.state?.branding?.subject||DEFAULT_SUBJECT)); }
