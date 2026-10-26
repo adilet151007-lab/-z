@@ -47,6 +47,7 @@ export async function createGameServer(options = {}) {
   if(!options.legacyRules)game.enableUniversal();
   if(!options.legacyRules&&options.flexibleTeams!==false)game.enableFlexibleTeams();
   if(!game.state.accessControl.admission){game.state.accessControl.admission={open:false,epoch:randomUUID(),expiresAt:0};game.touch()}
+  if(game.state.accessControl.admission.stableId===undefined){game.state.accessControl.admission.stableId=randomUUID();game.touch()}
   if(!game.state.accessControl.playerDevices){game.state.accessControl.playerDevices={};game.touch()}
   if(game.state.settings.allowPublicDemo===undefined||options.allowDemoQuestions!==undefined){game.state.settings.allowPublicDemo=options.allowDemoQuestions??process.env.ENABLE_DEMO_QUESTIONS==='true';game.touch()}
   if(game.state.settings.allowPublicDemo===false&&game.state.round&&!game.state.round.resolved&&isPublicDemoQuestion(game.state.round.questionSnapshot)&&game.state.settings.autoAdvance){game.state.settings.autoAdvance=false;game.touch()}
@@ -98,6 +99,7 @@ export async function createGameServer(options = {}) {
     if(secureCookies)res.setHeader('Strict-Transport-Security','max-age=31536000');
     next();
   });
+  if(options.lobbyRouter)app.use(options.lobbyRouter);
   app.get("/", (_req, res) => res.redirect("/student.html"));
   app.get("/health", (_req, res) => res.status(closing ? 503 : 200).json({ ok: !closing, storage: store.kind, chatStorage:chatStore.kind, creatorAccessEnabled:configured.length===2 }));
   app.get('/api/public-settings',(_req,res)=>res.json({branding:publishedGame.publicBranding(),privacyVersion:PRIVACY_VERSION,consentRequired:requireConsent}));
@@ -135,8 +137,14 @@ export async function createGameServer(options = {}) {
     try{const data=JSON.parse(Buffer.from(payload,'base64url').toString());return data.role===role&&Number.isSafeInteger(data.expires)&&data.expires>Date.now()?data:null}catch{return null}
   }
   function admissionStatus(){const entry=publishedGame.state.accessControl.admission;return {required:requireAdmission,open:!requireAdmission||entry.open&&entry.expiresAt>Date.now(),expiresAt:entry.expiresAt}}
-  function admissionDetails(){const entry=game.state.accessControl.admission;return {required:requireAdmission,expiresAt:entry.expiresAt,open:entry.open&&entry.expiresAt>Date.now(),token:entry.expiresAt>Date.now()?signed({role:'admission',epoch:entry.epoch,expires:entry.expiresAt}):null}}
-  function requireLessonAccess(token){const entry=publishedGame.state.accessControl.admission;if(!requireAdmission)return;if(!entry.open||entry.expiresAt<=Date.now())throw new GameError('Регистрация закрыта. Обратитесь к преподавателю.','ADMISSION_CLOSED');const data=decodeCredential(token,'admission');if(!data||data.epoch!==entry.epoch||data.expires!==entry.expiresAt)throw new GameError('Откройте ссылку или QR-код этого занятия у преподавателя.','ADMISSION_REQUIRED')}
+  function admissionDetails(){const entry=game.state.accessControl.admission;return {required:requireAdmission,expiresAt:entry.expiresAt,open:entry.open&&entry.expiresAt>Date.now(),stableToken:signed({role:'classroom',id:entry.stableId}),token:entry.expiresAt>Date.now()?signed({role:'admission',epoch:entry.epoch,expires:entry.expiresAt}):null}}
+  function validClassroomToken(token,entry){
+    if(typeof token!=='string'||token.length>2000)return false;
+    const [payload,signature,extra]=token.split('.');
+    if(!payload||!signature||extra||!equal(signature,createHmac('sha256',secret).update(payload).digest('base64url')))return false;
+    try{const data=JSON.parse(Buffer.from(payload,'base64url').toString());return data.role==='classroom'&&typeof data.id==='string'&&equal(data.id,entry.stableId)}catch{return false}
+  }
+  function requireLessonAccess(token){const entry=publishedGame.state.accessControl.admission;if(!requireAdmission)return;if(!entry.open||entry.expiresAt<=Date.now())throw new GameError('Регистрация закрыта. Обратитесь к преподавателю.','ADMISSION_CLOSED');if(validClassroomToken(token,entry))return;const data=decodeCredential(token,'admission');if(!data||data.epoch!==entry.epoch||data.expires!==entry.expiresAt)throw new GameError('Откройте постоянную ссылку класса у преподавателя.','ADMISSION_REQUIRED')}
   const effectiveLocalCodeHash=()=>Object.hasOwn(publishedGame.state.accessControl,'localKeyOverride')?publishedGame.state.accessControl.localKeyOverride:localAdminCodeHash;
   function privilegedEntry(name){const code=typeof name==='string'?name.trim().split(/\s/,1)[0]:'';return Object.keys(CREATOR_NAMES).some(id=>publishedGame.state.accessControl.keyOverrides[id]?equal(hashToken(code),publishedGame.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id]))||!!effectiveLocalCodeHash()&&equal(hashToken(code),effectiveLocalCodeHash())||code.startsWith('CQI-')}
   function checkDevice(socket){if(!requireAdmission||!cookieSessions)return;if(!socket.data.deviceHash)throw new GameError('Откройте страницу входа и разрешите необходимые cookie.','DEVICE_REQUIRED');const devices=publishedGame.state.accessControl.playerDevices;if(publishedGame.state.regions.some(team=>team.members.some(member=>!member.creatorId&&devices[member.pid]===socket.data.deviceHash)))throw new GameError('В этом браузере уже есть участник. Вернитесь в открытую сессию или выйдите из неё.','DEVICE_OCCUPIED')}
@@ -488,6 +496,7 @@ export async function createGameServer(options = {}) {
     handle('rotateLocalAccessKey','creator',()=>{if(game.creatorFor(socket.data.playerHash)?.creatorId!=='adilet')throw new GameError('Только главный администратор обновляет общий код.','PRO_ONLY');return game.rotateLocalAccessKey()});
     handle('getAdmissionLink','teacher',()=>admissionDetails());
     handle('setAdmission','teacher',data=>{if(typeof data.open!=='boolean'||data.rotate!==undefined&&typeof data.rotate!=='boolean')throw new GameError('Некорректная настройка входа.');const entry=game.state.accessControl.admission;if(data.rotate||data.open&&entry.expiresAt<=Date.now()){entry.epoch=randomUUID();entry.expiresAt=Date.now()+12*3600000}entry.open=data.open;game.touch();return admissionDetails()});
+    handle('revokeAdmissionLink','teacher',()=>{const entry=game.state.accessControl.admission;entry.stableId=randomUUID();entry.epoch=randomUUID();game.touch();return admissionDetails()});
     handle('setPublicDemo','teacher',data=>game.setPublicDemo(data.enabled));
     handle('setPresentationEffects','actualTeacher',data=>{
       if(typeof data.enabled!=='boolean')throw new GameError('Некорректная настройка.');

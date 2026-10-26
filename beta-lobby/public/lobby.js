@@ -1,6 +1,7 @@
 import {GAME} from './lobby-config.js';
 import {COPY} from './lobby-copy.js';
 import {createStorage, matchesGame, parseInvitation} from './lobby-core.js';
+import {setupAccount} from './lobby-account.js';
 
 const storage = createStorage(), $ = id => document.getElementById(id);
 const keys = {language:'cq_lobby_language_v1', theme:'cq_lobby_theme_v1', invite:'cq_lobby_invite_v1'};
@@ -8,6 +9,7 @@ let language = storage.get(keys.language) === 'kk' ? 'kk' : 'ru';
 let theme = storage.get(keys.theme) === 'light' ? 'light' : 'dark';
 let invitation = null, message = '', error = false;
 const t = key => COPY[language][key] || COPY.ru[key] || key;
+let account;
 
 function renderMessage() {
   $('invitation-message').textContent = message ? t(message) : '';
@@ -36,6 +38,7 @@ function render() {
   document.querySelectorAll('[data-privacy]').forEach(node => { node.href = GAME.privacyUrl; });
   $('saved-invite').hidden = !invitation;
   renderMessage(); renderSearch();
+  account?.render();
 }
 
 try {
@@ -55,6 +58,7 @@ try {
 }
 if (invitation) $('invitation-input').value = invitation.url;
 render();
+account=setupAccount({language:()=>language});
 
 // A second invitation can arrive while this tab is already open.
 window.addEventListener('hashchange', () => {

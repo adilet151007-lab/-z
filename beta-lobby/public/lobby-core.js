@@ -24,7 +24,9 @@ export function parseInvitation(value, portalOrigin = '') {
   if (token.length > 2000 || !/^[A-Za-z0-9_-]{20,1950}\.[A-Za-z0-9_-]{43}$/.test(token)) throw new InvitationError('invalid');
   try {
     const payload = JSON.parse(atob(token.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')));
-    if (payload.role !== 'admission' || typeof payload.epoch !== 'string' || !/^[\w-]{1,80}$/.test(payload.epoch) || !Number.isSafeInteger(payload.expires) || payload.expires <= 0) throw new Error();
+    const classroom=payload.role==='classroom'&&typeof payload.id==='string'&&/^[\w-]{32,80}$/.test(payload.id);
+    const lesson=payload.role==='admission'&&typeof payload.epoch==='string'&&/^[\w-]{1,80}$/.test(payload.epoch)&&Number.isSafeInteger(payload.expires)&&payload.expires>0;
+    if(!classroom&&!lesson)throw new Error();
   } catch { throw new InvitationError('invalid'); }
   return Object.freeze({token, url: GAME.studentUrl + '#join=' + encodeURIComponent(token)});
 }

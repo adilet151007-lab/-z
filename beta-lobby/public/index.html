@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#101a1b">
   <meta name="description" content="Выберите образовательную игру или присоединитесь к занятию по приглашению преподавателя.">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <title>Мәдениеттану · Игровое лобби</title>
   <link rel="icon" type="image/svg+xml" href="mark.svg">
   <link rel="stylesheet" href="lobby.css">
@@ -25,6 +25,7 @@
         <button class="text-button" type="button" data-help data-i18n="helpNav">Как присоединиться</button>
       </nav>
       <div class="header-actions">
+        <button class="account-button" id="account-button" type="button">Войти</button>
         <button class="icon-button" id="theme-toggle" type="button" aria-label="Включить светлую тему">
           <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4 19 5"/></svg>
           <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 14.4A9 9 0 0 1 9.6 3.3a9 9 0 1 0 11.1 11.1Z"/></svg>
@@ -81,6 +82,7 @@
     <footer class="site-footer"><div><span class="footer-symbol" aria-hidden="true">✳</span><strong>Мәдениеттану<span>.</span></strong><span class="footer-line" data-i18n="footerLine">Знания объединяют.</span></div><div><span data-i18n="authors">Создано Адилетом и Ернуром</span><a data-privacy href="https://culture-quest-z.onrender.com/privacy.html" data-i18n="privacy">Конфиденциальность</a></div></footer>
   </div>
   <dialog id="help-dialog" aria-labelledby="help-title"><div class="help-content"><span class="help-icon" aria-hidden="true">↗</span><h2 id="help-title" data-i18n="helpTitle">Как попасть в игру</h2><p data-i18n="helpText">Ссылку занятия создаёт преподаватель в пульте: «Вход и защита занятия» → «Открыть вход» → «Копировать ссылку».</p><p data-i18n="helpReturn">Если вы уже участвуете, нажмите «Открыть игру»: действующая сессия восстановится в том же браузере.</p><p data-i18n="helpAccess">Открытая ссылка ведёт на страницу участника. Регистрацию, наличие мест и доступ проверяет сервер игры.</p><button type="button" class="button button-mint" id="help-close" data-i18n="close">Понятно</button></div></dialog>
+  <dialog id="account-dialog" aria-labelledby="account-title"><div class="help-content account-content"><span class="help-icon" aria-hidden="true">◈</span><h2 id="account-title">Ваш профиль</h2><p class="account-name" id="account-name"></p><p id="account-email"></p><p id="account-status" role="status" aria-live="polite"></p><a id="google-sign-in" class="button google-button" href="/auth/google" hidden>Войти через Google</a><button id="account-logout" type="button" class="button button-outline" hidden>Выйти из аккаунта</button><p id="account-note"></p><a class="account-privacy" id="account-privacy" href="lobby-privacy.html">Как используются данные аккаунта</a><button type="button" class="button button-mint" id="account-close">Закрыть</button></div></dialog>
   <noscript><p class="noscript-note">Для приглашений включите JavaScript. <a href="https://culture-quest-z.onrender.com/student.html">Открыть игру / Ойынды ашу ↗</a></p></noscript>
 </body>
 </html>
