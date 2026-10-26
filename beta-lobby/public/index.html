@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#101a1b">
+  <meta name="description" content="Выберите образовательную игру или присоединитесь к занятию по приглашению преподавателя.">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Мәдениеттану · Игровое лобби</title>
+  <link rel="icon" type="image/svg+xml" href="mark.svg">
+  <link rel="stylesheet" href="lobby.css">
+  <script type="module" src="lobby.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#games">Игры / Ойындар</a>
+  <div class="page-shell">
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="Мәдениеттану">
+        <img src="mark.svg" alt="" width="42" height="42">
+        <span><strong>Мәдениеттану<span class="brand-dot">.</span></strong><small data-i18n="platform">ИГРОВАЯ ПЛАТФОРМА</small></span>
+      </a>
+      <nav class="header-nav" aria-label="Навигация / Навигация">
+        <a href="#games" data-i18n="gamesNav">Игры</a>
+        <button class="text-button" type="button" data-help data-i18n="helpNav">Как присоединиться</button>
+      </nav>
+      <div class="header-actions">
+        <button class="icon-button" id="theme-toggle" type="button" aria-label="Включить светлую тему">
+          <svg class="sun-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4 19 5"/></svg>
+          <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 14.4A9 9 0 0 1 9.6 3.3a9 9 0 1 0 11.1 11.1Z"/></svg>
+        </button>
+        <div class="language-switch" role="group" data-i18n-aria="language" aria-label="Язык интерфейса"><button type="button" data-language="ru" aria-pressed="true">RU</button><button type="button" data-language="kk" aria-pressed="false">ҚАЗ</button></div>
+        <a class="teacher-link" data-teacher href="https://culture-quest-z.onrender.com/teacher.html"><span data-i18n="teacherNav">Преподавателю</span><span aria-hidden="true">↗</span></a>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span><span data-i18n="eyebrow">МӘДЕНИЕТТАНУ 3D / ОБЩЕЕ ЛОББИ</span><span class="beta-badge" data-i18n="beta">Бета</span></p>
+          <h1 id="hero-title"><span data-i18n="heroStart">Каждый ответ</span><em data-i18n="heroEnd">открывает мир.</em></h1>
+          <p class="hero-intro" data-i18n="intro">Выбирайте игру, объединяйтесь в команды и превращайте знания в культурный капитал.</p>
+          <a class="button button-gold browse-button" href="#games"><span data-i18n="browse">Выбрать игру</span><span aria-hidden="true">↓</span></a>
+          <div class="hero-features"><span><i aria-hidden="true">◈</i><span data-i18n="format">Команды и Solo</span></span><span><i aria-hidden="true">▯</i><span data-i18n="device">Играйте с телефона</span></span></div>
+        </div>
+
+        <section class="invitation-panel" aria-labelledby="invite-title">
+          <div class="ticket-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 8h22v6a3 3 0 0 0 0 6v5H5v-5a3 3 0 0 0 0-6Z"/><path d="M21 9v3m0 3v3m0 3v3M10 12h6m-6 5h4"/></svg><span>01</span></div>
+          <p class="eyebrow" data-i18n="inviteEyebrow">ВАШ ПРОПУСК В ИГРУ</p>
+          <h2 id="invite-title" data-i18n="inviteTitle">Есть приглашение?</h2>
+          <p class="panel-description" data-i18n="inviteDescription">Вставьте ссылку, которую прислал преподаватель. Аккаунт для участия не нужен.</p>
+          <form id="invitation-form" novalidate autocomplete="off">
+            <label class="field-label" for="invitation-input" data-i18n="inviteLabel">Ссылка-приглашение</label>
+            <div class="invitation-input-wrap"><span aria-hidden="true">↗</span><input id="invitation-input" type="text" inputmode="url" maxlength="3200" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Вставьте ссылку занятия" data-i18n-placeholder="invitePlaceholder" aria-describedby="invitation-message"></div>
+            <button class="button button-mint" type="submit"><span data-i18n="join">Присоединиться</span><span aria-hidden="true">↗</span></button>
+            <p id="invitation-message" class="form-message" role="status" aria-live="polite"></p>
+          </form>
+          <p class="invitation-note"><span aria-hidden="true">⌁</span><span data-i18n="inviteNote">Имя и команду вы выберете на странице игры.</span></p>
+        </section>
+      </section>
+
+      <section class="catalog-section" id="games" aria-labelledby="catalog-title">
+        <div class="section-heading"><div><p class="eyebrow" data-i18n="catalogEyebrow">ВАШЕ СЛЕДУЮЩЕЕ ПРИКЛЮЧЕНИЕ</p><h2 id="catalog-title"><span data-i18n="catalogTitle">Во что сыграем?</span><span id="game-count" class="count-badge" aria-live="polite">1 игра</span></h2></div><div class="search-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><label for="game-search" class="sr-only" data-i18n="searchLabel">Поиск игры</label><input id="game-search" type="search" placeholder="Найти игру или предмет" data-i18n-placeholder="searchPlaceholder" autocomplete="off"></div></div>
+        <div class="catalog-layout">
+          <div class="catalog-main">
+            <article class="game-card" id="game-card">
+              <div class="game-cover"><div class="cover-topline"><span data-i18n="subject">КУЛЬТУРОЛОГИЯ</span><span class="cover-mode">3D / QUIZ</span></div><img src="ornament.svg" alt="" width="420" height="260" loading="lazy" decoding="async"><p class="cover-motto">БІЛІМ<span>МӘДЕНИЕТ</span>БОЛАШАҚ</p><div class="cover-bottomline"><span>МӘДЕНИЕТТАНУ</span><span aria-hidden="true">↗</span></div></div>
+              <div class="game-details"><span class="access-badge"><i aria-hidden="true"></i><span data-i18n="inviteBadge">Вход по приглашению</span></span><h3 data-i18n="gameTitle">Мәдениеттану 3D</h3><p data-i18n="gameDescription">От первого ответа до собственного города. Исследуйте культуру Казахстана и развивайте свой регион вместе с командой.</p><div class="game-tags"><span data-i18n="teamTag">Командная стратегия</span><span data-i18n="soloTag">Личный рейтинг</span></div><div class="game-bottom"><p data-i18n="gameAccess">Новым участникам нужна ссылка занятия от преподавателя.</p><a class="button button-outline" id="student-link" href="https://culture-quest-z.onrender.com/student.html"><span data-i18n="enterGame">Открыть игру</span><span aria-hidden="true">↗</span></a></div></div>
+            </article>
+            <div class="empty-state" id="empty-state" hidden><span aria-hidden="true">⌕</span><h3 data-i18n="emptyTitle">Такой игры пока нет</h3><p data-i18n="emptyDescription">Попробуйте «Мәдениеттану», «культурология» или «Solo».</p><button type="button" class="text-button" id="clear-search" data-i18n="clearSearch">Сбросить поиск</button></div>
+          </div>
+          <aside class="side-column">
+            <section class="steps-panel"><p class="side-kicker" aria-hidden="true">START HERE ↘</p><h3 data-i18n="stepsTitle">До игры — три шага</h3><ol class="steps"><li><span class="step-number">01</span><div><strong data-i18n="stepOneTitle">Получите приглашение</strong><p data-i18n="stepOne">Преподаватель открывает вход и отправляет ссылку занятия.</p></div></li><li><span class="step-number">02</span><div><strong data-i18n="stepTwoTitle">Представьтесь</strong><p data-i18n="stepTwo">Введите имя, подтвердите согласие и выберите команду, если игра командная.</p></div></li><li><span class="step-number">03</span><div><strong data-i18n="stepThreeTitle">Играйте вместе</strong><p data-i18n="stepThree">Отвечайте на вопросы, развивайте регион и собирайте достижения.</p></div></li></ol></section>
+            <section class="saved-invite" id="saved-invite" hidden><span aria-hidden="true">↗</span><div><h3 data-i18n="savedTitle">Приглашение подготовлено</h3><p data-i18n="savedDescription">Можно присоединиться или выбрать другую ссылку.</p><button class="text-button" id="remove-invitation" type="button" data-i18n="removeInvite">Убрать приглашение</button></div></section>
+            <section class="teacher-panel"><h3 data-i18n="teacherTitle">Ведёте занятие?</h3><p data-i18n="teacherDescription">В пульте можно подготовить вопросы, настроить формат и пригласить группу.</p><a data-teacher href="https://culture-quest-z.onrender.com/teacher.html"><span data-i18n="teacherButton">Открыть пульт</span><span aria-hidden="true">↗</span></a></section>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer"><div><span class="footer-symbol" aria-hidden="true">✳</span><strong>Мәдениеттану<span>.</span></strong><span class="footer-line" data-i18n="footerLine">Знания объединяют.</span></div><div><span data-i18n="authors">Создано Адилетом и Ернуром</span><a data-privacy href="https://culture-quest-z.onrender.com/privacy.html" data-i18n="privacy">Конфиденциальность</a></div></footer>
+  </div>
+  <dialog id="help-dialog" aria-labelledby="help-title"><div class="help-content"><span class="help-icon" aria-hidden="true">↗</span><h2 id="help-title" data-i18n="helpTitle">Как попасть в игру</h2><p data-i18n="helpText">Ссылку занятия создаёт преподаватель в пульте: «Вход и защита занятия» → «Открыть вход» → «Копировать ссылку».</p><p data-i18n="helpReturn">Если вы уже участвуете, нажмите «Открыть игру»: действующая сессия восстановится в том же браузере.</p><p data-i18n="helpAccess">Открытая ссылка ведёт на страницу участника. Регистрацию, наличие мест и доступ проверяет сервер игры.</p><button type="button" class="button button-mint" id="help-close" data-i18n="close">Понятно</button></div></dialog>
+  <noscript><p class="noscript-note">Для приглашений включите JavaScript. <a href="https://culture-quest-z.onrender.com/student.html">Открыть игру / Ойынды ашу ↗</a></p></noscript>
+</body>
+</html>
