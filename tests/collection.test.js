@@ -119,7 +119,7 @@ test('коллекция: защищённая cookie переживает вы�
 
 test('интерфейс: секретные условия только на сервере, выбранный предпросмотр и перчатка с шестью камнями',async()=>{
  const [engine,styles,student,teacher,scene]=await Promise.all(['shared-engine.js','styles.css','student.html','teacher.html','scene3d.js'].map(f=>readFile(new URL('../'+f,import.meta.url),'utf8')));
- assert.ok(engine.includes('engine.previewAchievement(kind.value)'));assert.ok(engine.includes('engine.grantAchievement(kind.value,scope,targetId)'));assert.ok(engine.includes('data-award-perks'));assert.ok(student.includes('data-collection-stones')&&teacher.includes('data-collection-stones'));assert.ok(styles.includes('@keyframes gem-awaken')&&styles.includes('@keyframes limit-unbound'));assert.ok(styles.includes('@media(prefers-reduced-motion:reduce)'));assert.ok(scene.includes("award.achievementId!=='sky-breaker'"));
+ assert.ok(engine.includes('engine.previewAchievement(kind.value)'));assert.ok(engine.includes('engine.grantAchievement(kind.value,scope,targetId)'));assert.ok(engine.includes('data-award-perks'));assert.ok(student.includes('data-collection-stones')&&teacher.includes('data-collection-stones'));assert.ok(styles.includes('@keyframes gem-awaken')&&styles.includes('@keyframes limit-unbound'));assert.ok(styles.includes('@media(prefers-reduced-motion:reduce)'));
  for(const id of ['neon-summit','zero-card','scenario-reader'])assert.equal(engine.includes(awardDefinition(id).title),false);
  const gems=engine.match(/const gems=\[(.*?)\];/s)[1];assert.equal((gems.match(/'(power|space|reality|mind|soul|time)'/g)||[]).length,6);
 });

@@ -409,8 +409,14 @@ export function createScene(canvas, opts = {}) {
   function setLowPower(value){lowPower=!!value;renderer.setPixelRatio(Math.min(lowPower?1:1.5,window.devicePixelRatio||1));renderer.shadowMap.enabled=!lowPower;try{localStorage.setItem('cq_graphics_v1',lowPower?'low':'standard')}catch{}paintQuality();wake()}
   qualityButton.addEventListener('click',()=>setLowPower(!lowPower));paintQuality();
   hud.append(homeButton,regionSelect,qualityButton); canvas.parentElement.append(hud);
-  let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true,sceneVisible=true,requestedVisible=true,renderingReady=false,activeUntil=0,latestState=null,mapPreview=null,lastFocusId,lastWorldPaint=0,worldMatch=null;
+  let selected = null, cameraTween = null, disposed = false, frame = 0, initial = true,sceneVisible=true,requestedVisible=true,renderingReady=false,activeUntil=0,latestState=null,mapPreview=null,lastFocusId,lastWorldPaint=0,worldMatch=null,personalCinema=false;
   const worldEffects=new Map(),seenWorld=new Set();
+  function trackWorldEffect(award,effect,remaining){
+    for(const [id,previous]of worldEffects)if(previous.award?.achievementId===award.achievementId&&previous.award.teamId===award.teamId){previous.dispose();worldEffects.delete(id)}
+    const dispose=effect.dispose.bind(effect);let released=false;
+    const expiry=setTimeout(()=>{effect.dispose();if(worldEffects.get(award.id)===effect)worldEffects.delete(award.id);wake()},Math.max(1,remaining));
+    effect.award=award;effect.dispose=()=>{if(released)return;released=true;clearTimeout(expiry);dispose()};worldEffects.set(award.id,effect);
+  }
   function clearWorld(){for(const effect of worldEffects.values())effect.dispose();worldEffects.clear()}
   function syncWorldAchievements(state){
     if(worldMatch!==state.match?.id){clearWorld();seenWorld.clear();worldMatch=state.match?.id}
@@ -420,10 +426,10 @@ export function createScene(canvas, opts = {}) {
       const duration=award.durationMs||7800,elapsed=Math.max(0,(state.serverTime||Date.now())-award.startedAt+Math.max(0,Date.now()-(state.clientReceivedAt||Date.now())));if(elapsed>=duration)continue;
       const team=state.regions.find(t=>t.id===award.teamId),base=team&&metadataFor(team).baseRegionId,region=regions.find(r=>r.meta.id===base);if(!region)continue;
       if(Object.hasOwn(ANIMATION_MODULES,award.achievementId)){
-        const group=new THREE.Group();region.group.add(group);let cancelled=false,animation=null,normalizer=null;
+        const group=new THREE.Group();group.name='match-achievement';group.userData.achievementId=award.id;region.group.add(group);let cancelled=false,animation=null,normalizer=null;
         const started=performance.now()-elapsed;
         const effect={group,started,update(seconds){if(seconds*1000>=duration)return false;if(animation){try{animation.update(seconds,1/30);group.visible=true;}catch(error){console.error('Ошибка анимации на карте:',error);return false;}}return true},dispose(){cancelled=true;animation?.dispose?.();if(animation)disposeAnimationScene(animation.scene);group.removeFromParent()}};
-        worldEffects.set(award.id,effect);newEffects.push({region,award});wake(duration-elapsed);
+        trackWorldEffect(award,effect,duration-elapsed);newEffects.push({region,award});wake(duration-elapsed);
         import(ANIMATION_MODULES[award.achievementId]).then(module=>{
           if(cancelled||disposed)return;
           animation=module.createAnimation({THREE,reducedMotion:window.matchMedia('(prefers-reduced-motion: reduce)').matches,lowPower:true,mapMode:true});
@@ -438,7 +444,7 @@ export function createScene(canvas, opts = {}) {
       }
       const effect=(award.achievementId==='sky-breaker'?mapAchievement:mapLegendaryAchievement)(award,window.matchMedia('(prefers-reduced-motion: reduce)').matches);effect.started=performance.now()-elapsed;effect.group.scale.setScalar(clamp(region.data.cityRadius*.5,1.25,1.8));effect.group.position.y=.7;
       const peers=state.regions.filter(t=>metadataFor(t).baseRegionId===base);if(peers.length>1){const angle=peers.findIndex(t=>t.id===team.id)*Math.PI*2/peers.length,radius=Math.min(2.2,region.data.cityRadius*.65);effect.group.position.x=Math.cos(angle)*radius;effect.group.position.z=Math.sin(angle)*radius}
-      region.group.add(effect.group);worldEffects.set(award.id,effect);newEffects.push({region,award});wake(duration-elapsed);
+      region.group.add(effect.group);trackWorldEffect(award,effect,duration-elapsed);newEffects.push({region,award});wake(duration-elapsed);
     }
     if(newEffects.length){selected=null;mapPreview=null;regionSelect.value='';const distance=Math.max(44,44/(Math.tan(THREE.MathUtils.degToRad(camera.fov/2))*camera.aspect));
       if(newEffects.length===1){
@@ -446,7 +452,7 @@ export function createScene(canvas, opts = {}) {
       }else moveCamera(new THREE.Vector3(0,4,0),Math.min(138,distance));
     }
   }
-  function wake(ms=180){activeUntil=performance.now()+ms;if(renderingReady&&!frame&&!disposed&&sceneVisible&&requestedVisible&&!document.hidden)frame=requestAnimationFrame(animate)}
+  function wake(ms=180){activeUntil=performance.now()+ms;if(renderingReady&&!frame&&!disposed&&sceneVisible&&requestedVisible&&!personalCinema&&!document.hidden)frame=requestAnimationFrame(animate)}
   function setVisible(value){if(requestedVisible===value)return;requestedVisible=value;if(value)wake();else{cancelAnimationFrame(frame);frame=0}}
   function moveCamera(target, distance) {
     cameraTween = { target, position: target.clone().add(new THREE.Vector3(0, distance * .79, distance * .71)) };
@@ -533,7 +539,7 @@ export function createScene(canvas, opts = {}) {
   }
   const clock = new THREE.Clock(), reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   function animate() {
-    frame=0;if (disposed||!sceneVisible||!requestedVisible||document.hidden) return;
+    frame=0;if (disposed||!sceneVisible||!requestedVisible||personalCinema||document.hidden) return;
     if(worldEffects.size&&lowPower&&performance.now()-lastWorldPaint<1000/30){frame=requestAnimationFrame(animate);return}lastWorldPaint=performance.now();
     const dt = Math.min(.05, clock.getDelta()), t = clock.elapsedTime, rate = reduceMotion ? 1 : 1 - Math.exp(-dt * 5);
     if (cameraTween) {
@@ -567,11 +573,12 @@ export function createScene(canvas, opts = {}) {
     if(!frame&&(cameraTween||settling||worldEffects.size||performance.now()<activeUntil))frame=requestAnimationFrame(animate);
   }
   const onVisibility=()=>{if(document.hidden){cancelAnimationFrame(frame);frame=0}else wake()};document.addEventListener('visibilitychange',onVisibility);
+  const onCinema=event=>{personalCinema=event.detail?.active===true;if(personalCinema){cancelAnimationFrame(frame);frame=0}else wake()};window.addEventListener('cq:cinema-state',onCinema);
   const visibilityObserver=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{sceneVisible=entries[0]?.isIntersecting??true;if(sceneVisible)wake();else{cancelAnimationFrame(frame);frame=0}});visibilityObserver?.observe(canvas);
   renderingReady=true;animate();
   function dispose() {
     disposed = true;clearWorld();cancelAnimationFrame(frame); observer.disconnect(); controls.dispose();
-    visibilityObserver?.disconnect();document.removeEventListener('visibilitychange',onVisibility);
+    visibilityObserver?.disconnect();document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('cq:cinema-state',onCinema);
     canvas.removeEventListener("pointerdown", onDown); canvas.removeEventListener("pointerup", onUp); hud.remove();
     const geometries = new Set(), mats = new Set(), textures = new Set();
     scene.traverse(object => { if (object.geometry) geometries.add(object.geometry); if (object.material) for (const mat of Array.isArray(object.material) ? object.material : [object.material]) { mats.add(mat); if (mat.map) textures.add(mat.map); } });

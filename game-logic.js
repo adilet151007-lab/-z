@@ -436,10 +436,14 @@ export class GameLogic {
     const match=this.ensureMatch(),team=scope==='team'?this.region(targetId):this.state.regions.find(t=>t.members.some(m=>m.pid===targetId)),member=scope==='player'?team?.members.find(m=>m.pid===targetId):null;
     ensure(team&&(scope==='team'?team.members.length:member),'Получатель отсутствует или команда пуста.');
     this.state.achievements??=[];
-    const duplicate=this.state.achievements.find(a=>a.matchId===match.id&&a.achievementId===achievementId&&a.scope===scope&&a.targetId===targetId&&(source==='manual'||a.source!=='manual'));if(duplicate)return {achievement:structuredClone(duplicate),duplicate:true};
-    const recipients=scope==='team'?team.members:[member];
+    let recipients=scope==='team'?team.members:[member];
+    const duplicate=this.state.achievements.find(a=>a.matchId===match.id&&a.achievementId===achievementId&&a.scope===scope&&a.targetId===targetId&&(source==='manual'||a.source!=='manual'));
+    if(duplicate){
+      const missing=recipients.filter(m=>{const p=profileFor(this,m.pid);return achievementId==='infinity-gauntlet'&&p?.perkRevoked||!p?.earned.some(a=>a.achievementId===achievementId&&(source==='manual'||a.source!=='manual'))});
+      if(!missing.length)return {achievement:structuredClone(duplicate),duplicate:true};recipients=missing;
+    }
     if(source!=='manual'&&recipients.every(m=>profileFor(this,m.pid)?.earned.some(a=>a.achievementId===achievementId&&a.source!=='manual')))return {achievement:structuredClone(profileFor(this,recipients[0].pid).earned.find(a=>a.achievementId===achievementId)),duplicate:true};
-    const award={id:randomUUID(),achievementId,scope,targetId,teamId:team.id,matchId:match.id,earnedAt:this.now(),source,reason,recipientName:scope==='team'?team.name:member.name,recipientIds:scope==='team'?team.members.map(m=>m.pid):[member.pid]};
+    const award={id:randomUUID(),achievementId,scope,targetId,teamId:team.id,matchId:match.id,earnedAt:this.now(),source,reason,recipientName:scope==='team'?team.name:member.name,recipientIds:recipients.map(m=>m.pid)};
     this.state.achievements=[...this.state.achievements,award].slice(-1000);recordCollectionAward(this,award);
     if(source==='manual'){
       const round=this.state.round;

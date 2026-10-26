@@ -1,6 +1,7 @@
 export const durationMs = 11000;
 const DURATION_MS = durationMs;
 export const captionAtMs = 8500;
+export const posterAtMs = 8900;
 const CAPTION_AT_MS = captionAtMs;
 
 export function createAnimation({ THREE, reducedMotion = false, lowPower = false, mapMode = false }) {
@@ -62,13 +63,13 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
     if(pos) o.position.copy(pos); return o;
   };
   const group = (parent,name) => {const o=new THREE.Group(); o.name=name||''; if(parent)parent.add(o);return o;};
-  const sphereGeo = G(new THREE.SphereGeometry(1,32,24));
+  const sphereGeo = G(new THREE.SphereGeometry(1,lowPower?12:32,lowPower?8:24));
   const sphere = (parent,pos,scale,mat=gold) => { const o=mesh(sphereGeo,mat,parent,pos); o.scale.set(scale[0],scale[1],scale[2]); return o; };
   const tube = (parent,points,r,mat,closed=false,segments=64) => {
     const curve=points instanceof THREE.Curve?points:new THREE.CatmullRomCurve3(points,closed,'catmullrom',.45);
-    return mesh(G(new THREE.TubeGeometry(curve,lowPower?Math.max(24,Math.round(segments*.65)):segments,r,24,closed)),mat,parent);
+    return mesh(G(new THREE.TubeGeometry(curve,lowPower?Math.max(8,Math.min(32,Math.round(segments*.35))):segments,r,lowPower?6:24,closed)),mat,parent);
   };
-  const torus = (parent,r,thickness,mat,pos,arc=TAU) => mesh(G(new THREE.TorusGeometry(r,thickness,24,96,arc)),mat,parent,pos);
+  const torus = (parent,r,thickness,mat,pos,arc=TAU) => mesh(G(new THREE.TorusGeometry(r,thickness,lowPower?6:24,lowPower?32:96,arc)),mat,parent,pos);
   const glowMaterial = color => M(new THREE.MeshBasicMaterial({
     color,transparent:true,opacity:1,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false
   }));
@@ -87,6 +88,9 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
   // using that player's renderer. The studio never becomes the visible backdrop.
   function prepareEnvironment(renderer) {
     if(disposed || preparing || envRenderer===renderer) return;
+    // The six-face floating-point studio pass is unnecessary on a phone.
+    // Direct studio lights keep the same rig usable without HDR render targets.
+    if(lowPower){envRenderer=renderer;return;}
     preparing=true;
     const studio=new THREE.Scene();
     studio.background=new THREE.Color(0x181b22);
@@ -146,16 +150,16 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
   }
   function extrudeShape(shape,depth=.12,bevel=.06) {
     const g=G(new THREE.ExtrudeGeometry(shape,{
-      depth,bevelEnabled:true,bevelThickness:bevel,bevelSize:bevel,bevelSegments:8,
-      steps:2,curveSegments:32
+      depth,bevelEnabled:true,bevelThickness:bevel,bevelSize:bevel,bevelSegments:lowPower?2:8,
+      steps:lowPower?1:2,curveSegments:lowPower?8:32
     }));
     g.translate(0,0,-depth/2);
     g.computeVertexNormals();g.computeBoundingBox();
     // A separate smooth parametric crown sits above the rounded extruded lid.
     // Its regular polar topology prevents large cap triangles from looking faceted.
-    const outline=shape.getPoints(160),bb=g.boundingBox;
+    const outline=shape.getPoints(lowPower?40:160),bb=g.boundingBox;
     const cx=(bb.min.x+bb.max.x)/2,cy=(bb.min.y+bb.max.y)/2;
-    const N=72,R=16,bulge=Math.min(.032,(bb.max.x-bb.min.x)*.10,(bb.max.y-bb.min.y)*.10);
+    const N=lowPower?24:72,R=lowPower?5:16,bulge=Math.min(.032,(bb.max.x-bb.min.x)*.10,(bb.max.y-bb.min.y)*.10);
     const positions=[cx,cy,bb.max.z+.0006+bulge],idx=[];
     function radius(th){
       const dx=Math.cos(th),dy=Math.sin(th);let best=Infinity;
@@ -167,8 +171,9 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
       }
       return Number.isFinite(best)?best:0;
     }
+    const radii=Array.from({length:N},(_,k)=>radius(k/N*TAU));
     for(let j=1;j<=R;j++)for(let k=0;k<N;k++){
-      const th=k/N*TAU,u=j/R,r=radius(th)*u;
+      const th=k/N*TAU,u=j/R,r=radii[k]*u;
       const px=cx+Math.cos(th)*r,py=cy+Math.sin(th)*r;
       const nx=(px-cx)/((bb.max.x-bb.min.x)*.51),ny=(py-cy)/((bb.max.y-bb.min.y)*.51);
       const domeHeight=bulge*Math.pow(Math.max(0,1-nx*nx-ny*ny),1.6);
@@ -213,9 +218,10 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
   }
   // Sculpted dorsal volume and a separately padded inner palm share a real aperture.
   function sculptedPalm(){
-    const outline=palmShape.getPoints(192),N=128,R=28,positions=[],uv=[],indices=[];
+    const outline=palmShape.getPoints(lowPower?64:192),N=lowPower?48:128,R=lowPower?8:28,positions=[],uv=[],indices=[];
+    const radii=Array.from({length:N+1},(_,k)=>contourRadius(outline,k/N*TAU,0,-.19));
     for(let side=0;side<2;side++)for(let ring=0;ring<=R;ring++)for(let k=0;k<=N;k++){
-      const th=k/N*TAU,r=mix(.342,contourRadius(outline,th,0,-.19),ring/R);
+      const th=k/N*TAU,r=mix(.342,radii[k],ring/R);
       const x=Math.cos(th)*r,y=-.19+Math.sin(th)*r;
       const z=.16+.22*Math.sqrt(Math.max(.015,1-Math.pow(x/1.25,2)))+.035*(1-Math.pow(y/1.5,2));
       const back=-.19-.15*Math.sqrt(Math.max(.015,1-Math.pow(x/1.3,2)));
@@ -241,7 +247,7 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
   const antique=M(gold.clone());antique.color.set(0x9e7330);antique.roughness=.42;antique.emissiveIntensity=.12;
   const polish=M(gold.clone());polish.color.set(0xffda82);polish.roughness=.16;polish.emissiveIntensity=.18;
   const inlayTextures=(()=>{
-    const size=768,c=document.createElement('canvas'),b=document.createElement('canvas');
+    const size=lowPower?256:768,c=document.createElement('canvas'),b=document.createElement('canvas');
     c.width=c.height=b.width=b.height=size;
     const x=c.getContext('2d'),h=b.getContext('2d'),data=x.createImageData(size,size),height=h.createImageData(size,size);
     for(let y=0;y<size;y++)for(let px=0;px<size;px++){
@@ -298,19 +304,20 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
       }
     });
     for(const {mat,list} of batches.values()){
-      const pos=[],normal=[],uv=[];
+      const pos=[],normal=[],uv=[],packedIndices=[],point=new THREE.Vector3(),normalPoint=new THREE.Vector3();
       for(const o of list){
         const g=o.geometry,pa=g.getAttribute('position'),na=g.getAttribute('normal'),ta=g.getAttribute('uv');
         const matrix=new THREE.Matrix4().multiplyMatrices(inverse,o.matrixWorld),nm=new THREE.Matrix3().getNormalMatrix(matrix);
-        const indices=g.index?g.index.array:null,count=indices?indices.length:pa.count;
-        for(let k=0;k<count;k++){
-          const idx=indices?indices[k]:k,v=new THREE.Vector3().fromBufferAttribute(pa,idx).applyMatrix4(matrix);
-          const n=new THREE.Vector3().fromBufferAttribute(na,idx).applyNormalMatrix(nm);
-          pos.push(v.x,v.y,v.z);normal.push(n.x,n.y,n.z);uv.push(ta?ta.getX(idx):0,ta?ta.getY(idx):0);
+        const offset=pos.length/3;
+        for(let k=0;k<pa.count;k++){
+          point.fromBufferAttribute(pa,k).applyMatrix4(matrix);normalPoint.fromBufferAttribute(na,k).applyNormalMatrix(nm);
+          pos.push(point.x,point.y,point.z);normal.push(normalPoint.x,normalPoint.y,normalPoint.z);uv.push(ta?ta.getX(k):0,ta?ta.getY(k):0);
         }
+        if(g.index)for(const index of g.index.array)packedIndices.push(offset+index);else for(let k=0;k<pa.count;k++)packedIndices.push(offset+k);
       }
       const g=G(new THREE.BufferGeometry());g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
       g.setAttribute('normal',new THREE.Float32BufferAttribute(normal,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
+      g.setIndex(packedIndices);
       const result=mesh(g,mat,root);result.name='Batched hand-crafted relief';result.frustumCulled=false;
     }
     remove.forEach(o=>o.removeFromParent());
@@ -322,7 +329,7 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
   function recessedPlate(shape,depth=.012,bevel=.009) {
     const g=G(new THREE.ExtrudeGeometry(shape,{
       depth,bevelEnabled:true,bevelThickness:bevel,bevelSize:bevel,
-      bevelSegments:8,steps:2,curveSegments:32
+      bevelSegments:lowPower?2:8,steps:lowPower?1:2,curveSegments:lowPower?8:32
     }));
     g.translate(0,0,-depth/2);g.computeVertexNormals();g.computeBoundingBox();
     // ExtrudeGeometry uses shape-space cap UVs; normalize the chased atlas to
@@ -452,9 +459,9 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
     new THREE.Vector2(.76,-1.22),new THREE.Vector2(.73,-1.13),new THREE.Vector2(.69,-.76),
     new THREE.Vector2(.56,-.22),new THREE.Vector2(.54,-.04),new THREE.Vector2(.61,0)
   ]);
-  const cuff=mesh(G(new THREE.LatheGeometry(cuffProfile.getPoints(80).reverse(),96)),satin,wristAssembly,V(0,-1.17,0));
+  const cuff=mesh(G(new THREE.LatheGeometry(cuffProfile.getPoints(lowPower?24:80).reverse(),lowPower?32:96)),satin,wristAssembly,V(0,-1.17,0));
   cuff.scale.set(1.10,1.34,.74);cuff.name='Hollow flared bracer';assemble(cuff,V(0,-.75,-.20),.05);
-  const liner=mesh(G(new THREE.CylinderGeometry(.555,.745,1.13,64,8,true)),jointLiner,wristAssembly,V(0,-1.97,0));
+  const liner=mesh(G(new THREE.CylinderGeometry(.555,.745,1.13,lowPower?24:64,lowPower?2:8,true)),jointLiner,wristAssembly,V(0,-1.97,0));
   liner.scale.set(1.08,1.34,.74);assemble(liner,V(0,-.7,-.2),.05);
   // Thin interrupted machined rims retain the floating-collar motif.
   for(const [radius,y] of [[.70,-1.27],[.94,-2.76]]){
@@ -502,7 +509,7 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
 
   function profiledFingerGeometry(r,length,taper=.14) {
     // Dense rounded-rectangle sections: flatter armored backs and full finger sides.
-    const N=48,R=36,positions=[],uv=[],idx=[];
+    const N=lowPower?16:48,R=lowPower?12:36,positions=[],uv=[],idx=[];
     for(let j=0;j<=R;j++){
       const u=j/R,y=(u-.5)*length;
       const cap=.19;
@@ -545,7 +552,7 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
       if(j>0)pivot.position.y=lengths[j-1]*.90;
       const r=width*(1-j*.085);
       // Liner and reinforced gold sleeve overlap, leaving only a fine flexible crease.
-      const underGeo=G(new THREE.CapsuleGeometry(r*.94,Math.max(.025,length-r*1.88),16,32));
+      const underGeo=G(new THREE.CapsuleGeometry(r*.94,Math.max(.025,length-r*1.88),lowPower?4:16,lowPower?12:32));
       underGeo.translate(0,length/2,0);
       const under=mesh(underGeo,jointLiner,pivot);under.scale.z=.83;
       const shell=mesh(profiledFingerGeometry(r,length),reactiveMat,pivot);
@@ -556,7 +563,7 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
       nestedArmor(armor,r*1.76,length*(j===2?.82:.74),fingerArmorShape,.018,true);
       const jointDetail=decoration(pivot,'Articulated lateral bearings');
       for(const side of [-1,1]){
-        const cap=mesh(G(new THREE.CylinderGeometry(r*.25,r*.29,r*.16,36,8)),antique,jointDetail,V(side*r*.94,.055,0));
+        const cap=mesh(G(new THREE.CylinderGeometry(r*.25,r*.29,r*.16,lowPower?12:36,lowPower?1:8)),antique,jointDetail,V(side*r*.94,.055,0));
         cap.rotation.z=PI/2;
         const bearing=torus(jointDetail,r*.21,.009,polish,V(side*r*1.025,.055,0));bearing.rotation.y=PI/2;
         sphere(jointDetail,V(side*r*1.035,.055,0),[.008,r*.08,r*.08],dark);
@@ -622,7 +629,7 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
       new THREE.Vector2(r*.78,-.085)
     ];
     const spline=new THREE.SplineCurve(points);
-    const o=mesh(G(new THREE.LatheGeometry(spline.getPoints(64),64)),mat);o.rotation.x=PI/2;return o;
+    const o=mesh(G(new THREE.LatheGeometry(spline.getPoints(lowPower?20:64),lowPower?24:64)),mat);o.rotation.x=PI/2;return o;
   }
   // UV-driven charging. vUv.x follows the path from each knuckle toward center.
   const channelVertex=[
@@ -895,7 +902,7 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
       'gl_FragColor=vec4(refracted,min(.26,uOpacity*(.10+.90*fres)));}'
     ].join('\n')
   }));
-  const lens=mesh(G(new THREE.TorusGeometry(1,.05,32,128)),waveShader,waveRoot);
+  const lens=mesh(G(new THREE.TorusGeometry(1,.05,lowPower?8:32,lowPower?48:128)),waveShader,waveRoot);
   lens.rotation.x=.22;
   // A transparent WebGL canvas cannot sample arbitrary DOM pixels. A host may
   // supply its live game/map texture for actual chromatic refraction. The demo
@@ -908,9 +915,10 @@ export function createAnimation({ THREE, reducedMotion = false, lowPower = false
   }
 
   // Crisp caption rendered inside THREE, not HTML text masquerading as 3D.
-  const captionCanvas=document.createElement('canvas');captionCanvas.width=2400;captionCanvas.height=520;
+  const captionCanvas=document.createElement('canvas'),captionScale=lowPower?.5:1;captionCanvas.width=2400*captionScale;captionCanvas.height=520*captionScale;
   const cx=captionCanvas.getContext('2d');
   function drawCaption() {
+    cx.setTransform(captionScale,0,0,captionScale,0,0);
     cx.clearRect(0,0,2400,520);
     const panel=cx.createRadialGradient(1200,240,80,1200,240,1200);
     panel.addColorStop(0,'rgba(11,18,25,.52)');panel.addColorStop(.6,'rgba(11,18,25,.34)');panel.addColorStop(1,'rgba(11,18,25,0)');

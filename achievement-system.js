@@ -89,7 +89,7 @@ function saveToProfile(p,award){
  p.updatedAt=award.earnedAt;
 }
 export function recordCollectionAward(g,award){
- for(const pid of award.recipientIds){const p=ensurePlayerProfile(g,pid);if(!p)continue;saveToProfile(p,award);if(award.achievementId==='infinity-gauntlet')delete p.perkRevoked;if(ownsInfinity(p)&&!earned(p,'infinity-gauntlet'))g.grantAchievement('infinity-gauntlet','player',pid,'earned','collection');}
+ for(const pid of award.recipientIds){const p=ensurePlayerProfile(g,pid);if(!p)continue;saveToProfile(p,award);if(award.achievementId==='infinity-gauntlet')delete p.perkRevoked;if(award.achievementId!=='infinity-gauntlet'&&!p.perkRevoked&&completedStones(p).length===LEGENDARY_IDS.length&&!earned(p,'infinity-gauntlet'))g.grantAchievement('infinity-gauntlet','player',pid,'earned','collection');}
 }
 export function scoreLimit(g,scope,id){
  if(!g.state.settings.perksEnabled)return RESOURCE_CAP;
@@ -98,7 +98,7 @@ export function scoreLimit(g,scope,id){
 }
 export function publicCollection(g,pid){
  const p=profileFor(g,pid),m=members(g).find(m=>m.pid===pid),stones=completedStones(p);
- return {awards:(p?.earned||[]).map(a=>({...byId.get(a.achievementId),...a,recipientName:m?.name||''})),stones:stones.map(id=>byId.get(id).stone),totalStones:6,unlocked:ownsInfinity(p),active:g.state.settings.perksEnabled&&ownsInfinity(p),studied:earned(p,'daily-training')?100:p?.studied.length||0};
+ return {awards:(p?.earned||[]).map(a=>({...byId.get(a.achievementId),...a,recipientName:m?.name||''})),stones:stones.map(id=>byId.get(id).stone),totalStones:6,unlocked:ownsInfinity(p),revoked:p?.perkRevoked===true,active:g.state.settings.perksEnabled&&ownsInfinity(p),studied:earned(p,'daily-training')?100:p?.studied.length||0};
 }
 const emptyStats=()=>({seen:[],correct:0,answered:0,errors:0,correctRun:0,fast:0,fastRun:0,hard:0,armed:false,foresight:false,brokenNotice:false,midLast:false,ledAfterMid:false,previousRank:null,initial:false,earnedPoints:0});
 function statsFor(match,key){match.questStats??={};if(!Object.hasOwn(match.questStats,key))Object.defineProperty(match.questStats,key,{value:emptyStats(),enumerable:true,writable:true,configurable:true});return match.questStats[key]}

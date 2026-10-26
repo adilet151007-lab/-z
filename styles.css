@@ -442,6 +442,7 @@ body.telemetry-open,body.presentation-signal{overflow:hidden}
 .award-caption{position:absolute;bottom:max(70px,env(safe-area-inset-bottom));left:12px;right:12px;text-align:center;color:#fff;opacity:0;transform:translateY(8px);transition:opacity .6s,transform .6s;pointer-events:none}
 .award-caption.on{opacity:1;transform:none}.award-caption small,.award-caption span{display:block;color:#cfc6e6;font-size:12px}.award-caption strong{display:block;margin:8px 0;font:700 clamp(22px,5vw,32px)/1.2 Georgia,serif;text-shadow:0 0 20px #b48cff}
 .award-static{display:none}.award-fallback .award-static{display:block;position:absolute;inset:25% 30% 35%;border:2px solid #c8993a;border-radius:14px;text-align:center;color:#f8e199;font:100px Georgia,serif}.award-fallback canvas{display:none}
+.award-render-notice{position:absolute;left:20px;right:20px;top:58%;text-align:center;color:#e7d9f6;font-size:14px;line-height:1.5}
 
 /* Personal appearance settings; the atlas and cinematic artwork keep their own lighting. */
 .ui-preferences{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:none;min-width:0}.reg-card>.ui-preferences{width:100%;margin-bottom:16px;flex:none}.ui-preferences select{width:100px;min-height:40px;font-size:12px;padding:7px 8px}.ui-theme-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:40px;padding:7px 10px;white-space:nowrap;font-size:12px}.ui-theme-button>span:first-child{font-size:19px;line-height:1}.topbar>.ui-preferences{margin-left:2px}

@@ -1,4 +1,5 @@
 import { ANIMATION_MODULES } from './achievement-animations.js';
+import {t as uiText} from './ui-preferences.js';
 
 export const hasAchievementAnimation = id => Object.hasOwn(ANIMATION_MODULES, id);
 let threePromise;
@@ -29,8 +30,8 @@ export function mountAchievementAnimation(host, award, options = {}) {
   const env = options.environment || globalThis, doc = env.document;
   const reducedMotion = !!env.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const mobile = !!env.matchMedia?.('(max-width: 700px), (pointer: coarse)').matches;
-  let stopped = false, frame = 0, deadline = 0, renderer, animation, observer;
-  let startedAt = 0, lastPaint = -Infinity, lastUpdate = 0;
+  let stopped = false, fallback = false, frame = 0, deadline = 0, renderer, animation, observer;
+  let startedAt = 0, lastPaint = -Infinity, lastUpdate = 0, hasRendered = false;
   const listeners = [];
   host.classList.add('achievement-custom');
   host.innerHTML = '<div class="award-stage"><canvas aria-hidden="true"></canvas><div class="award-loading" role="status">Подготовка анимации…</div><div class="award-static" aria-hidden="true">0</div></div><aside class="award-caption" role="status" aria-live="polite"><small></small><strong></strong><span></span></aside><button class="achievement-skip" type="button">Закрыть ×</button>';
@@ -44,33 +45,42 @@ export function mountAchievementAnimation(host, award, options = {}) {
     target.addEventListener(name, handler, settings);
     listeners.push(() => target.removeEventListener(name, handler, settings));
   };
+  const releaseGraphics = () => {
+    const current=animation,context=renderer;animation=null;renderer=null;
+    try { current?.dispose?.(); } finally {
+      disposeAnimationScene(current?.scene);
+      context?.renderLists?.dispose(); context?.dispose(); context?.forceContextLoss?.();
+    }
+  };
+  const cinemaEvent=active=>{if(env.dispatchEvent&&env.CustomEvent)env.dispatchEvent(new env.CustomEvent('cq:cinema-state',{detail:{active}}))};
+  cinemaEvent(true);
   const teardown = () => {
     if (stopped) return;
     stopped = true;
     env.cancelAnimationFrame(frame); env.clearTimeout(deadline);
     observer?.disconnect(); listeners.forEach(remove => remove());
-    try { animation?.dispose?.(); } finally {
-      disposeAnimationScene(animation?.scene);
-      renderer?.renderLists?.dispose(); renderer?.dispose(); renderer?.forceContextLoss?.();
-      animation = null; renderer = null;
-    }
+    try{releaseGraphics()}finally{cinemaEvent(false)}
   };
   const finish = () => { if (stopped) return; teardown(); options.onDone?.(); };
   const resize = () => {
-    if (stopped || !renderer || !animation) return;
+    if (stopped || fallback || !renderer || !animation) return;
     const width = Math.max(1, stage.clientWidth), height = Math.max(1, stage.clientHeight);
     renderer.setSize(width, height, false); animation.resize?.(width, height);
-    if (reducedMotion) renderer.render(animation.scene, animation.camera);
+    if (reducedMotion&&hasRendered)try{renderer.render(animation.scene, animation.camera)}catch(error){showFallback(error)}
   };
-  const showFallback = () => {
-    if (stopped) return;
-    loading.hidden = true; host.classList.add('award-fallback'); caption.classList.add('on');
-    deadline = env.setTimeout(finish, 3500);
+  const showFallback = error => {
+    if (stopped || fallback) return;
+    fallback=true;env.cancelAnimationFrame(frame);frame=0;env.clearTimeout(deadline);observer?.disconnect();
+    try{releaseGraphics()}catch{}
+    loading.hidden = true; host.classList.add('award-fallback');caption.hidden=false;caption.classList.add('on');
+    host.querySelector('.award-static').textContent=award.achievementId==='infinity-gauntlet'?'∞':award.achievementId==='zero-card'?'0':'✧';
+    const notice=doc.createElement('p');notice.className='award-render-notice';notice.setAttribute('role','status');notice.textContent=options.preview?uiText('3D недоступно. Повторите предпросмотр или включите WebGL.'):uiText('3D недоступно. Достижение сохранено; его можно посмотреть позже.');stage.append(notice);
+    options.onError?.(error);deadline = env.setTimeout(finish, 6000);
   };
   listen(host.querySelector('button'), 'click', finish);
   listen(doc, 'keydown', event => { if (event.key === 'Escape') finish(); });
   listen(doc, 'visibilitychange', () => { if (doc.hidden) finish(); });
-  listen(canvas, 'webglcontextlost', event => { event.preventDefault(); finish(); });
+  listen(canvas, 'webglcontextlost', event => { event.preventDefault(); showFallback(new Error('WebGL context lost')); });
   listen(stage, 'pointermove', event => {
     if (stopped || !animation || reducedMotion) return;
     const box = stage.getBoundingClientRect();
@@ -92,6 +102,7 @@ export function mountAchievementAnimation(host, award, options = {}) {
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.1;
       renderer.shadowMap.enabled=!mobile&&!reducedMotion;
+      if(renderer.debug)renderer.debug.onShaderError=()=>{throw new Error('Achievement shader failed')};
       loaded = module.createAnimation({ THREE, reducedMotion, lowPower: mobile }); animation = loaded;
       if (!animation?.scene || !animation?.camera || typeof animation.update !== 'function') throw new Error('Invalid animation module');
       animation.prepareEnvironment?.(renderer);
@@ -101,13 +112,14 @@ export function mountAchievementAnimation(host, award, options = {}) {
       resize(); loading.hidden = true;
       if (env.ResizeObserver) { observer = new env.ResizeObserver(resize); observer.observe(stage); }
       if (reducedMotion) {
-        animation.update(duration / 1000, 0); renderer.render(animation.scene, animation.camera);
+        const poster=Math.max(0,Math.min(duration,Number(module.posterAtMs)||(captionAt>0?Math.min(duration*.8,captionAt+450):duration*.75)));
+        animation.update(poster / 1000, 0); renderer.render(animation.scene, animation.camera);hasRendered=true;
         caption.classList.add('on'); deadline = env.setTimeout(finish, 3500); return;
       }
       startedAt = env.performance.now();
       const tick = now => {
         frame = 0;
-        if (stopped) return;
+        if (stopped || fallback) return;
         const elapsed = Math.max(0, now - startedAt);
         if (now - lastPaint >= 1000 / 30 || elapsed >= duration) {
           try {
@@ -115,16 +127,14 @@ export function mountAchievementAnimation(host, award, options = {}) {
             animation.update(current, Math.max(0, Math.min(.1, current - lastUpdate))); lastUpdate = current;
             renderer.render(animation.scene, animation.camera); lastPaint = now;
             caption.classList.toggle('on', elapsed >= captionAt);
-          } catch { finish(); return; }
+          } catch (error) { showFallback(error); return; }
         }
         if (elapsed < duration) frame = env.requestAnimationFrame(tick);
       };
       frame = env.requestAnimationFrame(tick); deadline = env.setTimeout(finish, duration + 700);
-    } catch {
+    } catch (error) {
       if (stopped) return;
-      env.clearTimeout(deadline); disposeAnimationScene(loaded?.scene);
-      renderer?.dispose(); renderer?.forceContextLoss?.(); renderer = null; animation = null;
-      showFallback();
+      env.clearTimeout(deadline);showFallback(error);
     }
   })();
   return teardown;

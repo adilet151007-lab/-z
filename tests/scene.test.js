@@ -7,11 +7,12 @@ import * as THREE from 'three';
 test('сцена: камера следует высоте города, крайний зум не теряет подпись, статичная карта останавливается',async()=>{
  const sourceURL=new URL('../scene3d.js',import.meta.url),temporary=new URL('../.scene-test-'+process.pid+'.mjs',import.meta.url);
  const source=(await readFile(sourceURL,'utf8')).replace('new THREE.WebGLRenderer({ canvas, antialias: !mobile, alpha: false, powerPreference: "high-performance" })','new globalThis.SceneTestRenderer()');
- let now=0,nextId=0,renders=0;const frames=new Map(),events=new Map();
- const context=new Proxy({}, {get:(_target,key)=>key==='measureText'?()=>({width:1}):()=>{},set:()=>true});
+ let now=0,nextId=0,renders=0;const frames=new Map(),events=new Map(),windowEvents=new Map();
+ const gradient={addColorStop(){}};
+ const context=new Proxy({}, {get:(_target,key)=>key==='measureText'?()=>({width:1}):key==='createImageData'?(w,h)=>({data:new Uint8ClampedArray(w*h*4)}):key==='createLinearGradient'||key==='createRadialGradient'?()=>gradient:()=>{},set:()=>true});
  const element=()=>({style:{},clientWidth:390,clientHeight:230,addEventListener(){},removeEventListener(){},setAttribute(){},append(){},remove(){},getContext(){return context},getRootNode(){return this},getBoundingClientRect(){return {left:0,top:0,width:390,height:230}}});
  globalThis.document={hidden:false,createElement:element,addEventListener:(name,fn)=>events.set(name,fn),removeEventListener:name=>events.delete(name)};
- globalThis.window={devicePixelRatio:3,matchMedia:()=>({matches:true}),addEventListener(){},removeEventListener(){}};
+ globalThis.window={devicePixelRatio:3,matchMedia:()=>({matches:true}),addEventListener:(name,fn)=>windowEvents.set(name,fn),removeEventListener:name=>windowEvents.delete(name)};
  globalThis.performance={now:()=>now};globalThis.ResizeObserver=class{observe(){}disconnect(){}};
  globalThis.requestAnimationFrame=fn=>{const id=++nextId;frames.set(id,fn);return id};globalThis.cancelAnimationFrame=id=>frames.delete(id);
  globalThis.SceneTestRenderer=class{shadowMap={};setPixelRatio(value){this.pixelRatio=value}setSize(){}render(){renders++}dispose(){}};
@@ -31,6 +32,7 @@ test('сцена: камера следует высоте города, кра�
   for(let i=0;i<45;i++)step();assert.equal(frames.size,0);const settledRenders=renders;step();assert.equal(renders,settledRenders);api.setVisible(true);assert.equal(frames.size,0);
   api.setLowPower(false);assert.equal(api.renderer.pixelRatio,1.5);assert.equal(api.renderer.shadowMap.enabled,true);api.setLowPower(true);assert.equal(api.renderer.pixelRatio,1);assert.equal(api.renderer.shadowMap.enabled,false);
   api.setVisible(false);api.update({regions:[]});assert.equal(frames.size,0);api.setVisible(true);assert.ok(frames.size>0);
+  windowEvents.get('cq:cinema-state')({detail:{active:true}});assert.equal(frames.size,0);windowEvents.get('cq:cinema-state')({detail:{active:false}});assert.ok(frames.size>0);
   document.hidden=true;events.get('visibilitychange')();assert.equal(frames.size,0);document.hidden=false;events.get('visibilitychange')();assert.ok(frames.size>0);
   const state={regions:[{id:'astana',baseRegionId:'astana',name:'Астана',points:1000,economy:100,members:[]}],match:{id:'match-1'},serverTime:1000,clientReceivedAt:Date.now(),worldAchievements:[{id:'award-1',achievementId:'sky-breaker',teamId:'astana',teamName:'Астана',startedAt:1000,durationMs:7800}]};
   window.matchMedia=query=>({matches:!query.includes('prefers-reduced-motion')});api.update(state);step();const effect=group.children.find(o=>o.name==='match-achievement');assert.ok(effect);assert.equal(effect.userData.achievementId,'award-1');assert.ok(effect.getWorldPosition(new THREE.Vector3()).y>group.position.y);
@@ -39,8 +41,10 @@ test('сцена: камера следует высоте города, кра�
   const ids=['neon-summit','zero-card','scenario-reader','determination','daily-training','infinity-gauntlet'];
   api.update({...state,worldAchievements:ids.map((achievementId,i)=>({id:'new-'+i,achievementId,teamId:'astana',teamName:'Астана',title:achievementId,startedAt:1000,durationMs:8000}))});step();
   const effects=group.children.filter(o=>o.name==='match-achievement');assert.equal(effects.length,ids.length);
+  await Promise.all(ids.map(id=>import('../award-'+id+'.js')));step();assert.ok(effects.every(effect=>effect.children.length>0));
   for(const [i,id]of ids.entries())assert.equal(effects[i].userData.achievementId,'new-'+i);
-  const training=effects.find(o=>o.children.some(c=>c.children.some(m=>m.isInstancedMesh)));
+  const training=effects.find(o=>{let instanced=false;o.traverse(child=>{if(child.isInstancedMesh)instanced=true});return instanced});
   assert.ok(training);for(let i=0;i<180;i++)step();assert.equal(group.children.some(o=>o.name==='match-achievement'),false);
+  api.update({...state,clientReceivedAt:Date.now(),worldAchievements:[{...state.worldAchievements[0],id:'offscreen',durationMs:20}]});assert.ok(group.children.some(o=>o.userData.achievementId==='offscreen'));api.setVisible(false);await new Promise(resolve=>setTimeout(resolve,40));assert.equal(group.children.some(o=>o.userData.achievementId==='offscreen'),false);
  }finally{api?.dispose();await unlink(fileURLToPath(temporary))}
 });
