@@ -26,6 +26,11 @@ export function createLobbyRouter(options = {}) {
   const redirectUri = origin + '/auth/google/callback';
   const oauth = options.oauth || (enabled ? new OAuth2Client({clientId:options.clientId,clientSecret:options.clientSecret,redirectUri,transporterOptions:{timeout:10000}}) : null);
   const router = express.Router(), pending = new Map(), limiter = new RequestLimiter(now);
+  function diagnostic(req,stage,reason){
+    try{limiter.take('diagnostic:'+clientAddress(req,options.trustProxy===true),5,10000);}catch{return;}
+    const record={event:'google_login_failed',stage,reason};
+    if(options.onDiagnostic)options.onDiagnostic(record);else console.warn(JSON.stringify(record));
+  }
   const cookie = (res, name, value, maxAge) => res.cookie(name, value, {httpOnly:true, secure, sameSite:'lax', path:'/', maxAge});
   const cookieValue = (req, name) => {
     const raw = req.headers.cookie?.split(';').map(value=>value.trim()).find(value=>value.startsWith(name+'='));
@@ -61,20 +66,33 @@ export function createLobbyRouter(options = {}) {
   router.get('/auth/google/callback', async (req,res) => {
     if (!enabled) return res.redirect(303,'/?account=not-configured');
     const id = cookieValue(req,names.flow), flow = pending.get(id);
-    if (!flow || flow.expires <= now() || typeof req.query.state !== 'string' || !equal(req.query.state,flow.state)) return res.redirect(303,'/?account=expired');
+    if (!flow || flow.expires <= now() || typeof req.query.state !== 'string' || !equal(req.query.state,flow.state)) {
+      diagnostic(req,'state',!id?'missing_cookie':!flow?'missing_transaction':flow.expires<=now()?'expired_transaction':'state_mismatch');
+      return res.redirect(303,'/?account=expired');
+    }
     pending.delete(id);cookie(res,names.flow,'',0);
     if (req.query.error === 'access_denied') return res.redirect(303,'/?account=cancelled');
     if (typeof req.query.code !== 'string' || !req.query.code || req.query.code.length > 4096 || req.query.error) return res.redirect(303,'/?account=failed');
+    let stage='token_exchange';
     try {
       const {tokens} = await oauth.getToken({code:req.query.code,codeVerifier:flow.verifier,redirect_uri:redirectUri});
       if (typeof tokens.id_token !== 'string') throw new Error('No ID token');
+      stage='token_validation';
       const ticket = await oauth.verifyIdToken({idToken:tokens.id_token,audience:options.clientId});
+      stage='profile_validation';
       const profile = ticket.getPayload();
       if (!profile || !equal(profile.nonce,flow.nonce) || typeof profile.sub !== 'string' || !profile.sub || profile.sub.length > 255 || profile.email_verified !== true || typeof profile.email !== 'string' || profile.email.length > 320) throw new Error('Invalid account');
       const name = String(profile.name || profile.given_name || profile.email.split('@')[0]).replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,80) || 'Участник';
       cookie(res,names.session,sign({kind:'google-account',sub:profile.sub,name,email:profile.email,expires:now()+WEEK}),WEEK);
       return res.redirect(303,'/?account=connected');
-    } catch {return res.redirect(303,'/?account=failed');}
+    } catch(error) {
+      const providerReason=error?.response?.data?.error;
+      const allowed=new Set(['invalid_client','invalid_grant','invalid_request','unauthorized_client','access_denied','temporarily_unavailable']);
+      const reason=allowed.has(providerReason)?providerReason:'validation_failed';
+      diagnostic(req,stage,reason);
+      const code=reason==='invalid_client'||reason==='unauthorized_client'?'G01':reason==='invalid_grant'?'G02':stage!=='token_exchange'?'G03':'G04';
+      return res.redirect(303,'/?account=failed&errorCode='+code);
+    }
   });
   router.post('/auth/logout', (req,res) => {
     if (req.headers.origin !== origin || req.headers['x-cq-lobby'] !== '1') return res.status(403).json({ok:false});

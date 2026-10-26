@@ -2,6 +2,8 @@ const messages = {
   ru:{signIn:'Войти',title:'Ваш профиль',guest:'Участие без аккаунта доступно всегда.',loading:'Проверяем вход…',unavailable:'Вход через Google ещё не открыт. Можно продолжить без аккаунта.',google:'Войти через Google',logout:'Выйти из аккаунта',privacy:'Как используются данные аккаунта',cancelled:'Вход отменён. Можно попробовать снова.',failed:'Не удалось завершить вход. Попробуйте ещё раз.',expired:'Время входа истекло. Начните снова.',connected:'Аккаунт подключён.',notConfigured:'Вход через Google ещё не открыт.',close:'Закрыть',access:'Аккаунт сохраняет вашу личность. Доступ преподавателя выдаётся отдельно.'},
   kk:{signIn:'Кіру',title:'Сіздің профиліңіз',guest:'Аккаунтсыз қатысу әрқашан қолжетімді.',loading:'Кіру тексерілуде…',unavailable:'Google арқылы кіру әзірге ашылмаған. Аккаунтсыз жалғастыруға болады.',google:'Google арқылы кіру',logout:'Аккаунттан шығу',privacy:'Аккаунт деректері қалай қолданылады',cancelled:'Кіру тоқтатылды. Қайта көруге болады.',failed:'Кіру аяқталмады. Қайта көріңіз.',expired:'Кіру уақыты аяқталды. Қайта бастаңыз.',connected:'Аккаунт қосылды.',notConfigured:'Google арқылы кіру әзірге ашылмаған.',close:'Жабу',access:'Аккаунт жеке басыңызды сақтайды. Оқытушы рұқсаты бөлек беріледі.'}
 };
+Object.assign(messages.ru,{G01:'Google отклонил настройки входа приложения. Сообщите преподавателю код G01.',G02:'Попытка входа устарела. Нажмите «Войти через Google» ещё раз. Код G02.',G03:'Не удалось подтвердить аккаунт Google. Сообщите преподавателю код G03.',G04:'Не удалось связаться с Google для завершения входа. Попробуйте ещё раз. Код G04.'});
+Object.assign(messages.kk,{G01:'Google қолданбаның кіру баптауларын қабылдамады. Оқытушыға G01 кодын хабарлаңыз.',G02:'Кіру әрекетінің мерзімі аяқталды. «Google арқылы кіру» батырмасын қайта басыңыз. G02 коды.',G03:'Google аккаунтын растау мүмкін болмады. Оқытушыға G03 кодын хабарлаңыз.',G04:'Кіруді аяқтау үшін Google қызметіне қосылу мүмкін болмады. Қайта көріңіз. G04 коды.'});
 
 export function setupAccount({language}) {
   const $ = id => document.getElementById(id), dialog = $('account-dialog');
@@ -9,7 +11,8 @@ export function setupAccount({language}) {
   const query = new URLSearchParams(location.search), result = query.get('account');
   if (['connected','cancelled','failed','expired','not-configured'].includes(result)) {
     status = result === 'not-configured' ? 'notConfigured' : result;
-    query.delete('account');history.replaceState(null,'',location.pathname+(query.size?'?'+query:'')+location.hash);
+    const code=query.get('errorCode');if(result==='failed'&&['G01','G02','G03','G04'].includes(code))status=code;
+    query.delete('account');query.delete('errorCode');history.replaceState(null,'',location.pathname+(query.size?'?'+query:'')+location.hash);
   }
   function render() {
     const copy = messages[language()] || messages.ru;
@@ -51,5 +54,7 @@ export function setupAccount({language}) {
     }catch{status='failed';}
     $('account-logout').disabled=false;render();
   });
-  render();refresh();return {render};
+  render();refresh();
+  if(status&&status!=='connected'){lastFocus=$('account-button');dialog.showModal();document.body.classList.add('help-open');}
+  return {render};
 }
