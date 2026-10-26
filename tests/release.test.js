@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {io} from 'socket.io-client';
-import {createGameServer} from '../server.js';
+import {createGameServer} from './fixture-server.js';
 import {GameLogic} from '../game-logic.js';
 import {PRIVACY_VERSION} from '../game-config.js';
 
@@ -19,9 +19,10 @@ async function fixture(t,extra={}){
  return {store,server,connect,teacher,join,url:`http://127.0.0.1:${port}`};
 }
 
-test('релиз: неверные попытки не создают 15-минутную блокировку правильного входа',async t=>{
- const f=await fixture(t),s=await f.connect();
+test('релиз: неверные попытки создают только короткое ограничение до 10 секунд',async t=>{
+ let now=1000;const f=await fixture(t,{securityNow:()=>now}),s=await f.connect();
  for(let i=0;i<25;i++)assert.equal((await cmd(s,'teacherLogin',{password:'wrong'})).ok,false);
+ assert.equal((await cmd(s,'teacherLogin',{password:config.teacherPassword})).code,'RATE_LIMIT');now+=10001;
  assert.equal((await cmd(s,'teacherLogin',{password:config.teacherPassword})).ok,true);
  assert.equal((await f.join(config.creatorCodes.adilet)).isCreator,true);
 });

@@ -4,7 +4,7 @@ import {once} from 'node:events';
 import {setTimeout as delay} from 'node:timers/promises';
 import {io} from 'socket.io-client';
 import {GameLogic} from '../game-logic.js';
-import {createGameServer} from '../server.js';
+import {createGameServer} from './fixture-server.js';
 
 const waitFor=async fn=>{const until=Date.now()+4000;while(!fn()){if(Date.now()>until)throw Error('Условие не наступило');await delay(10)}};
 test('срок и скорость ответа учитывают серверное время получения, а не ожидание в очереди',()=>{

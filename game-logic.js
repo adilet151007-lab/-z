@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { REGIONS, CITIES, SEAT_LIMIT, ECONOMY_PENALTY, ECONOMY_RECOVERY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, MAX_PLAYERS, metadataFor, capacityFor, totalCapacity, normalizeRegionId, CREATOR_TEAM_ID, CREATOR_NAMES, isCreatorTeam, regularTeams } from "./game-config.js";
-import { QUESTION_BANK } from "./question-bank.js";
+import { QUESTION_BANK,isPublicDemoQuestion } from "./question-bank.js";
 import {AWARD_CATALOG,awardDefinition,initializeAwards,validateAwardState,ensurePlayerProfile,profileFor,issueCollectionCookie,recordCollectionAward,scoreLimit,SAFE_SCORE,prepareAwardRound,answerElapsed,pauseAwardClock,evaluateAwardRound,evaluateAwardFinish,achievementView} from "./achievement-system.js";
 import { ANIMATION_DURATIONS } from './achievement-animations.js';
 import {MODE_NAMES,ECONOMY_FLOOR,soloMultiplier,DEFAULT_BRANDING,DEFAULT_SUBJECT,ACHIEVEMENTS} from './game-config.js';
@@ -52,7 +52,7 @@ export function validateQuestions(questions) {
     }
     const options = q.options.map(o => cleanText(o, 1, 500, "Вариант"));
     ensure(new Set(options.map(o => o.toLocaleLowerCase())).size === 4, "Варианты ответа не должны повторяться.");
-    return { id: q.id, text: cleanText(q.text, 3, 2000, "Вопрос"), options, correct: q.correct, points: q.points, version: q.version ?? 1, ...extra };
+    return { id: q.id, text: cleanText(q.text, 3, 2000, "Вопрос"), options, correct: q.correct, points: q.points, version: q.version ?? 1, ...extra,...(isPublicDemoQuestion(q)?{publicDemo:true}:{}) };
   });
 }
 
@@ -104,7 +104,7 @@ function restoreSnapshot(raw) {
     if (!state.awardSystemVersion&&integer(region.points, RESOURCE_CAP + 1, 10000000)) region.points = RESOURCE_CAP;
   }
   state.regions = validateRegions(state.regions,null,!!state.settings?.universal,state.settings?.mode,!!state.settings?.flexibleTeams);
-  state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT,perksEnabled:state.settings?.perksEnabled??true,autoAdvance:state.settings?.autoAdvance===true,autoDuration:state.settings?.autoDuration||60,...(state.settings?.universal?{universal:true,mode:state.settings.mode}:{}),...(state.settings?.flexibleTeams?{flexibleTeams:true,teamDecision:state.settings.teamDecision||'consensus',tradeEnabled:state.settings.tradeEnabled===true}:{}) };
+  state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT,perksEnabled:state.settings?.perksEnabled??true,autoAdvance:state.settings?.autoAdvance===true,autoDuration:state.settings?.autoDuration||60,...(state.settings?.allowPublicDemo!==undefined?{allowPublicDemo:state.settings.allowPublicDemo===true}:{}),...(state.settings?.universal?{universal:true,mode:state.settings.mode}:{}),...(state.settings?.flexibleTeams?{flexibleTeams:true,teamDecision:state.settings.teamDecision||'consensus',tradeEnabled:state.settings.tradeEnabled===true}:{}) };
   if(state.settings.universal){
     ensure(['team','solo'].includes(state.settings.mode)&&(state.settings.flexibleTeams||state.regions.length===10)&&!state.regions.some(isCreatorTeam)&&state.regions.every(t=>(state.settings.flexibleTeams||t.capacity===4)&&t.economy>=15),'Повреждены настройки формата игры.');
     if(state.settings.flexibleTeams)ensure(['consensus','leader','instant'].includes(state.settings.teamDecision),'Неизвестный способ ответа команды.');
@@ -116,6 +116,9 @@ function restoreSnapshot(raw) {
   if(state.presentationEffectsEnabled!==undefined)ensure(typeof state.presentationEffectsEnabled==='boolean','Повреждена настройка эффектов.');
   if(state.delegatedAdmins!==undefined)ensure(Array.isArray(state.delegatedAdmins)&&state.delegatedAdmins.length<=MAX_PLAYERS&&state.delegatedAdmins.every(a=>a&&typeof a.pid==='string'&&/^[\w-]{1,80}$/.test(a.pid)&&(a.tier===undefined||a.tier==='local')&&a.permissions&&typeof a.permissions==='object'&&Object.keys(a.permissions).every(k=>['players','questions','game','effects'].includes(k)&&typeof a.permissions[k]==='boolean')&&Number.isInteger(a.effectDuration)&&a.effectDuration>=100&&a.effectDuration<=60000&&typeof a.unlimitedEffects==='boolean'&&(!a.expiresAt||Number.isSafeInteger(a.expiresAt))),'Повреждены делегированные права.');
   if(state.accessControl!==undefined)ensure(state.accessControl&&typeof state.accessControl==='object'&&state.accessControl.keyOverrides&&Object.keys(state.accessControl.keyOverrides).every(k=>Object.hasOwn(CREATOR_NAMES,k)&&/^[a-f0-9]{64}$/.test(state.accessControl.keyOverrides[k]))&&Array.isArray(state.accessControl.invitations)&&state.accessControl.invitations.length<=MAX_PLAYERS,'Повреждены настройки доступа.');
+  if(Object.hasOwn(state.accessControl||{},'localKeyOverride'))ensure(state.accessControl.localKeyOverride===null||typeof state.accessControl.localKeyOverride==='string'&&/^[a-f0-9]{64}$/.test(state.accessControl.localKeyOverride),'Повреждена настройка общего кода.');
+  if(state.accessControl?.admission){const entry=state.accessControl.admission;ensure(typeof entry.open==='boolean'&&typeof entry.epoch==='string'&&/^[\w-]{1,80}$/.test(entry.epoch)&&Number.isSafeInteger(entry.expiresAt),'Повреждены настройки входа на занятие.')}
+  if(state.accessControl?.playerDevices)ensure(typeof state.accessControl.playerDevices==='object'&&!Array.isArray(state.accessControl.playerDevices)&&Object.entries(state.accessControl.playerDevices).every(([pid,hash])=>/^[\w-]{1,80}$/.test(pid)&&/^[a-f0-9]{64}$/.test(hash)),'Повреждены привязки сессий.');
   ensure(typeof state.settings.perksEnabled==='boolean','Повреждена настройка перков.');
   validateAwardState(state,ensure);
   state.questions = validateQuestions(state.questions);
@@ -275,7 +278,7 @@ export class GameLogic {
     ensure(typeof name==='string'&&name.trim().length>=2,'Введите своё имя и выберите команду.','NAME_REQUIRED');
     const result=this.joinTeam(regionId,name);
     const grant=this.grantAdmin(result.player.pid,{players:true,game:true});
-    grant.tier='local';grant.label='Универсал';
+    grant.tier='local';grant.label='Универсал';grant.origin='shared-local';
     return result;
   }
   grantAdmin(pid, permissions = {}, effectDuration = 3000, unlimitedEffects = false, expiresAt = null) {
@@ -288,11 +291,12 @@ export class GameLogic {
     const safe = { players: !!permissions.players, questions: !!permissions.questions, game: !!permissions.game, effects: !!permissions.effects };
     ensure(Object.values(safe).some(Boolean), 'Выберите хотя бы одно разрешение или отзовите доступ.');
     const current = this.state.delegatedAdmins || [], previous = current.find(a => a.pid === pid);
-    const grant = { pid, permissions: safe, effectDuration, unlimitedEffects, grantedAt: previous?.grantedAt || this.now(),...(expiresAt?{expiresAt}:{}) };
+    const grant = { pid, permissions: safe, effectDuration, unlimitedEffects, grantedAt: previous?.grantedAt || this.now(),...(expiresAt?{expiresAt}:{}),...(previous?.tier==='local'||previous?.origin==='shared-local'?{origin:'shared-local'}:{}) };
     this.state.delegatedAdmins = [...current.filter(a => a.pid !== pid), grant]; this.log(`Административный доступ делегирован игроку ${member.name}.`); this.touch(); return grant;
   }
-  revokeAdmin(pid) { const before = this.state.delegatedAdmins || []; this.state.delegatedAdmins = before.filter(a => a.pid !== pid); ensure(before.length !== this.state.delegatedAdmins.length, 'Делегированный доступ не найден.'); this.log('Делегированный административный доступ отозван.'); this.touch(); }
-  expireAdminGrants(){const grants=this.state.delegatedAdmins||[],active=grants.filter(a=>!a.expiresAt||a.expiresAt>this.now());if(active.length===grants.length)return false;this.state.delegatedAdmins=active;this.touch();return true}
+  revokeAdmin(pid) { const before = this.state.delegatedAdmins || [],previous=before.find(grant=>grant.pid===pid);this.state.delegatedAdmins = before.filter(a => a.pid !== pid); ensure(before.length !== this.state.delegatedAdmins.length, 'Делегированный доступ не найден.');if(previous.tier==='local'||previous.origin==='shared-local')this.state.accessControl.localKeyOverride=null; this.log('Делегированный административный доступ отозван.'); this.touch();return {localCodeRevoked:previous.tier==='local'||previous.origin==='shared-local'} }
+  rotateLocalAccessKey(){const code='CQL-'+randomBytes(24).toString('base64url');this.state.accessControl.localKeyOverride=hashToken(code);this.touch();return {code}}
+  expireAdminGrants(){const grants=this.state.delegatedAdmins||[],active=grants.filter(a=>!a.expiresAt||a.expiresAt>this.now());if(active.length===grants.length)return false;if(grants.some(grant=>!active.includes(grant)&&(grant.tier==='local'||grant.origin==='shared-local')))this.state.accessControl.localKeyOverride=null;this.state.delegatedAdmins=active;this.touch();return true}
   createAdminInvite(permissions,minutes=120,effectDuration=3000){
     ensure(permissions&&typeof permissions==='object'&&!Array.isArray(permissions)&&Object.keys(permissions).length>0&&Object.keys(permissions).every(k=>['players','questions','game','effects'].includes(k)&&typeof permissions[k]==='boolean')&&Object.values(permissions).some(v=>v===true),'Выберите точные разрешения приглашения.');
     ensure(integer(minutes,0,43200)&&integer(effectDuration,100,60000),'Срок доступа: 0–43200 минут; эффект: 100–60000 мс.');
@@ -471,8 +475,9 @@ export class GameLogic {
     ensure(integer(duration, 5, 3600), "Время вопроса: от 5 до 3600 секунд.");
     const question = this.state.questions.find(q => q.id === questionId);
     ensure(question, "Вопрос не найден.");
+    ensure(!isPublicDemoQuestion(question)||this.state.settings.allowPublicDemo!==false,'Публичный демонстрационный вопрос отключён. Добавьте свой вопрос или явно включите деморежим.','PUBLIC_DEMO_DISABLED');
     ensure((question.subject||DEFAULT_SUBJECT)===this.state.branding.subject,'Выберите вопрос текущего предмета.');
-    const match=this.ensureMatch(true);match.questionIds=this.state.questions.filter(q=>(q.subject||DEFAULT_SUBJECT)===this.state.branding.subject).map(q=>q.id);
+    const match=this.ensureMatch(true);match.questionIds=this.playableQuestions().map(q=>q.id);
     this.state.phase = "playing";
     this.state.round = { id: randomUUID(), questionId, questionSnapshot: structuredClone(question), startedAt: this.now(), duration, deadline: this.now() + duration * 1000, remainingMs: duration * 1000, paused: false, resolved: false, ballots: {}, submitted: {}, results: {},...(this.state.settings.universal?{proposals:{},leaderChoices:{}}:{}) };
     prepareAwardRound(this);
@@ -481,9 +486,12 @@ export class GameLogic {
   }
   switchQuestion(questionId,duration) {
     ensure(this.state.questions.some(q=>q.id===questionId) && integer(duration,5,3600),"Проверьте вопрос и время.");
+    ensure(this.state.settings.allowPublicDemo!==false||!isPublicDemoQuestion(this.state.questions.find(q=>q.id===questionId)),'Публичный демонстрационный вопрос отключён. Добавьте свой вопрос или явно включите деморежим.','PUBLIC_DEMO_DISABLED');
     if(this.state.round&&!this.state.round.resolved)this.log("Активный вопрос заменён без начисления очков. Голоса очищены.");
     this.state.round=null;this.startRound(questionId,duration);
   }
+  playableQuestions(){return this.state.questions.filter(question=>(question.subject||DEFAULT_SUBJECT)===this.state.branding.subject&&(this.state.settings.allowPublicDemo!==false||!isPublicDemoQuestion(question)))}
+  setPublicDemo(enabled){ensure(typeof enabled==='boolean','Некорректная настройка демонстрационных вопросов.');ensure(!this.state.round||this.state.round.resolved,'Сначала завершите текущий вопрос.');this.state.settings.allowPublicDemo=enabled;this.touch()}
   requireRound(roundId, voting = false) {
     const round = this.state.round;
     ensure(round && !round.resolved && round.id === roundId, "Этот вопрос уже завершён или сменился.");
@@ -769,7 +777,7 @@ export class GameLogic {
     if(!this.state.settings.autoAdvance||!round?.resolved||!match||match.finishedAt!==null)return;
     const lastAward=Math.max(0,...this.state.achievements.filter(a=>a.matchId===match.id).map(a=>a.earnedAt+(ANIMATION_DURATIONS[a.achievementId]??7800)));
     if(this.now()<lastAward)return;
-    const next=match.questionIds.find(id=>!match.completedQuestionIds.includes(id)&&this.state.questions.some(q=>q.id===id));
+    const playable=new Set(this.playableQuestions().map(question=>question.id));const next=match.questionIds.find(id=>!match.completedQuestionIds.includes(id)&&playable.has(id));
     if(next)this.startRound(next,this.state.settings.autoDuration||60);else this.finishMatch();
   }
   deleteQuestion(id) {
@@ -874,7 +882,7 @@ export class GameLogic {
       viewer: { role: creator ? "creator" : teacher ? "teacher" : delegated ? "delegate" : player ? "student" : "guest", isCreator:creator,isDevTelemetry:creator||!!delegated,isProAdmin:creator&&player?.creatorId==='adilet',canGrantAdmin:creator&&player?.creatorId==='adilet',canTriggerPresentationEffect:creator&&player?.creatorId==='adilet'||!!(player&&this.adminCan(player.pid,'presentationEffect')),adminGrant:delegated,...(delegated?.tier==='local'?{allowedAdminActions:[...LOCAL_ADMIN_ACTIONS]}:{}), player: player ? { pid: player.pid, name: player.name, regionId: player.regionId,capital:player.capital??0,streak:player.streak??0,scoreLimit:this.scoreLimit('player',player.pid)>RESOURCE_CAP?null:RESOURCE_CAP } : null },
       regions: frame.regions,
       leaderboard:frame.leaderboard,teamLeaderboard:frame.teamLeaderboard,
-      questions: teacher || delegated?.permissions.questions ? structuredClone(this.state.questions) : delegated?.permissions.game ? this.state.questions.map(({id,text,options,points,version,topic,subject})=>({id,text,options:[...options],points,version,topic,subject})) : [],
+      questions: teacher || delegated?.permissions.questions ? structuredClone(this.state.questions) : delegated?.permissions.game ? this.state.questions.map(({id,text,options,points,version,topic,subject,publicDemo})=>({id,text,options:[...options],points,version,topic,subject,publicDemo})) : [],
       round: null, log: adminView ? structuredClone(this.state.log.filter(entry=>entry.kind!=='admin'&&(entry.kind==='game'||!ADMIN_LOG_PATTERN.test(entry.msg)))) : []
     };
     const awards=(this.state.achievements||[]).map(({recipientIds,...award})=>({...awardDefinition(award.achievementId),...award}));

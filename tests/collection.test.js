@@ -5,7 +5,7 @@ import {readFile} from 'node:fs/promises';
 import {io} from 'socket.io-client';
 import {GameLogic,hashToken} from '../game-logic.js';
 import {LEGENDARY_IDS,profileFor,SAFE_SCORE,awardDefinition} from '../achievement-system.js';
-import {createGameServer} from '../server.js';
+import {createGameServer} from './fixture-server.js';
 
 function fixture(mode='solo',size=30,count=1){
  let now=100000;const g=new GameLogic(null,()=>now);g.enableUniversal();g.enableFlexibleTeams();if(mode==='solo')g.setGameMode(mode);

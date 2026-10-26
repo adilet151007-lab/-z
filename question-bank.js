@@ -1,3 +1,4 @@
+// Public examples only. These questions are excluded from real sessions unless demo mode is enabled explicitly.
 export const QUESTION_BANK = [
   { id: "q1", text: "Латинское слово «cultura» первоначально означало…", options: ["Возделывание, обработку земли", "Военный поход", "Торговый обмен", "Письменность"], correct: 0, points: 25 },
   { id: "q2", text: "Что лучше всего выражает кочевой образ жизни как систему культуры?", options: ["Каменная крепость", "Юрта — разборное жилище", "Морской порт", "Библиотека-хранилище"], correct: 1, points: 25 },
@@ -10,3 +11,6 @@ export const QUESTION_BANK = [
   { id: "q9", text: "Наурыз традиционно празднуется в день…", options: ["Весеннего равноденствия", "Летнего солнцестояния", "Зимнего солнцестояния", "Осеннего равноденствия"], correct: 0, points: 25 },
   { id: "q10", text: "«Жеті жарғы» — это свод…", options: ["Обычного права казахов", "Торговых пошлин", "Военных званий", "Религиозных праздников"], correct: 0, points: 25 }
 ];
+const signature=question=>JSON.stringify([String(question.text).normalize('NFC').trim(),question.options.map(option=>String(option).normalize('NFC').trim()).sort()]);
+const publicExamples=new Set(QUESTION_BANK.map(signature));
+export const isPublicDemoQuestion=question=>!!question&&Array.isArray(question.options)&&publicExamples.has(signature(question));

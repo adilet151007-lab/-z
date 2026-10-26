@@ -1,5 +1,5 @@
 import {t as uiText,tx as uiTpl,setupUIPreferences} from './ui-preferences.js';
-import { GameEngine, REGIONS, CITIES,capacityFor, totalCapacity, regularTeams, isCreatorTeam, MAX_TEAMS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, metadataFor, setupPresentationEffects, setupBranding,setupAchievements, escapeHTML as h } from "./shared-engine.js";
+import { GameEngine, REGIONS, CITIES,capacityFor, totalCapacity, regularTeams, isCreatorTeam, MAX_TEAMS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, metadataFor, setupPresentationEffects, setupBranding,setupAchievements,setupAdmissionControls, escapeHTML as h } from "./shared-engine.js";
 import { setupSyllabus } from "./syllabus-ui.js";
 import { setupCommunication } from "./chat-ui.js";
 
@@ -9,6 +9,7 @@ setupCommunication(engine);
 setupPresentationEffects(engine);
 setupBranding(engine);
 setupAchievements(engine);
+setupAdmissionControls(engine,$("admission-tools"));
 let scene=null,sceneFailed=false,sceneLoading=false,selectedQuestionId=null,duration=30,controlKey="",loggingIn=false;
 window.addEventListener('cq:map-review-change',()=>{if(scene)scene.resize();else ensureScene()});
 window.addEventListener('cq:world-achievement',()=>{if(document.hidden)return;if(!scene)ensureScene();if(!/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName))document.querySelector('.atlas-projector')?.scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})});
@@ -207,7 +208,7 @@ $("question-form").addEventListener("submit",async e=>{
 function renderBank(state,force=false){
  const query=$("bank-search").value.trim().toLocaleLowerCase(),key=JSON.stringify([state.branding?.subject,state.questions.map(q=>q.id+":"+q.version),query,bankPage,engine.connected]);
  if(!force&&key===bankKey)return;bankKey=key;
- const questions=engine.allQuestions().filter(q=>!query||`${q.text} ${q.topic||""}`.toLocaleLowerCase().includes(query)),pages=Math.max(1,Math.ceil(questions.length/15));bankPage=Math.min(bankPage,pages-1);
+ const questions=engine.allQuestions(true).filter(q=>!query||`${q.text} ${q.topic||""}`.toLocaleLowerCase().includes(query)),pages=Math.max(1,Math.ceil(questions.length/15));bankPage=Math.min(bankPage,pages-1);
  $("bank-count").textContent= uiTpl`${state.questions.length} вопросов в банке`;
  $("question-bank").innerHTML=questions.slice(bankPage*15,bankPage*15+15).map(q=> uiTpl`<article class="bank-question"><div><span class="mut small-note">${h(q.topic|| uiText("Без темы"))}</span><p>${h(q.text)}</p><p class="cyan small-note">${alphabet(q.correct)}. ${h(q.options[q.correct])}</p></div><div class="row"><button data-edit-question="${q.id}" ${!engine.connected?"disabled":""}>Изменить</button><button class="ghost danger" data-delete-question="${q.id}" ${!engine.connected?"disabled":""}>Удалить</button></div></article>`).join("")|| uiText('<p class="mut">Вопросы не найдены.</p>');
  $("bank-page").textContent=`${bankPage+1} / ${pages}`;$("bank-prev").disabled=bankPage===0;$("bank-next").disabled=bankPage>=pages-1;

@@ -7,6 +7,20 @@ export { REGIONS, CITIES, SEAT_LIMIT, CRISIS_THRESHOLD, ECONOMY_PENALTY, RESOURC
 
 export const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 
+export function setupAdmissionControls(engine,host){
+ host.innerHTML=uiTpl`<p class="small-note mut">Участники входят по ссылке занятия. Закрытие входа и новая ссылка не исключают уже подключённых игроков.</p><div class="row section-gap"><button type="button" data-entry-open class="pri">Открыть вход</button><button type="button" data-entry-close>Закрыть вход</button><button type="button" data-entry-rotate>Новая ссылка</button></div><label class="field-label section-gap">Ссылка для участников<input type="text" data-entry-link readonly spellcheck="false" autocomplete="off"></label><button type="button" data-entry-copy class="section-gap">Копировать ссылку</button><p data-entry-status class="small-note section-gap" role="status"></p><label class="privacy-consent section-gap"><input type="checkbox" data-public-demo><span>Использовать публичные демовопросы · только для проверки</span></label><p data-demo-warning class="small-note mut"></p>`;
+ const field=host.querySelector('[data-entry-link]'),status=host.querySelector('[data-entry-status]'),demo=host.querySelector('[data-public-demo]');let key='',busy=false;
+ const allowed=()=>engine.state?.viewer.isCreator||engine.state?.viewer.role==='teacher';
+ function display(data){field.value=data.token?location.origin+'/student.html#join='+encodeURIComponent(data.token):'';status.textContent=data.open?uiText('Вход открыт. Передайте ссылку студентам.'):uiText('Вход закрыт. Уже вошедшие участники продолжают игру.')}
+ async function load(){if(!allowed()||!engine.connected||busy)return;busy=true;try{display(await engine.request('getAdmissionLink'))}catch(error){status.textContent=uiText(error.message)}finally{busy=false;render(engine.state)}}
+ async function change(open,rotate=false){if(busy||!allowed())return;busy=true;try{display(await engine.request('setAdmission',{open,rotate}));key=''}catch(error){status.textContent=uiText(error.message)}finally{busy=false;render(engine.state)}}
+ host.querySelector('[data-entry-open]').addEventListener('click',()=>change(true));host.querySelector('[data-entry-close]').addEventListener('click',()=>change(false));host.querySelector('[data-entry-rotate]').addEventListener('click',()=>change(true,true));
+ host.querySelector('[data-entry-copy]').addEventListener('click',async()=>{if(!field.value)return;try{await navigator.clipboard.writeText(field.value);status.textContent=uiText('Ссылка скопирована.')}catch{field.focus();field.select();status.textContent=uiText('Выделите и скопируйте ссылку.')}});
+ demo.addEventListener('change',async()=>{if(!allowed())return;busy=true;try{await engine.request('setPublicDemo',{enabled:demo.checked});key=''}catch(error){status.textContent=uiText(error.message)}finally{busy=false;render(engine.state)}});
+ function render(state){const full=allowed();host.hidden=!full;const shell=host.closest('[data-admission-shell]');if(shell)shell.hidden=!full;if(!full){field.value='';key='';return}for(const button of host.querySelectorAll('button'))button.disabled=busy||!engine.connected;host.querySelector('[data-entry-copy]').disabled||=!field.value;demo.checked=state.settings.allowPublicDemo===true;demo.disabled=busy||!engine.connected||!!state.round&&!state.round.resolved;const count=state.questions.filter(question=>question.publicDemo).length;host.querySelector('[data-demo-warning]').textContent=count?uiTpl`В банке ${count} публичных демовопросов. Для занятия используйте свои вопросы; демо сохраняются отдельно.`:'';const next=JSON.stringify([state.viewer.role,state.viewer.player?.pid,state.admission,engine.connected]);if(next!==key){key=next;load()}}
+ const off=engine.onChange(render);return off;
+}
+
 export function setupBranding(engine){
   let key='';engine.onChange(state=>{const b=state?.branding;if(!b)return;const next=JSON.stringify(b);if(key===next)return;key=next;
     document.documentElement.style.setProperty('--brand-accent',b.accent);document.documentElement.style.setProperty('--brand-gold',b.gold);
@@ -366,14 +380,15 @@ export class GameEngine {
   async httpRequest(path,data){if(!this.httpProof)await new Promise((resolve,reject)=>{const ready=()=>{clearTimeout(wait);resolve()},wait=setTimeout(()=>{this.socket.off('session:ready',ready);reject(new Error( uiText('Подключение ещё не готово. Повторите действие.')))},5000);this.socket.once('session:ready',ready)});if(!this.socket.connected)throw new Error( uiText('Нет связи с сервером.'));const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);try{const response=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CQ-Client':'1','X-CQ-Socket':this.socket.id,'X-CQ-Proof':this.httpProof,'X-CQ-Surface':this.mode},body:JSON.stringify(data),signal:controller.signal});const result=await response.json();if(!result.ok)throw Object.assign(new Error(uiText(result.error||'Запрос не выполнен.')),{code:result.code});return result}finally{clearTimeout(timer)}}
   bindSession(role,token){return this.httpRequest('/api/session',{role,token})}
   clearLegacyTokens(){for(const key of ['cq_player_token_v2','cq_creator_session_v1','cq_teacher_token_v2','isDevTelemetry'])setToken(key,null)}
-  allQuestions() { return (this.state?.questions || []).filter(q=>(q.subject||DEFAULT_SUBJECT)===(this.state?.branding?.subject||DEFAULT_SUBJECT)); }
+  allQuestions(includeDemo=false) { return (this.state?.questions || []).filter(q=>(q.subject||DEFAULT_SUBJECT)===(this.state?.branding?.subject||DEFAULT_SUBJECT)&&(includeDemo||!q.publicDemo||this.state?.settings.allowPublicDemo!==false)); }
   remainingSeconds() {
     const round = this.state?.round;
     if (!round || round.resolved) return 0;
     return Math.max(0, Math.ceil((round.paused ? round.remainingMs : round.deadline - (Date.now() + this.offset)) / 1000));
   }
   async joinTeam(regionId, name, accepted = false) {
-    const result = await this.request("joinTeam", { regionId, name, privacyConsent:{accepted,version:PRIVACY_VERSION} });
+    let admissionToken;try{admissionToken=sessionStorage.getItem('cq_lesson_access_v1')||undefined}catch{}
+    const result = await this.request("joinTeam", { regionId, name,admissionToken, privacyConsent:{accepted,version:PRIVACY_VERSION} });
     if(result.sessionMethod==='cookie'){await this.bindSession('player',result.playerToken);this.clearLegacyTokens();this.socket.disconnect().connect()}else{setToken('cq_player_token_v2',result.playerToken);saveCreatorToken(result.isCreator?result.playerToken:null)}
     this.sessionNotice='';
     return result;

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import KAZAKH from '../ui-kz.js';
-import {createGameServer} from '../server.js';
+import {createGameServer} from './fixture-server.js';
 
 let revision=0;
 const file=name=>readFile(new URL('../'+name,import.meta.url),'utf8');

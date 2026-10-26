@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {io} from 'socket.io-client';
 import {GameLogic,hashToken} from '../game-logic.js';
-import {createGameServer} from '../server.js';
+import {createGameServer} from './fixture-server.js';
 import {readFile} from 'node:fs/promises';
 
 const config={teacherPassword:'security-test-teacher-password',sessionSecret:'security-test-signing-key-longer-than-thirty-two',creatorCodes:{ernur:'E'.repeat(26),adilet:'A'.repeat(26)}};

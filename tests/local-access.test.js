@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {readFile} from 'node:fs/promises';
 import {io} from 'socket.io-client';
-import {createGameServer} from '../server.js';
+import {createGameServer} from './fixture-server.js';
 import {GameLogic,hashToken} from '../game-logic.js';
 
 const code='CQL-test-only-universal-access-000000000';

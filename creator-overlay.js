@@ -1,9 +1,9 @@
 import {t as uiText,tx as uiTpl,getLocale} from './ui-preferences.js';
-import {escapeHTML as h,setupAchievementControls} from './shared-engine.js';
+import {escapeHTML as h,setupAchievementControls,setupAdmissionControls} from './shared-engine.js';
 import {setupSyllabus} from './syllabus-ui.js';
 
 export function setupTelemetry(engine){
- let root=null,sheet=null,open=false,tab='eye',hold=null,origin=null,swipe=null,busy=false,selected='',pid='',lastIdentity='',lastPlayer='',editingQuestion=null,exitDialog=null,stopSyllabus=null,stopAwards=null;
+ let root=null,sheet=null,open=false,tab='eye',hold=null,origin=null,swipe=null,busy=false,selected='',pid='',lastIdentity='',lastPlayer='',editingQuestion=null,exitDialog=null,stopSyllabus=null,stopAwards=null,stopAdmission=null;
  const enabled=()=>engine.state?.viewer.isDevTelemetry===true,$=id=>document.getElementById(id);
  function permitted(action){
   const v=engine.state?.viewer;if(!v)return false;
@@ -11,7 +11,7 @@ export function setupTelemetry(engine){
    const request={points:soloMode()?'adjustCapital':'adjustPoints','minus-points':soloMode()?'adjustCapital':'adjustPoints',economy:'adjustEconomy','minus-economy':'adjustEconomy',restore:'adjustEconomy',previous:'switchQuestion',next:'switchQuestion',pause:'pauseRound',timer:'resetTimer',resolve:'resolveRound',kick:'freeSlot','self-move':'movePlayer',lobby:'endRound','q-start':'startRound',export:'exportSummary'}[action];
    return action==='chat'||!!request&&v.allowedAdminActions?.includes(request);
   }
-  if(['grant-admin','revoke-admin','create-invite'].includes(action))return v.canGrantAdmin===true;
+  if(['grant-admin','revoke-admin','create-invite','rotate-local-key'].includes(action))return v.canGrantAdmin===true;
   if(action==='reset'&&!v.isCreator)return v.adminGrant?.permissions.game===true&&v.adminGrant?.permissions.players===true;
   if(action==='effect')return v.canTriggerPresentationEffect===true;
   if(v.isCreator)return true;
@@ -85,6 +85,8 @@ export function setupTelemetry(engine){
   $('sys-admin-player').addEventListener('change',()=>syncGrant(true));
   sheet.querySelector('[data-sys-pane="control"]').insertAdjacentHTML('beforeend', uiTpl`<details class="section-gap" data-access-tools><summary>Приглашения и защита входа</summary><div data-invite-tools><h3 class="section-gap">Одноразовый доступ</h3><div class="row section-gap">${[['players', uiText('Игроки и команды')],['questions', uiText('Вопросы и ответы')],['game', uiText('Игра')],['effects', uiText('Эффекты')]].map(([key,label])=>`<label><input type="checkbox" id="sys-invite-${key}"> ${label}</label>`).join('')}</div><label class="field-label section-gap" for="sys-invite-minutes">Срок прав, минут · 0 — до сброса игры</label><input id="sys-invite-minutes" type="number" min="0" max="43200" value="120"><label class="field-label section-gap" for="sys-invite-duration">Максимальная длительность эффекта, мс</label><input id="sys-invite-duration" type="number" min="100" max="60000" value="3000">${button('create-invite', uiText('Создать одноразовый код'))}<p class="small-note mut">Код можно активировать один раз в течение часа. Получатель вводит код, своё имя и выбирает команду. Право выдавать новые доступы не передаётся.</p><div id="sys-invite-list"></div></div><div data-key-tools class="section-gap"><h3>Мой персональный код входа</h3>${button('rotate-key', uiText('Сгенерировать новый код'))}<p class="small-note mut">Старый код перестанет работать. Текущий вход сохранится. Скопируйте новый код в менеджер паролей.</p></div><label class="field-label section-gap" for="sys-access-once">Новый код · отображается только здесь</label><textarea id="sys-access-once" rows="3" readonly spellcheck="false"></textarea>${button('clear-code', uiText('Скрыть код'))}</details>`);
   $('sys-invite-list').addEventListener('click',e=>{const button=e.target.closest('[data-invite-revoke]');if(button)run(()=>engine.revokeAdminInvite(button.dataset.inviteRevoke))});
+  root.querySelector('[data-invite-tools]').insertAdjacentHTML('beforeend',button('rotate-local-key',uiText('Новый код Универсал'))+'<p class="small-note mut">'+uiText('Отзыв прав закрывает старый общий код. Действующие сессии других помощников сохраняются.')+'</p>');
+  const admission=document.createElement('details');admission.className='section-gap';admission.dataset.admissionShell='';admission.innerHTML='<summary>'+uiText('Вход и защита занятия')+'</summary><div class="section-gap"></div>';sheet.querySelector('[data-sys-pane="control"]').append(admission);stopAdmission=setupAdmissionControls(engine,admission.querySelector('div'));
   root.querySelector('[data-key-tools]').insertAdjacentHTML('afterbegin',button('full-console', uiText('Открыть полный пульт управления')));
   $('sys-player-form').addEventListener('submit',e=>{e.preventDefault();run(()=>engine.updatePlayer(pid,$('sys-player-name').value.trim(),$('sys-player-team').value))});
   $('sys-question-form').addEventListener('submit',e=>{e.preventDefault();run(saveQuestion)});
@@ -145,7 +147,8 @@ export function setupTelemetry(engine){
   else if(action==='refresh'){if(confirm( uiText('Перезагрузить выбранные экраны? Вход и принятые ответы сохранятся.')))await engine.refreshClients($('sys-refresh-scope').value)}
   else if(action==='effect'){const result=await engine.presentationEffect(Number($('sys-effect-duration')?.value||3000),$('sys-effect-target')?.value||undefined);return  uiTpl`Помеха отправлена на ${result.recipientCount} экр. · ${result.duration/1000} с.`;}
   else if(action==='grant-admin')await engine.grantAdmin($('sys-admin-player').value,{players:$('sys-admin-players').checked,questions:$('sys-admin-questions').checked,game:$('sys-admin-game').checked,effects:$('sys-admin-effects').checked},Number($('sys-admin-duration').value),$('sys-admin-unlimited').checked);
-  else if(action==='revoke-admin')await engine.revokeAdmin($('sys-admin-player').value);
+  else if(action==='revoke-admin'){const result=await engine.revokeAdmin($('sys-admin-player').value);if(result.localCodeRevoked){$('sys-access-once').value='';return uiText('Права отозваны. Старый общий код закрыт; при необходимости создайте новый код Универсал.')}}
+  else if(action==='rotate-local-key')$('sys-access-once').value=(await engine.request('rotateLocalAccessKey')).code;
   else if(action==='create-invite'){const permissions=Object.fromEntries(['players','questions','game','effects'].map(key=>[key,$('sys-invite-'+key).checked]));const result=await engine.createAdminInvite(permissions,Number($('sys-invite-minutes').value),Number($('sys-invite-duration').value));$('sys-access-once').value=result.code;}
   else if(action==='rotate-key'){if(confirm( uiText('Заменить свой персональный код? Старый код сразу перестанет работать.')))$('sys-access-once').value=(await engine.rotateAccessKey()).code;}
   else if(action==='clear-code')$('sys-access-once').value='';
@@ -163,5 +166,5 @@ export function setupTelemetry(engine){
  const heading=document.getElementById('session-heading');heading.addEventListener('pointerdown',e=>{if(!enabled()||e.button>0)return;origin={x:e.clientX,y:e.clientY};hold=setTimeout(()=>{hold=null;try{navigator.vibrate?.(50)}catch{}show()},2000)});
  heading.addEventListener('pointermove',e=>{if(origin&&Math.hypot(e.clientX-origin.x,e.clientY-origin.y)>12)cancelHold()});for(const event of ['pointerup','pointercancel','pointerleave'])heading.addEventListener(event,cancelHold);heading.addEventListener('contextmenu',e=>{if(enabled())e.preventDefault()});
  document.addEventListener('keydown',e=>{if(!enabled())return;if(e.key==='Escape'){close();return}if(e.key==='F9'||e.code==='Backquote'&&!e.target.closest('input,textarea,select')){e.preventDefault();open?close():show()}});window.addEventListener('cq:show-chat',close);
- engine.onChange(()=>{if(!enabled()){cancelHold();close();stopSyllabus?.();stopSyllabus=null;stopAwards?.();stopAwards=null;exitDialog?.close();exitDialog?.remove();exitDialog=null;root?.remove();$('sys-signal-zone')?.remove();root=null;sheet=null;lastIdentity='';lastPlayer='';return}mount();syncExit();if(open)render()});
+ engine.onChange(()=>{if(!enabled()){cancelHold();close();stopSyllabus?.();stopSyllabus=null;stopAwards?.();stopAwards=null;stopAdmission?.();stopAdmission=null;exitDialog?.close();exitDialog?.remove();exitDialog=null;root?.remove();$('sys-signal-zone')?.remove();root=null;sheet=null;lastIdentity='';lastPlayer='';return}mount();syncExit();if(open)render()});
 }

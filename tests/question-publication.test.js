@@ -4,7 +4,7 @@ import {once} from 'node:events';
 import {setTimeout as delay} from 'node:timers/promises';
 import {io} from 'socket.io-client';
 import {GameLogic,hashToken} from '../game-logic.js';
-import {createGameServer} from '../server.js';
+import {createGameServer} from './fixture-server.js';
 import {profileFor} from '../achievement-system.js';
 
 function solo(count=1){let at=100000;const g=new GameLogic(null,()=>at);g.enableUniversal();g.setGameMode('solo');g.state.questions=g.state.questions.slice(0,10);const players=Array.from({length:count},(_,i)=>g.joinTeam(null,'Участник '+i));return {g,players,advance:ms=>at+=ms}}

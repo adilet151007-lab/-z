@@ -4,7 +4,7 @@ import {once} from 'node:events';
 import {readFile} from 'node:fs/promises';
 import {io} from 'socket.io-client';
 import {GameLogic,hashToken} from '../game-logic.js';
-import {createGameServer} from '../server.js';
+import {createGameServer} from './fixture-server.js';
 
 function game(){const g=new GameLogic();g.enableUniversal();g.enableFlexibleTeams();g.joinTeam('saryarka','Алия');return g}
 function answer(g,correct=true,questionId='q1'){

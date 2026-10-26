@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {readFile} from 'node:fs/promises';
 import {io} from 'socket.io-client';
-import {createGameServer,SESSION_IDLE_MS} from '../server.js';
+import {createGameServer,SESSION_IDLE_MS} from './fixture-server.js';
 import {hashToken} from '../game-logic.js';
 
 const credentials={teacherPassword:'idle-test-teacher-password',sessionSecret:'idle-test-signing-secret-at-least-thirty-two',creatorCodes:{adilet:'A'.repeat(26),ernur:'E'.repeat(26)}};

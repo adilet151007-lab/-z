@@ -13,6 +13,7 @@
     "dev": "node server.js",
     "setup": "node scripts/setup.mjs",
     "test": "node --test tests/smoke.test.js",
+    "test:security": "node --test tests/security-hardening.test.js",
     "test:full": "node --test tests/*.test.js"
   },
   "dependencies": {
@@ -27,5 +28,8 @@
   "devDependencies": {
     "pg-mem": "^3.0.5",
     "socket.io-client": "^4.8.1"
+  },
+  "overrides": {
+    "body-parser": "2.4.0"
   }
 }

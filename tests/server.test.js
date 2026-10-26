@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { io } from "socket.io-client";
-import { createGameServer } from "../server.js";
+import { createGameServer } from "./fixture-server.js";
 import { FileStore } from "../storage.js";
 
 const config = { requireConsent:false, creatorCodes:{ernur:'E'.repeat(26),adilet:'A'.repeat(26)}, teacherPassword: "test-teacher-password", sessionSecret: "unit-test-session-secret-at-least-32-characters" };

@@ -4,6 +4,7 @@ import { setupTelemetry } from "./creator-overlay.js";
 import { setupCommunication } from "./chat-ui.js";
 
 setupUIPreferences();
+try{const fragment=new URLSearchParams(location.hash.slice(1)),token=fragment.get('join');if(token&&token.length<=2000&&/^[A-Za-z0-9_.-]+$/.test(token)){sessionStorage.setItem('cq_lesson_access_v1',token);history.replaceState(null,'',location.pathname+location.search)}}catch{}
 const engine = new GameEngine("student");
 setupTelemetry(engine);
 setupCommunication(engine);
@@ -42,12 +43,12 @@ async function act(fn) {
 }
 function renderRegistration(state) {
   if(selectedArea&&!state.regions.some(t=>metadataFor(t).baseRegionId===selectedArea))selectedArea=null;
-  const key=JSON.stringify([state.settings.mode,state.regions,engine.connected,joining,selectedArea,$('name-input').value,$('team-search').value]);
+  const key=JSON.stringify([state.settings.mode,state.regions,state.admission,engine.connected,joining,selectedArea,$('name-input').value,$('team-search').value]);
   if(key===registrationKey)return;registrationKey=key;
   const solo=state.settings.mode==='solo';
   const code=$('name-input').value.trim().split(/\s/,1)[0],tokenCandidate=code.length===26||code.startsWith('CQO-'),invite=/^(CQI|CQL)-/.test(code);
   $('join-session').hidden=!solo&&!invite;$('join-session').textContent=invite? uiText('Продолжить вход по приглашению'): uiText('Присоединиться');$('join-session').disabled=!engine.connected||joining;$('region-grid').hidden=solo;$('area-back').hidden=solo||!selectedArea;
-  $('registration-instruction').textContent=solo? uiText('Жеке сайыс · введите имя и присоединитесь.'):selectedArea? uiText('Выберите команду области или её города.'): uiText('Шаг 1 · выберите область. Города находятся внутри неё.');
+  $('registration-instruction').textContent=state.admission?.required&&!state.admission.open?uiText('Регистрация закрыта. Обратитесь к преподавателю.'):solo? uiText('Жеке сайыс · введите имя и присоединитесь.'):selectedArea? uiText('Выберите команду области или её города.'): uiText('Шаг 1 · выберите область. Города находятся внутри неё.');
   if(solo){$('team-search').hidden=true;$('registration-capacity').textContent= uiTpl`${state.regions.reduce((n,t)=>n+(t.occupied??t.members.length),0)} участников · личный рейтинг`;$('join-session').disabled=!engine.connected||joining;return}
   $("team-search").hidden = state.regions.length <= 8;
   const query = $("team-search").hidden ? "" : $("team-search").value.trim().toLocaleLowerCase();

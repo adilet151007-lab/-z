@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {io} from 'socket.io-client';
 import {GameLogic,hashToken} from '../game-logic.js';
-import {createGameServer} from '../server.js';
+import {createGameServer} from './fixture-server.js';
 import {SAFE_SCORE} from '../achievement-system.js';
 test('отзыв перка возвращает предел и обновляет коллекцию',()=>{
  const g=new GameLogic(),j=g.joinTeam('saryarka','Игрок');g.grantAchievement('infinity-gauntlet','player',j.player.pid);assert.equal(g.scoreLimit('team','saryarka'),SAFE_SCORE);
