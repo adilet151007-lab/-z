@@ -56,6 +56,11 @@ try {
 if (invitation) $('invitation-input').value = invitation.url;
 render();
 
+// A second invitation can arrive while this tab is already open.
+window.addEventListener('hashchange', () => {
+  if (new URLSearchParams(location.hash.slice(1)).has('join')) location.reload();
+});
+
 $('theme-toggle').addEventListener('click', () => {
   theme = theme === 'dark' ? 'light' : 'dark'; storage.set(keys.theme, theme); render();
 });
