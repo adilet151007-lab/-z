@@ -2,7 +2,24 @@
 
 Подготовлен серверный Authorization Code flow. Статический хостинг не может хранить Client Secret или проверять Google-токены. До создания OAuth-клиента рабочий Google-вход включить нельзя. Этот этап не переносит результаты существующих игроков в Google-профили и не создаёт несколько комнат.
 
-## 1. Отдельный сервер
+## Сервер профиля без копии игры
+
+Для подключения Google к лобби теперь есть отдельный entry point: `node beta-lobby/portal-server.mjs`. Он не подключается к PostgreSQL и не запускает игровой движок. Студенческая и преподавательская кнопки открывают существующую игру. Доступ к рабочей базе не нужен.
+
+Render Web Service, ветка `beta/lobby`:
+
+- Build: `npm ci --omit=dev && npm ci --prefix beta-lobby --omit=dev && node beta-lobby/build.mjs`
+- Start: `node beta-lobby/portal-server.mjs`
+- Environment: `LOBBY_SESSION_SECRET` (случайный секрет), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`.
+- Публичный домен берётся из `RENDER_EXTERNAL_URL`; для собственного домена задайте `LOBBY_PUBLIC_ORIGIN`.
+- Callback для Google: публичный домен этого сервиса + `/auth/google/callback`.
+- Политика аккаунта: `/lobby-privacy.html`.
+
+Google-профиль пока не переносит результаты игровой сессии в постоянную историю аккаунта. Профиль авторизован только на домене лобби. Рабочий сайт и его пароли не меняются.
+
+Вариант ниже (`server.mjs`) нужен только для отдельной полноценной тестовой игры с собственной базой. Для обычного подключения Google к лобби используйте `portal-server.mjs`.
+
+## 1. Отдельный сервер с копией игры
 
 Оставить `culture-quest-z`, `main` и рабочую базу без изменений. Для серверной беты использовать отдельный Render Web Service из ветки `beta/lobby` и отдельную PostgreSQL-базу.
 

@@ -16,6 +16,8 @@ export function createLobbyRouter(options = {}) {
   const origin = options.publicOrigin;
   const url = new URL(origin);
   if (url.origin !== origin || url.protocol !== 'https:' && !(['localhost','127.0.0.1'].includes(url.hostname) && url.protocol === 'http:')) throw new Error('LOBBY_PUBLIC_ORIGIN must be an HTTPS origin, or localhost for development.');
+  const gameOrigin=options.gameOrigin||origin,gameUrl=new URL(gameOrigin);
+  if(gameUrl.origin!==gameOrigin||gameUrl.protocol!=='https:'&&!(['localhost','127.0.0.1'].includes(gameUrl.hostname)&&gameUrl.protocol==='http:'))throw new Error('Invalid game origin.');
   if (typeof options.sessionSecret !== 'string' || options.sessionSecret.length < 32) throw new Error('A separate lobby session secret of at least 32 characters is required.');
   const secret = createHmac('sha256', options.sessionSecret).update('culture-quest/lobby/account/v1').digest();
   const now = options.now || Date.now, secure = url.protocol === 'https:';
@@ -81,7 +83,7 @@ export function createLobbyRouter(options = {}) {
   router.get('/lobby-config.js', async (_req,res,next) => {
     try {
       const source = await readFile(new URL('lobby-config.js',publicDirectory),'utf8');
-      res.type('application/javascript').set('Cache-Control','no-store').send(source.replace(/^export const GAME_ORIGIN = .*;$/m,'export const GAME_ORIGIN = '+JSON.stringify(origin)+';'));
+      res.type('application/javascript').set('Cache-Control','no-store').send(source.replace(/^export const GAME_ORIGIN = .*;$/m,'export const GAME_ORIGIN = '+JSON.stringify(gameOrigin)+';'));
     } catch (error) {next(error);}
   });
   router.get(['/', '/index.html'], async (_req,res,next) => {
