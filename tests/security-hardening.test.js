@@ -51,12 +51,12 @@ test('защита: лимит действует до проверки паро
  now+=10001;assert.equal((await command(another,'teacherLogin',{password:credentials.teacherPassword})).ok,true);
 });
 
-test('защита: боты без ссылки не занимают места, закрытие и смена ссылки прекращают новый вход',async t=>{
+test('защита: общая ссылка регистрирует только при открытом входе, продление сохраняет старые ссылки',async t=>{
  const f=await fixture(t),teacher=await f.teacher(),outsiders=await Promise.all(Array.from({length:6},()=>f.connect()));
  for(const socket of outsiders)assert.equal((await command(socket,'joinTeam',{name:'Посторонний',regionId:'jetisu'})).code,'ADMISSION_CLOSED');assert.equal(f.server.game.region('jetisu').members.length,0);
- const token=await f.lesson(teacher);assert.equal((await command(outsiders[0],'joinTeam',{name:'Посторонний',regionId:'jetisu'})).code,'ADMISSION_REQUIRED');const student=await f.join('Участник',token);
+ const token=await f.lesson(teacher);const direct=await command(outsiders[0],'joinTeam',{name:'Участник по общей ссылке',regionId:'jetisu'});assert.equal(direct.ok,true);assert.equal((await command(outsiders[0],'resetGame')).code,'FORBIDDEN');const student=await f.join('Участник',token);
  await command(teacher,'setAdmission',{open:false});assert.equal((await command(outsiders[1],'joinTeam',{name:'Посторонний',regionId:'jetisu',admissionToken:token})).code,'ADMISSION_CLOSED');assert.ok(f.server.game.findPlayer(hashToken(student.playerToken)));
- await f.lesson(teacher);assert.equal((await command(outsiders[2],'joinTeam',{name:'Посторонний',regionId:'jetisu',admissionToken:token})).code,'ADMISSION_REQUIRED');
+ await f.lesson(teacher);assert.equal((await command(outsiders[2],'joinTeam',{name:'Старая ссылка',regionId:'jetisu',admissionToken:token})).ok,true);assert.equal((await command(outsiders[3],'joinTeam',{name:'Без приглашения',regionId:'mangystau'})).ok,true);assert.equal((await command(outsiders[3],'setAdmission',{open:false})).code,'FORBIDDEN');
 });
 
 test('защита: один браузер не занимает два места, поддельная cookie и токен занятия не дают административный вход',async t=>{

@@ -136,7 +136,7 @@ export async function createGameServer(options = {}) {
   }
   function admissionStatus(){const entry=publishedGame.state.accessControl.admission;return {required:requireAdmission,open:!requireAdmission||entry.open&&entry.expiresAt>Date.now(),expiresAt:entry.expiresAt}}
   function admissionDetails(){const entry=game.state.accessControl.admission;return {required:requireAdmission,expiresAt:entry.expiresAt,open:entry.open&&entry.expiresAt>Date.now(),token:entry.expiresAt>Date.now()?signed({role:'admission',epoch:entry.epoch,expires:entry.expiresAt}):null}}
-  function requireLessonAccess(token){const entry=publishedGame.state.accessControl.admission;if(!requireAdmission)return;if(!entry.open||entry.expiresAt<=Date.now())throw new GameError('Регистрация закрыта. Обратитесь к преподавателю.','ADMISSION_CLOSED');const data=decodeCredential(token,'admission');if(!data||data.epoch!==entry.epoch||data.expires!==entry.expiresAt)throw new GameError('Откройте ссылку или QR-код этого занятия у преподавателя.','ADMISSION_REQUIRED')}
+  function requireLessonAccess(){const entry=publishedGame.state.accessControl.admission;if(!requireAdmission)return;if(!entry.open||entry.expiresAt<=Date.now())throw new GameError('Регистрация закрыта. Обратитесь к преподавателю.','ADMISSION_CLOSED')}
   const effectiveLocalCodeHash=()=>Object.hasOwn(publishedGame.state.accessControl,'localKeyOverride')?publishedGame.state.accessControl.localKeyOverride:localAdminCodeHash;
   function privilegedEntry(name){const code=typeof name==='string'?name.trim().split(/\s/,1)[0]:'';return Object.keys(CREATOR_NAMES).some(id=>publishedGame.state.accessControl.keyOverrides[id]?equal(hashToken(code),publishedGame.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id]))||!!effectiveLocalCodeHash()&&equal(hashToken(code),effectiveLocalCodeHash())||code.startsWith('CQI-')}
   function checkDevice(socket){if(!requireAdmission||!cookieSessions)return;if(!socket.data.deviceHash)throw new GameError('Откройте страницу входа и разрешите необходимые cookie.','DEVICE_REQUIRED');const devices=publishedGame.state.accessControl.playerDevices;if(publishedGame.state.regions.some(team=>team.members.some(member=>!member.creatorId&&devices[member.pid]===socket.data.deviceHash)))throw new GameError('В этом браузере уже есть участник. Вернитесь в открытую сессию или выйдите из неё.','DEVICE_OCCUPIED')}
@@ -332,7 +332,7 @@ export async function createGameServer(options = {}) {
           if(permission==='student'&&!player)throw new GameError('Войдите в команду заново.','SESSION_EXPIRED');
           if(permission==='teacher'&&!['teacher','creator'].includes(identity.role)&&!delegated||permission==='creator'&&!publishedGame.creatorFor(identity.playerHash)&&!delegated||permission==='actualTeacher'&&identity.role!=='teacher'&&!(name==='revokeAchievement'&&identity.role==='creator'))throw new GameError('Для действия недостаточно прав.','FORBIDDEN');
           if(name==='teacherLogin'||name==='joinTeam'&&typeof data?.name==='string'&&/(?:ROOT_ACCESS|DEV_CONSOLE)|^CQ[IOL]-|^[A-Za-z0-9_#$!.-]{26,128}(?:\s|$)/i.test(data.name.trim()))checkLoginLimit(socket);
-          if(name==='joinTeam'){if(!privilegedEntry(data?.name))requireLessonAccess(data?.admissionToken);registrationLimiter.take(clientAddress(socket.request,trustProxy),300,10000);}
+          if(name==='joinTeam'){if(!privilegedEntry(data?.name))requireLessonAccess();registrationLimiter.take(clientAddress(socket.request,trustProxy),300,10000);}
         }catch(error){reply({ok:false,error:error.message,code:error.code||'INVALID_ACTION',...(error.retryAfterMs?{retryAfterMs:error.retryAfterMs}:{})});return}
         const fastInput=["castVote","confirmVote","cancelVote","voteLeader","teamSubmit"].includes(name);
         const chatAction=['chatSubscribe','chatSend','chatDelete'].includes(name);
@@ -416,7 +416,7 @@ export async function createGameServer(options = {}) {
       if(data.regionId===CREATOR_TEAM_ID||configured.some(id=>equal(code,creatorCodes[id]))||/(?:ROOT_ACCESS|DEV_CONSOLE)|^CQO-/i.test(name)){
         throw new GameError('Некорректный персональный код.','BAD_CREATOR_CODE');
       }
-      requireLessonAccess(data.admissionToken);checkDevice(socket);const result=game.joinTeam(data.regionId, data.name);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;
+      requireLessonAccess();checkDevice(socket);const result=game.joinTeam(data.regionId, data.name);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;
     }, result => { socket.data.playerHash = hashToken(result.playerToken); });
     handle("leaveTeam", "student", (_data, p) => game.leaveTeam(p.regionId, p.pid), () => { socket.data.playerHash = null; });
     handle("castVote", "student", (data, p) => game.castVote(p.regionId, p.pid, data.optionIdx, data.roundId));
