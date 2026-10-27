@@ -1,6 +1,7 @@
 import {GAME} from './lobby-config.js';
 import {COPY} from './lobby-copy.js';
 import {createStorage, matchesGame, parseInvitation} from './lobby-core.js';
+import {setupPlatform} from './lobby-platform.js';
 import {setupAccount} from './lobby-account.js';
 
 const storage = createStorage(), $ = id => document.getElementById(id);
@@ -9,7 +10,7 @@ let language = storage.get(keys.language) === 'kk' ? 'kk' : 'ru';
 let theme = storage.get(keys.theme) === 'light' ? 'light' : 'dark';
 let invitation = null, message = '', error = false;
 const t = key => COPY[language][key] || COPY.ru[key] || key;
-let account;
+let account,platform;
 
 function renderMessage() {
   $('invitation-message').textContent = message ? t(message) : '';
@@ -38,7 +39,7 @@ function render() {
   document.querySelectorAll('[data-privacy]').forEach(node => { node.href = GAME.privacyUrl; });
   $('saved-invite').hidden = !invitation;
   renderMessage(); renderSearch();
-  account?.render();
+  account?.render();platform?.render();
 }
 
 try {
@@ -109,3 +110,6 @@ dialog.addEventListener('click', event => {
   if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) closeHelp();
 });
 document.addEventListener('keydown', event => { if (event.key === 'Escape' && dialog.open) closeHelp(); });
+
+platform = setupPlatform({language:()=>language});
+document.getElementById("language-select")?.addEventListener("change",()=>platform.render());

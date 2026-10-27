@@ -38,7 +38,7 @@ export function setupAccount({language}) {
       configured = data.googleEnabled === true;
       user = data.user && typeof data.user.name==='string' && typeof data.user.email==='string' ? data.user : null;
     } catch {configured=false;}
-    loading=false;render();
+    loading=false;render();document.dispatchEvent(new Event('cq:account-change'));
   }
   function close() {dialog.close();document.body.classList.remove('help-open');lastFocus?.focus();}
   $('account-button').addEventListener('click',()=>{lastFocus=document.activeElement;dialog.showModal();document.body.classList.add('help-open');render();});
@@ -50,7 +50,7 @@ export function setupAccount({language}) {
     try {
       const response=await fetch('/auth/logout',{method:'POST',credentials:'same-origin',headers:{'X-CQ-Lobby':'1'},signal:AbortSignal.timeout(12000)});
       if(!response.ok)throw new Error();
-      user=null;status='';
+      user=null;status='';document.dispatchEvent(new Event('cq:account-change'));
     }catch{status='failed';}
     $('account-logout').disabled=false;render();
   });

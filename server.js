@@ -100,7 +100,7 @@ export async function createGameServer(options = {}) {
     next();
   });
   if(options.lobbyRouter)app.use(options.lobbyRouter);
-  app.get("/", (_req, res) => res.redirect("/student.html"));
+  app.get("/", (_req, res) => res.redirect((options.resourcePrefix||'')+"/student.html"));
   app.get("/health", (_req, res) => res.status(closing ? 503 : 200).json({ ok: !closing, storage: store.kind, chatStorage:chatStore.kind, creatorAccessEnabled:configured.length===2 }));
   app.get('/api/public-settings',(_req,res)=>res.json({branding:publishedGame.publicBranding(),privacyVersion:PRIVACY_VERSION,consentRequired:requireConsent}));
   app.get('/api/logo', (req,res)=>{const logo=publishedGame.state.branding.logo;if(!logo||req.query.v!==hashToken(logo).slice(0,16))return res.sendStatus(404);const [header,data]=logo.split(',');res.setHeader('Cache-Control','public, max-age=86400, immutable');res.type(header.slice(5,header.indexOf(';'))).send(Buffer.from(data,'base64'))});
@@ -108,7 +108,7 @@ export async function createGameServer(options = {}) {
   const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
   allowed.add('/ui-preferences.js');allowed.add('/ui-kz.js');
   for(const file of ['./award-2d.js','./achievement-player.js','./achievement-animations.js',...Object.values(ANIMATION_MODULES)])if(/^\.\/[a-z0-9-]+\.js$/.test(file))allowed.add(file.slice(1));
-  app.use(async(req,res,next)=>{if(!allowed.has(req.path))return next();const file=path.join(directory,req.path.slice(1));if(req.path.endsWith('.html')){if(req.path==='/student.html'&&!decodeCredential(cookies(req)[cookieName('device')],'device'))cookie(res,'device',signed({role:'device',id:randomUUID(),expires:Date.now()+PROFILE_RETENTION_MS}),PROFILE_RETENTION_MS);return res.type('html').send((await readFile(file,'utf8')).replace(/<script(?=[\s>])/g,`<script nonce="${res.locals.nonce}"`))}res.sendFile(file)});
+  app.use(async(req,res,next)=>{if(!allowed.has(req.path))return next();const file=path.join(directory,req.path.slice(1));if(req.path.endsWith('.html')){if(req.path==='/student.html'&&!decodeCredential(cookies(req)[cookieName('device')],'device'))cookie(res,'device',signed({role:'device',id:randomUUID(),expires:Date.now()+PROFILE_RETENTION_MS}),PROFILE_RETENTION_MS);return res.type('html').send((await readFile(file,'utf8')).replace(/(["'])\/(vendor|api|socket.io)\//g,(_,q,group)=>q+(options.resourcePrefix||'')+'/'+group+'/').replace(/<script(?=[\s>])/g,`<script nonce="${res.locals.nonce}"`))}if(options.resourcePrefix&&req.path.endsWith('.js'))return res.type('application/javascript').send((await readFile(file,'utf8')).replace(/(["'])\/(vendor|api|socket.io)\//g,(_,q,group)=>q+options.resourcePrefix+'/'+group+'/'));res.sendFile(file)});
   app.get("/vendor/pdfjs/pdf.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.mjs")));
   app.get("/vendor/pdfjs/pdf.worker.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.worker.mjs")));
   app.get("/vendor/mammoth/mammoth.browser.min.js", (_req,res) => res.sendFile(path.join(directory,"node_modules/mammoth/mammoth.browser.min.js")));
@@ -144,7 +144,7 @@ export async function createGameServer(options = {}) {
     if(!payload||!signature||extra||!equal(signature,createHmac('sha256',secret).update(payload).digest('base64url')))return false;
     try{const data=JSON.parse(Buffer.from(payload,'base64url').toString());return data.role==='classroom'&&typeof data.id==='string'&&equal(data.id,entry.stableId)}catch{return false}
   }
-  function requireLessonAccess(token){const entry=publishedGame.state.accessControl.admission;if(!requireAdmission)return;if(!entry.open||entry.expiresAt<=Date.now())throw new GameError('Регистрация закрыта. Обратитесь к преподавателю.','ADMISSION_CLOSED');if(validClassroomToken(token,entry))return;const data=decodeCredential(token,'admission');if(!data||data.epoch!==entry.epoch||data.expires!==entry.expiresAt)throw new GameError('Откройте постоянную ссылку класса у преподавателя.','ADMISSION_REQUIRED')}
+  function requireLessonAccess(){const entry=publishedGame.state.accessControl.admission;if(requireAdmission&&(!entry.open||entry.expiresAt<=Date.now()))throw new GameError('Регистрация закрыта. Обратитесь к преподавателю.','ADMISSION_CLOSED')}
   const effectiveLocalCodeHash=()=>Object.hasOwn(publishedGame.state.accessControl,'localKeyOverride')?publishedGame.state.accessControl.localKeyOverride:localAdminCodeHash;
   function privilegedEntry(name){const code=typeof name==='string'?name.trim().split(/\s/,1)[0]:'';return Object.keys(CREATOR_NAMES).some(id=>publishedGame.state.accessControl.keyOverrides[id]?equal(hashToken(code),publishedGame.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id]))||!!effectiveLocalCodeHash()&&equal(hashToken(code),effectiveLocalCodeHash())||code.startsWith('CQI-')}
   function checkDevice(socket){if(!requireAdmission||!cookieSessions)return;if(!socket.data.deviceHash)throw new GameError('Откройте страницу входа и разрешите необходимые cookie.','DEVICE_REQUIRED');const devices=publishedGame.state.accessControl.playerDevices;if(publishedGame.state.regions.some(team=>team.members.some(member=>!member.creatorId&&devices[member.pid]===socket.data.deviceHash)))throw new GameError('В этом браузере уже есть участник. Вернитесь в открытую сессию или выйдите из неё.','DEVICE_OCCUPIED')}
@@ -200,7 +200,7 @@ export async function createGameServer(options = {}) {
       if(expired.length||expiredTeachers.length)broadcast();
     }catch(error){game=new GameLogic(before);throw error}
   }
-  const cookieName=role=>(secureCookies?'__Host-':'')+'cq-'+role;
+  const cookieName=role=>(secureCookies?'__Host-':'')+'cq-'+(options.cookieNamespace?options.cookieNamespace+'-':'')+role;
   const cookies=req=>Object.fromEntries((req.headers.cookie||'').split(';').flatMap(part=>{const at=part.indexOf('=');if(at<0)return [];try{return [[part.slice(0,at).trim(),decodeURIComponent(part.slice(at+1))]]}catch{return []}}));
   const cookie=(res,role,value,maxAge)=>res.cookie(cookieName(role),value,{httpOnly:true,secure:secureCookies,sameSite:'strict',path:'/',maxAge});
   const sameOrigin=req=>{const origin=req.headers.origin;if(!origin)return true;try{return new URL(origin).host===req.headers.host}catch{return false}};
@@ -295,15 +295,20 @@ export async function createGameServer(options = {}) {
   let lastRefreshAt=0;
   const effectAttempts = new Map();
   const checkLoginLimit=socket=>credentialLimiter.take(clientAddress(socket.request,trustProxy),20,10000);
-  io.use((socket, next) => {
+  io.use(async(socket, next) => {
+    try {
     const auth = socket.handshake.auth || {};
     const jar=cookies(socket.request),legacy=cookieSessions&&auth.surface===undefined&&publishedGame.state.accessControl.legacyHandshakeUntil>Date.now();let teacherToken=cookieSessions?(auth.surface==='teacher'?jar[cookieName('teacher')]:null):auth.teacherToken,playerToken=cookieSessions?jar[cookieName('player')]:auth.playerToken;
     if(legacy){if(validTeacherToken(auth.teacherToken))teacherToken=auth.teacherToken;if(typeof auth.playerToken==='string'&&auth.playerToken.length<=200&&publishedGame.findPlayer(hashToken(auth.playerToken)))playerToken=auth.playerToken;socket.data.refreshLegacy=validTeacherToken(teacherToken)||!!(playerToken&&publishedGame.findPlayer(hashToken(playerToken)))}
     socket.data.teacherToken=validTeacherToken(teacherToken)?teacherToken:null;
+    if(options.authorizeTeacher)socket.data.portalTeacher=await options.authorizeTeacher(socket.request);
+    if(socket.data.portalTeacher&&auth.surface==='teacher')socket.data.teacherToken=signed({role:'teacher',epoch:game.state.accessControl.teacherEpoch||0,sessionId:randomUUID(),expires:Date.now()+86400000,passwordVersion:createHmac('sha256',secret).update(password).digest('hex')});
     socket.data.playerHash=typeof playerToken==='string'&&playerToken.length<=200?hashToken(playerToken):null;
+    if(options.onPlayerJoined&&socket.data.playerHash){const p=publishedGame.findPlayer(socket.data.playerHash);if(p)await options.onPlayerJoined(socket.request,p);}
     const collectionToken=jar[cookieName('collection')];socket.data.collectionHash=typeof collectionToken==='string'&&collectionToken.length<=200?hashToken(collectionToken):null;
     const device=decodeCredential(jar[cookieName('device')],'device');socket.data.deviceHash=device&&typeof device.id==='string'?hashToken(device.id):null;
     next();
+    }catch{next(new Error('Account verification unavailable'));}
   });
 
   io.on("connection", socket => {
@@ -352,6 +357,7 @@ export async function createGameServer(options = {}) {
         (chatAction?enqueueChat:enqueue)(async () => {
           if (closing) throw new GameError("Сервер перезапускается. Дождитесь подключения.");
           if(!fastInput&&!chatAction)await maintainIdleSessions();
+          if(options.authorizeTeacher&&socket.data.teacherToken&&!await options.authorizeTeacher(socket.request))socket.data.teacherToken=null;
           const identity = actor(socket);
           const actorPlayer = identity.playerHash ? game.findPlayer(identity.playerHash) : null;
           const delegatedAllowed = identity.role === 'delegate' && game.adminCan(actorPlayer?.pid, name);
@@ -373,6 +379,7 @@ export async function createGameServer(options = {}) {
             game.logContext=['teacher','creator','delegate'].includes(identity.role)&&!['startRound','resolveRound','endRound','finishMatch','castVote','confirmVote','cancelVote','teamSubmit','voteLeader','chatSend','chatSubscribe','offerTrade','settleTrade'].includes(name)?'admin':null;
             if(fastInput)game.inputTiming=inputTiming;
             try{result = await fn(data, player)}finally{delete game.inputTiming;game.logContext=oldLogContext}
+            if(name==='joinTeam'&&result?.player&&options.onPlayerJoined)await options.onPlayerJoined(socket.request,result.player);
             if(result?.playerToken&&result.player){game.ensureCollection(result.player.pid,socket.data.collectionHash);game.state.accessControl.activity.players[result.player.pid]=sessionNow();if(socket.data.deviceHash&&!result.isCreator)game.state.accessControl.playerDevices[result.player.pid]=socket.data.deviceHash;}
             if(name!=='leaveTeam'&&before.delegatedAdmins?.some(grant=>(grant.tier==='local'||grant.origin==='shared-local')&&(!game.state.regions.some(team=>team.members.some(member=>member.pid===grant.pid))||!game.adminGrantFor(grant.pid)))){game.state.accessControl.localKeyOverride=null;game.touch()}
             if(result?.teacherToken){const payload=JSON.parse(Buffer.from(result.teacherToken.split('.')[0],'base64url').toString());game.state.accessControl.activity.teachers[hashToken(result.teacherToken)]={at:sessionNow(),expiresAt:payload.expires};game.touch()}

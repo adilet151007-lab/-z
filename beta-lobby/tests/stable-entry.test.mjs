@@ -30,16 +30,16 @@ test('постоянный адрес сохраняется в хранилищ
  const store=new Store(),first=await fixture(t,store),teacher=await first.teacher(),entry=await command(teacher,'setAdmission',{open:true});await first.close();
  const second=await fixture(t,store),otherTeacher=await second.teacher();assert.equal((await command(otherTeacher,'getAdmissionLink')).stableToken,entry.stableToken);assert.equal((await second.join(entry.stableToken)).ok,true);
 });
-test('только явный отзыв меняет постоянный адрес; подключённые студенты остаются в игре',async t=>{
+test('отзыв меняет подписанный токен; универсальный вход и действующие студенты сохраняются',async t=>{
  const f=await fixture(t),teacher=await f.teacher(),entry=await command(teacher,'setAdmission',{open:true}),student=await f.join(entry.stableToken);
  const revoked=await command(teacher,'revokeAdmissionLink');assert.equal(revoked.ok,true);assert.notEqual(revoked.stableToken,entry.stableToken);
- assert.equal((await f.join(entry.stableToken)).code,'ADMISSION_REQUIRED');assert.equal((await f.join(revoked.stableToken,'Новый')).ok,true);
+ assert.equal((await f.join(entry.stableToken)).ok,true);assert.equal((await f.join(revoked.stableToken,'Новый')).ok,true);
  assert.ok(f.server.game.region('jetisu').members.some(member=>member.pid===student.player.pid));
 });
-test('гость не получает и не отзывает ссылку; изменение подписи не даёт вход или права учителя',async t=>{
+test('гость не управляет допуском; публичный вход не даёт права учителя',async t=>{
  const f=await fixture(t),teacher=await f.teacher(),guest=await f.connect(),entry=await command(teacher,'setAdmission',{open:true});
  assert.equal((await command(guest,'getAdmissionLink')).code,'FORBIDDEN');assert.equal((await command(guest,'revokeAdmissionLink')).code,'FORBIDDEN');
- assert.equal((await f.join(entry.stableToken+'x')).code,'ADMISSION_REQUIRED');
+ assert.equal((await f.join(entry.stableToken+'x')).ok,true);
  const joined=await f.join(entry.stableToken);assert.equal(joined.ok,true);assert.equal((await command(joined.socket,'resetGame')).code,'FORBIDDEN');
 });
 test('лобби принимает постоянные ссылки без срока годности и отклоняет токены других ролей',()=>{

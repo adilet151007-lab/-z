@@ -6,7 +6,7 @@ import {OAuth2Client} from 'google-auth-library';
 import {clientAddress, RequestLimiter} from '../security-controls.js';
 
 const publicDirectory = new URL('./public/', import.meta.url);
-const assets = new Set(['lobby.js','lobby.css','lobby-core.js','lobby-copy.js','lobby-account.js','mark.svg','ornament.svg','mobile-preview.html','lobby-privacy.html']);
+const assets = new Set(['lobby.js','lobby.css','lobby-core.js','lobby-copy.js','lobby-account.js','lobby-platform.js','mark.svg','ornament.svg','mobile-preview.html','lobby-privacy.html']);
 const hash = value => createHash('sha256').update(String(value)).digest();
 const equal = (left, right) => timingSafeEqual(hash(left), hash(right));
 const random = () => randomBytes(32).toString('base64url');
@@ -83,6 +83,7 @@ export function createLobbyRouter(options = {}) {
       const profile = ticket.getPayload();
       if (!profile || !equal(profile.nonce,flow.nonce) || typeof profile.sub !== 'string' || !profile.sub || profile.sub.length > 255 || profile.email_verified !== true || typeof profile.email !== 'string' || profile.email.length > 320) throw new Error('Invalid account');
       const name = String(profile.name || profile.given_name || profile.email.split('@')[0]).replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,80) || 'Участник';
+      if(options.onAuthenticated)await options.onAuthenticated({id:'google:'+profile.sub,name,email:profile.email});
       cookie(res,names.session,sign({kind:'google-account',sub:profile.sub,name,email:profile.email,expires:now()+WEEK}),WEEK);
       return res.redirect(303,'/?account=connected');
     } catch(error) {
@@ -112,5 +113,6 @@ export function createLobbyRouter(options = {}) {
     if (req.method !== 'GET' || !assets.has(file)) return next();
     res.sendFile(fileURLToPath(new URL(file,publicDirectory)));
   });
+  router.account = account;
   return router;
 }
