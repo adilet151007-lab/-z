@@ -31,6 +31,7 @@ export function createPortalServer(options={}){
  const runtime=platform?new RoomRuntime(platform,lobby.account,{secureCookies:secure,trustProxy:options.trustProxy}):null;
  app.use('/api/platform',platformAPI({platform,account:lobby.account,origin:publicOrigin,runtime,trustProxy:options.trustProxy}));
  if(runtime)app.use('/rooms/:roomId',(req,res,next)=>runtime.handle(req,res).catch(next));
+ app.get('/creators.html',async(req,res)=>{const a=lobby.account(req);if(!a||!platform)return res.status(403).type('text').send('Войдите аккаунтом создателя через лобби.');try{await platform.requireCreator(a.id);}catch{return res.status(403).type('text').send('Доступ только для создателей.');}return res.sendFile(new URL('./public/creators.html',import.meta.url).pathname);});
  app.use(lobby);
  for(const page of ['student.html','teacher.html','privacy.html'])app.get('/'+page,(_req,res)=>res.redirect(303,GAME_ORIGIN+'/'+page));
  app.use((_req,res)=>res.status(404).type('text').send('Not found'));
