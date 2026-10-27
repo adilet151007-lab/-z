@@ -17,6 +17,7 @@ export function authoringAPI({platform,runtime}){
  });
  router.post('/rooms/:id/invite',async(req,res)=>res.json(await platform.roomInvite(req.platformCreator.id,req.params.id)));
  router.post('/rooms/:id/revoke-managers',async(req,res)=>res.json({room:await platform.revokeManagers(req.platformCreator.id,req.params.id)}));
+ router.post('/rooms/:id/delete',async(req,res)=>{if(req.body.confirm!==req.params.id)throw new PlatformError('Подтвердите удаление комнаты.');await platform.requireCreator(req.platformCreator.id);const room=await platform.room(req.params.id);if(!room)throw new PlatformError('Комната не найдена.',404);await platform.closeRoom(req.platformCreator.id,room.id);await runtime.stop(room.id);await platform.store.roomStore(room.id).save(null);await platform.store.roomStore(room.id).saveChat(null);res.json(await platform.deleteRoom(req.platformCreator.id,room.id));runtime.summaries.delete(room.id);});
  router.post('/rooms/:id/reopen',async(req,res)=>res.json({room:await platform.reopenRoom(req.platformCreator.id,req.params.id)}));
  router.post('/rooms/:id/sleep',async(req,res)=>{const r=await platform.room(req.params.id);if(!r)throw new PlatformError('Комната не найдена.',404);await runtime.stop(r.id);res.json({ok:true});});
  router.post('/rooms/:id/restart',async(req,res)=>{const room=await platform.room(req.params.id);if(!room||room.closedAt)throw new PlatformError('Комната закрыта.',410);await runtime.stop(room.id);await runtime.get(room.id);res.json({ok:true});});
