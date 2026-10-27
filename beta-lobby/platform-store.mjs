@@ -8,6 +8,8 @@ export class PlatformStore {
  transaction(fn){const job=this.pending.then(async()=>{if(this.backend.mutate)return this.backend.mutate('platform',initial,fn);const state=await this.backend.load('platform')||initial();const result=await fn(state);await this.backend.save('platform',state);return structuredClone(result);});this.pending=job.catch(()=>{});return job;}
  async read(fn){await this.pending;return structuredClone(fn(await this.backend.load('platform')||initial()));}
  roomStore(id){if(!/^[a-f0-9-]{36}$/.test(id))throw new Error('Invalid room id');const b=this.backend;return {kind:b.kind,init:async()=>{},load:()=>b.load('room:'+id),save:s=>b.save('room:'+id,s),loadChat:()=>b.load('chat:'+id),saveChat:s=>b.save('chat:'+id,s),close:async()=>{}};}
+ async document(key){if(!/^(template|source-draft):[a-f0-9-]{36}$/.test(key))throw new Error('Invalid document key');return this.backend.load(key);}
+ updateDocument(key,fn){if(!/^template:[a-f0-9-]{36}$/.test(key))throw new Error('Invalid document key');const job=this.pending.then(async()=>{if(this.backend.mutate)return this.backend.mutate(key,()=>({version:0,current:null,history:[]}),fn);const doc=await this.backend.load(key)||{version:0,current:null,history:[]},result=await fn(doc);await this.backend.save(key,doc);return result;});this.pending=job.catch(()=>{});return job;}
  async acquireRoom(id){return this.backend.acquireRoom?this.backend.acquireRoom(id):{assert(){},release:async()=>{}};}
  async close(){await this.pending;await this.backend.close();}
 }

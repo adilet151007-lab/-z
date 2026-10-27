@@ -338,7 +338,14 @@ export class GameEngine {
     this.socket.on('chat:view',view=>{this.chatView=view;this.emitChat()});
     this.socket.on('chat:message',event=>{if(this.chatView?.room!==event.room)return;const messages=this.chatView.messages.filter(m=>m.id!==event.message.id).concat(event.message).sort((a,b)=>a.sequence-b.sequence).slice(-(this.chatMeta?.historyLimit||80));this.chatView={...this.chatView,messages,latestSequence:event.latestSequence};this.emitChat()});
     this.stopActivityTracking=this.trackUserActivity();
+    if(typeof document!=='undefined'&&document.documentElement.dataset.extensions==='enabled'){this.socket.on('extension:update',info=>this.syncExtension(info));fetch(new URL('./api/extension',import.meta.url),{cache:'no-store'}).then(r=>r.ok?r.json():null).then(info=>{if(info)this.syncExtension(info)}).catch(()=>{});}
     this.socket.connect();
+  }
+  async syncExtension(info){
+    if(!info||info.revision===this.extensionRevision)return;
+    this.extensionRevision=info.revision;const revision=info.revision;
+    let link=document.getElementById('cq-live-extension-style');if(!link){link=document.createElement('link');link.id='cq-live-extension-style';link.rel='stylesheet';document.head.append(link);}link.href=new URL('./extension.css?v='+encodeURIComponent(revision),import.meta.url).href;
+    try{const previous=this.extensionCleanup;this.extensionCleanup=null;try{previous?.();}catch{}if(info.js){const module=await import(new URL('./extension.js?v='+encodeURIComponent(revision),import.meta.url).href);if(this.extensionRevision!==revision)return;if(typeof module.default==='function'){const stop=await module.default({engine:this,mode:this.mode,onState:fn=>this.onChange(fn)});if(typeof stop==='function'){if(this.extensionRevision===revision)this.extensionCleanup=stop;else stop();}}}}catch{console.warn('Расширение игры отключено из-за ошибки. Основная игра продолжает работать.');}
   }
   trackUserActivity(){
     if(typeof document==='undefined'||typeof document.addEventListener!=='function')return ()=>{};

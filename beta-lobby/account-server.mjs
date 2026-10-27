@@ -6,7 +6,7 @@ import {OAuth2Client} from 'google-auth-library';
 import {clientAddress, RequestLimiter} from '../security-controls.js';
 
 const publicDirectory = new URL('./public/', import.meta.url);
-const assets = new Set(['lobby.js','lobby.css','lobby-core.js','lobby-copy.js','lobby-account.js','lobby-platform.js','lobby-creators.js','mark.svg','ornament.svg','mobile-preview.html','lobby-privacy.html']);
+const assets = new Set(['lobby.js','lobby.css','lobby-core.js','lobby-copy.js','lobby-account.js','lobby-platform.js','lobby-creators.js','lobby-creator-tools.js','mark.svg','ornament.svg','mobile-preview.html','lobby-privacy.html']);
 const hash = value => createHash('sha256').update(String(value)).digest();
 const equal = (left, right) => timingSafeEqual(hash(left), hash(right));
 const random = () => randomBytes(32).toString('base64url');
