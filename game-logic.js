@@ -104,7 +104,7 @@ function restoreSnapshot(raw) {
     if (!state.awardSystemVersion&&integer(region.points, RESOURCE_CAP + 1, 10000000)) region.points = RESOURCE_CAP;
   }
   state.regions = validateRegions(state.regions,null,!!state.settings?.universal,state.settings?.mode,!!state.settings?.flexibleTeams);
-  state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT,perksEnabled:state.settings?.perksEnabled??true,autoAdvance:state.settings?.autoAdvance===true,autoDuration:state.settings?.autoDuration||60,...(state.settings?.allowPublicDemo!==undefined?{allowPublicDemo:state.settings.allowPublicDemo===true}:{}),...(state.settings?.universal?{universal:true,mode:state.settings.mode}:{}),...(state.settings?.flexibleTeams?{flexibleTeams:true,teamDecision:state.settings.teamDecision||'consensus',tradeEnabled:state.settings.tradeEnabled===true}:{}) };
+  state.settings = { teamCapacity: state.settings?.teamCapacity ?? SEAT_LIMIT,perksEnabled:state.settings?.perksEnabled??true,achievementsEnabled:state.settings?.achievementsEnabled!==false,autoAdvance:state.settings?.autoAdvance===true,autoDuration:state.settings?.autoDuration||60,...(state.settings?.allowPublicDemo!==undefined?{allowPublicDemo:state.settings.allowPublicDemo===true}:{}),...(state.settings?.universal?{universal:true,mode:state.settings.mode}:{}),...(state.settings?.flexibleTeams?{flexibleTeams:true,teamDecision:state.settings.teamDecision||'consensus',tradeEnabled:state.settings.tradeEnabled===true}:{}) };
   if(state.settings.universal){
     ensure(['team','solo'].includes(state.settings.mode)&&(state.settings.flexibleTeams||state.regions.length===10)&&!state.regions.some(isCreatorTeam)&&state.regions.every(t=>(state.settings.flexibleTeams||t.capacity===4)&&t.economy>=15),'Повреждены настройки формата игры.');
     if(state.settings.flexibleTeams)ensure(['consensus','leader','instant'].includes(state.settings.teamDecision),'Неизвестный способ ответа команды.');
@@ -432,6 +432,7 @@ export class GameLogic {
     return this.state.match;
   }
   grantAchievement(achievementId,scope,targetId,source='manual',reason='manual'){
+    if(this.state.settings.achievementsEnabled===false)return {disabled:true};
     ensure(AWARD_CATALOG.some(a=>a.id===achievementId),'Неизвестное достижение.');ensure(['team','player'].includes(scope),'Выберите команду или участника.');
     const match=this.ensureMatch(),team=scope==='team'?this.region(targetId):this.state.regions.find(t=>t.members.some(m=>m.pid===targetId)),member=scope==='player'?team?.members.find(m=>m.pid===targetId):null;
     ensure(team&&(scope==='team'?team.members.length:member),'Получатель отсутствует или команда пуста.');

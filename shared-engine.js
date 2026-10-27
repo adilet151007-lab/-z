@@ -1,3 +1,4 @@
+import {applyRoomPresentation} from './room-layout.js';
 import {t as uiText,tx as uiTpl} from './ui-preferences.js';
 import {has2DAnimation,mount2DAnimation} from './award-2d.js';
 import { io } from "./socket.io/socket.io.esm.min.js";
@@ -239,6 +240,7 @@ export function setupAchievements(engine){
   }
   const render=state=>{
     if(!state)return;
+    if(state.roomConfig?.features.achievements===false){queue.length=0;close();clearWorld();return;}
     const viewer=state.viewer,current=viewer.player?.pid||(viewer.role==='teacher'?'teacher':'guest');
     if(current!==identity){identity=current;ready=false;shelfKey='';queue.length=0;close();clearWorld();worldSeen.clear();noticed.clear()}
     if(worldMatchId!==state.match?.id){worldMatchId=state.match?.id;queue.length=0;close();clearWorld();worldSeen.clear();noticed.clear()}
@@ -295,7 +297,7 @@ export class GameEngine {
     this.error = "";
     this.sessionNotice = "";
     this.offset = 0;this.clockRtt=Infinity;this.lastClockSync=0;this.clockSyncing=false;this.inputStatus=null;
-    this.listeners = new Set();
+    this.listeners = new Set();this.listeners.add(applyRoomPresentation);
     this.chatListeners=new Set();this.chatMeta=null;this.chatView=null;
     this.cookieSessions=typeof document!=='undefined';this.legacyToken=this.cookieSessions?(mode==='student'?creatorToken()||getToken('cq_player_token_v2'):getToken('cq_teacher_token_v2')):null;
     this.socket = io({ path:new URL('./socket.io',import.meta.url).pathname,autoConnect: false,transports:['websocket','polling'],tryAllTransports:true,reconnection:true,reconnectionDelay:2000,reconnectionDelayMax:2000,randomizationFactor:0,timeout:30000, auth: callback => callback({surface:mode,activityVersion:1,...(!this.cookieSessions?{playerToken:mode==='student'?creatorToken()||getToken('cq_player_token_v2'):undefined,teacherToken:mode==='teacher'?getToken('cq_teacher_token_v2'):undefined}:{})}) });

@@ -1,3 +1,4 @@
+import {roomFeatureDenied} from './room-layout.js';
 import "dotenv/config";
 import express from "express";
 import { ANIMATION_MODULES } from './achievement-animations.js';
@@ -42,6 +43,9 @@ export async function createGameServer(options = {}) {
   const store = options.store || await createStore();
   const saved = await store.load();
   let game = new GameLogic(saved);
+  const roomFeatures=()=>options.roomConfiguration?.()?.features;
+  function enforceRoomFeatures(){const f=roomFeatures();if(!f)return;game.state.settings.achievementsEnabled=f.achievements!==false;if(!f.achievements)game.state.settings.perksEnabled=false;if(!f.trading)game.state.settings.tradeEnabled=false;if(!f.presentationEffects)game.state.presentationEffectsEnabled=false;}
+  enforceRoomFeatures();
   const sessionNow=options.sessionNow||Date.now;
   const pendingPlayerActivity=new Map(),pendingTeacherActivity=new Map();
   if(!options.legacyRules)game.enableUniversal();
@@ -57,9 +61,11 @@ export async function createGameServer(options = {}) {
   const revokedCreators=game.state.regions.flatMap(team=>team.members.filter(member=>member.creatorId&&revokeCreatorSessionIds.includes(member.pid)).map(member=>({teamId:team.id,pid:member.pid})));
   for(const session of revokedCreators){game.leaveTeam(session.teamId,session.pid);delete initialActivity.players[session.pid]}
   if(revokedCreators.length){game.state.exitRequests=(game.state.exitRequests||[]).filter(request=>!revokedCreators.some(session=>session.pid===request.pid));game.log(`Оператор инфраструктуры завершил персональные сессии: ${revokedCreators.length}.`,'admin')}
+  enforceRoomFeatures();
   if (!saved||game.state.revision!==saved.revision) await store.save(game.state);
   let publishedGame = game.snapshotCopy();
   async function persistGame(){
+    enforceRoomFeatures();
     game.stageRoundPublication(publishedGame.state.round?.id);
     await store.save(game.state);
     const activated=game.activateRoundPublication();publishedGame=game.snapshotCopy();
@@ -107,7 +113,7 @@ export async function createGameServer(options = {}) {
   app.get('/api/public-settings',(_req,res)=>res.json({branding:publishedGame.publicBranding(),privacyVersion:PRIVACY_VERSION,consentRequired:requireConsent}));
   app.get('/api/logo', (req,res)=>{const logo=publishedGame.state.branding.logo;if(!logo||req.query.v!==hashToken(logo).slice(0,16))return res.sendStatus(404);const [header,data]=logo.split(',');res.setHeader('Cache-Control','public, max-age=86400, immutable');res.type(header.slice(5,header.indexOf(';'))).send(Buffer.from(data,'base64'))});
   app.get('/license-texts/:name', (req,res)=>{const licenses={three:'three/LICENSE','socket.io':'socket.io/LICENSE',express:'express/LICENSE',pg:'pg/LICENSE',dotenv:'dotenv/LICENSE',mammoth:'mammoth/LICENSE','pdfjs-dist':'pdfjs-dist/LICENSE'};const file=licenses[req.params.name];if(!file)return res.sendStatus(404);res.type('text/plain').sendFile(path.join(directory,'node_modules',file))});
-  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
+  const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/room-layout.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
   allowed.add('/ui-preferences.js');allowed.add('/ui-kz.js');
   for(const file of ['./award-2d.js','./achievement-player.js','./achievement-animations.js',...Object.values(ANIMATION_MODULES)])if(/^\.\/[a-z0-9-]+\.js$/.test(file))allowed.add(file.slice(1));
   app.use(async(req,res,next)=>{if(!allowed.has(req.path))return next();const file=path.join(directory,req.path.slice(1));if(req.path.endsWith('.html')){if(req.path==='/student.html'&&!decodeCredential(cookies(req)[cookieName('device')],'device'))cookie(res,'device',signed({role:'device',id:randomUUID(),expires:Date.now()+PROFILE_RETENTION_MS}),PROFILE_RETENTION_MS);return res.type('html').send((await readFile(file,'utf8')).replace('<html ',options.extensionSources?'<html data-extensions="enabled" ':'<html ').replace(/(["'])\/(vendor|api|socket.io)\//g,(_,q,group)=>q+(options.resourcePrefix||'')+'/'+group+'/').replace(/<script(?=[\s>])/g,`<script nonce="${res.locals.nonce}"`))}if(options.resourcePrefix&&req.path.endsWith('.js'))return res.type('application/javascript').send((await readFile(file,'utf8')).replace(/(["'])\/(vendor|api|socket.io)\//g,(_,q,group)=>q+options.resourcePrefix+'/'+group+'/'));res.sendFile(file)});
@@ -253,12 +259,13 @@ export async function createGameServer(options = {}) {
       cookie(res,'collection',collectionToken,PROFILE_RETENTION_MS);broadcast();res.json({ok:true});
     }catch(error){res.status(error instanceof GameError?403:503).json({ok:false,error:error instanceof GameError?error.message:'Коллекция временно недоступна. Повторите после подключения.',code:error.code||'STORAGE_ERROR'})}
   });
-  app.post('/api/bulk/:action',httpSocket,(req,res,next)=>{const socket=req.gameSocket,jar=cookies(req),surface=req.headers['x-cq-surface'],identity=actor(socket),player=publishedGame.findPlayer(socket.data.playerHash);const permitted=surface==='teacher'&&validTeacherToken(jar[cookieName('teacher')])&&equal(jar[cookieName('teacher')],socket.data.teacherToken)||typeof jar[cookieName('player')]==='string'&&hashToken(jar[cookieName('player')])===socket.data.playerHash;const authorized=['teacher','creator'].includes(identity.role)||identity.role==='delegate'&&publishedGame.adminCan(player?.pid,req.params.action);if(!bulkActions.has(req.params.action)||!permitted||!authorized)return res.status(403).json({ok:false,error:'Нужна действующая административная сессия.',code:'FORBIDDEN'});next()},express.json({limit:'8mb',inflate:false}),(req,res)=>{const action=req.gameSocket.data.bulkHandlers?.get(req.params.action);if(!action)return res.status(400).json({ok:false,error:'Действие недоступно.'});action(req.body,value=>res.json(value))});
+  app.post('/api/bulk/:action',httpSocket,(req,res,next)=>{const socket=req.gameSocket,jar=cookies(req),surface=req.headers['x-cq-surface'],identity=actor(socket),player=publishedGame.findPlayer(socket.data.playerHash);const permitted=surface==='teacher'&&validTeacherToken(jar[cookieName('teacher')])&&equal(jar[cookieName('teacher')],socket.data.teacherToken)||typeof jar[cookieName('player')]==='string'&&hashToken(jar[cookieName('player')])===socket.data.playerHash;const authorized=['teacher','creator'].includes(identity.role)||identity.role==='delegate'&&publishedGame.adminCan(player?.pid,req.params.action);if(!bulkActions.has(req.params.action)||!permitted||!authorized)return res.status(403).json({ok:false,error:'Нужна действующая административная сессия.',code:'FORBIDDEN'});if(identity.role!=='creator'&&roomFeatureDenied(req.params.action,roomFeatures()))return res.status(403).json({ok:false,error:'Функция отключена создателем.',code:'FEATURE_DISABLED'});next()},express.json({limit:'8mb',inflate:false}),(req,res)=>{const action=req.gameSocket.data.bulkHandlers?.get(req.params.action);if(!action)return res.status(400).json({ok:false,error:'Действие недоступно.'});action(req.body,value=>res.json(value))});
   app.use((error,_req,res,next)=>{if(res.headersSent)return next(error);if(error.type==='entity.too.large')return res.status(413).json({ok:false,error:'Файл или запрос слишком большой.',code:'PAYLOAD_TOO_LARGE'});if(error.type==='encoding.unsupported')return res.status(415).json({ok:false,error:'Сжатые тела запросов не поддерживаются.',code:'UNSUPPORTED_ENCODING'});if(error.type==='entity.parse.failed')return res.status(400).json({ok:false,error:'Некорректный JSON запроса.',code:'INVALID_ACTION'});console.error('HTTP запрос не выполнен:',error.name);res.status(500).json({ok:false,error:'Сервер не обработал запрос.',code:'SERVER_ERROR'})});
   app.use((_req,res)=>res.status(404).type('text').send('Страница не найдена.'));
   const online = () => new Set([...io.sockets.sockets.values()].map(s => s.data.playerHash && publishedGame.findPlayer(s.data.playerHash)?.pid).filter(Boolean));
   const chatTopology=players=>hashToken(JSON.stringify([publishedGame.state.regions.map(t=>[t.id,t.name,t.members.map(m=>[m.pid,m.name])]),[...players].sort()]));
   function sendChatScope(socket,force=false,players=online(),topology=chatTopology(players)){
+    if(roomFeatures()?.chat===false&&actor(socket).role!=='creator'){socket.data.chatRoom=null;socket.data.chatScope=null;socket.emit('chat:meta',null);return false;}
     const identity=chatIdentity(publishedGame,actor(socket)),key=JSON.stringify([identity,topology]);
     const changed=socket.data.chatScope!==key;
     if(!changed&&!force)return;
@@ -270,7 +277,7 @@ export async function createGameServer(options = {}) {
     }
     return changed;
   }
-  function stateFor(socket,players,frame){const view=publishedGame.view(actor(socket),players,frame);view.admission=admissionStatus();if(socket.data.portalCreatorId)view.viewer.canJoinFull=true;if(view.viewer.canGrantAdmin)view.sessionControl.localAccessEnabled=!!effectiveLocalCodeHash();return view}
+  function stateFor(socket,players,frame){const view=publishedGame.view(actor(socket),players,frame);view.admission=admissionStatus();if(options.roomConfiguration?.()){view.roomConfig=options.roomConfiguration();if(view.roomConfig.features.achievements===false){view.worldAchievements=[];view.achievements=[];}}if(socket.data.portalCreatorId)view.viewer.canJoinFull=true;if(view.viewer.canGrantAdmin)view.sessionControl.localAccessEnabled=!!effectiveLocalCodeHash();return view}
   const sendState = socket => {const players=online();socket.emit("state", stateFor(socket,players));sendChatScope(socket,false,players)};
   function publishChat(room,messageId){
     const players=online(),topology=chatTopology(players);
@@ -362,6 +369,7 @@ export async function createGameServer(options = {}) {
           if(!fastInput&&!chatAction)await maintainIdleSessions();
           if(options.authorizeTeacher&&socket.data.teacherToken&&!await options.authorizeTeacher(socket.request))socket.data.teacherToken=null;
           const identity = actor(socket);
+          if(identity.role!=='creator'&&roomFeatureDenied(name,roomFeatures()))throw new GameError('Эта функция отключена создателем для комнаты.','FEATURE_DISABLED');
           const actorPlayer = identity.playerHash ? game.findPlayer(identity.playerHash) : null;
           if(actorPlayer?.creatorId&&options.portalCreator&&(await options.portalCreator(socket.request))?.creatorId!==actorPlayer.creatorId)throw new GameError('Войдите Google-аккаунтом создателя.','FORBIDDEN');
           const delegatedAllowed = identity.role === 'delegate' && game.adminCan(actorPlayer?.pid, name);
@@ -606,6 +614,7 @@ export async function createGameServer(options = {}) {
     app, io, httpServer, store,
     get game() { return game; },
     platformActivityAt(){return Math.max(game.state.accessControl.activity.startedAt||0,...Object.values(game.state.accessControl.activity.players),...Object.values(game.state.accessControl.activity.teachers).map(v=>v.at),...pendingPlayerActivity.values(),...[...pendingTeacherActivity.values()].map(v=>v.at));},
+    async publishRoomConfiguration(previous={}){return enqueue(async()=>{const before=structuredClone(game.state),f=roomFeatures()||{};try{if(previous.achievements===false&&f.achievements===true)game.state.settings.perksEnabled=true;if(previous.trading===false&&f.trading===true)game.state.settings.tradeEnabled=true;if(previous.presentationEffects===false&&f.presentationEffects===true)game.state.presentationEffectsEnabled=true;enforceRoomFeatures();game.touch();await persistGame();broadcast(true);}catch(e){game=new GameLogic(before);throw e;}});},
     async platformControl(accountId,action,data={}){return enqueue(async()=>{
       if(!options.authorizePlatform||!await options.authorizePlatform(accountId))throw new GameError('Нужен доступ создателя.','FORBIDDEN');
       const methods={pause:()=>game.pauseRound(),resolve:()=>game.resolveRound(),next:()=>game.endRound(),start:()=>game.startRound(data.questionId,data.duration),resetTimer:()=>game.resetTimer(),reset:()=>game.resetGame(),points:()=>game.adjustPoints(data.teamId,data.delta),economy:()=>game.adjustEconomy(data.teamId,data.delta),rename:()=>game.renamePlayer(data.pid,data.name),move:()=>game.movePlayer(data.pid,data.teamId),kick:()=>{const team=game.state.regions.find(t=>t.members.some(m=>m.pid===data.pid)),member=team?.members.find(m=>m.pid===data.pid);if(!member)throw new GameError('Участник не найден.');if(member.creatorId)throw new GameError('Создатели не могут исключать друг друга.','PROTECTED_SESSION');return game.leaveTeam(team.id,member.pid);},question:()=>game.editQuestion(data.questionId,data.question,data.expectedVersion),clearQuestions:()=>game.clearQuestions(),mode:()=>game.setGameMode(data.mode),capacity:()=>game.setAllCapacities(data.capacity),layout:()=>{if(data.mode!==game.state.settings.mode){if(game.state.round?.resolved)game.endRound();game.setGameMode(data.mode);}game.setTeamCount(data.count);game.setAllCapacities(data.capacity);},rules:()=>{game.setAutoAdvance(data.autoAdvance,data.duration);game.setTeamRules(data.decision,data.trading);},teamCount:()=>game.setTeamCount(data.count),capital:()=>game.adjustCapital(data.pid,data.delta),admission:()=>{game.state.accessControl.admission.open=data.open===true;game.state.accessControl.admission.expiresAt=Date.now()+8*3600000;game.touch();},state:()=>{const pids=new Set((data.regions||[]).flatMap(t=>(t.members||[]).map(m=>m.pid)));if(game.state.regions.some(t=>t.members.some(m=>m.creatorId&&!pids.has(m.pid))))throw new GameError('JSON-патч не может исключать создателей.','PROTECTED_SESSION');return game.applyRawState(data);},configure:()=>{const c=data.config;if(game.state.round?.resolved)game.endRound();game.setGameMode(c.mode);game.setTeamCount(c.teamCount);game.setAllCapacities(c.capacity);game.updateBranding({title:data.name,subject:data.subject,subjects:[...new Set([...game.state.branding.subjects,data.subject])],accent:c.accent,gold:c.gold});game.setAutoAdvance(c.autoAdvance,c.duration);game.setPerksEnabled(c.perksEnabled);game.setTeamRules(c.decision,c.tradingEnabled);if(data.replaceQuestions){game.clearQuestions();game.importQuestions(data.questions);}return {configured:true};}};

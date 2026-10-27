@@ -144,7 +144,7 @@ export function setupCommunication(engine){
  });
  engine.onChange(state=>{
   const v=state?.viewer,identity=v?.role==='teacher'?'teacher':v?.player?.pid||'',nextScope=identity+':'+(v?.role||'')+':'+(v?.player?.regionId||'');
-  host.hidden=!allowed();host.classList.toggle('teacher-private',engine.mode==='teacher');credits.classList.toggle('teacher-private',engine.mode==='teacher');
+  host.hidden=!allowed()||state?.roomConfig?.features.chat===false;if(state?.roomConfig?.features.chat===false)setOpen(false);host.classList.toggle('teacher-private',engine.mode==='teacher');credits.classList.toggle('teacher-private',engine.mode==='teacher');
   if(identityKey!==identity){identityKey=identity;epoch++;requestId++;drafts.clear();pendingDraft=null;input.value='';room=null;view=null;meta=null;renderedRoom=null;renderKey='';pickerKey='';nodes.clear();list.replaceChildren();kind='global';reads.reset();if(!identity)setOpen(false)}
   if(scopeKey!==nextScope){scopeKey=nextScope;epoch++;requestId++;room=null;view=null;meta=null;renderKey='';list.replaceChildren();nodes.clear()}
   if(wasConnected&&!engine.connected){epoch++;requestId++;loading=false}

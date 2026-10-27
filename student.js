@@ -18,7 +18,7 @@ let selectedArea=null,pendingInvite='',marketKey='';
 window.addEventListener('cq:map-review-change',()=>{if(mapCollapsed){mapCollapsed=false;document.querySelector('.stage-wrap').hidden=false;$('map-visibility').textContent= uiText('Свернуть карту');$('map-visibility').setAttribute('aria-expanded','true')}if(scene){scene.setVisible(true);scene.resize()}else ensureScene()});
 window.addEventListener('cq:world-achievement',()=>{if(!engine.state?.viewer.player||document.hidden)return;window.dispatchEvent(new Event('cq:map-review-change'));if(!/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName))document.querySelector('.stage-wrap').scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})});
 async function ensureScene(){
-  if(scene||sceneLoading||sceneError||mapCollapsed)return;
+  if(engine.state?.roomConfig?.features.map===false||scene||sceneLoading||sceneError||mapCollapsed)return;
   sceneLoading=true;$('map-status').textContent= uiText('Загружаем 3D-карту…');
   try{
     const {createScene}=await import('./scene3d.js');

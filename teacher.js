@@ -20,7 +20,7 @@ function download(name,text,type){const url=URL.createObjectURL(new Blob([text],
 const alphabet=i=>String.fromCharCode(65+i);
 function html(id,value){const node=$(id);if(node.dataset.rendered!==value){node.innerHTML=value;node.dataset.rendered=value}}
 async function ensureScene(){
- if(scene||sceneLoading||sceneFailed)return;sceneLoading=true;$('map-status').textContent= uiText('Загружаем 3D-карту…');
+ if(engine.state?.roomConfig?.features.map===false||scene||sceneLoading||sceneFailed)return;sceneLoading=true;$('map-status').textContent= uiText('Загружаем 3D-карту…');
  try{const {createScene}=await import('./scene3d.js');if(engine.state?.viewer.role!=='teacher'&&!engine.state?.viewer.isCreator)return;scene=createScene($('scene-canvas'));scene.update(engine.state,$('map-team-select').value||null);$('map-status').textContent=''}
  catch{sceneFailed=true;$('map-status').textContent= uiText('3D недоступно. Управление игрой продолжает работать.')}
  finally{sceneLoading=false}
@@ -146,7 +146,7 @@ $("roster-table").addEventListener("click",e=>{
  if(b.hasAttribute("data-remove")&&confirm( uiTpl`Исключить ${t.members.find(m=>m.pid===b.dataset.remove)?.name|| uiText("участника")} из команды? Для персональной сессии будет отправлен запрос на согласие.`))act(()=>removeParticipant(id,b.dataset.remove));
  if(b.hasAttribute("data-team-remove")&&confirm( uiTpl`Удалить команду «${t.name}»? ${t.members.length} участников вернутся к регистрации, очки команды будут удалены.`))act(()=>engine.removeTeam(id), uiText("Команда удалена."));
  if(b.hasAttribute("data-team-edit"))openTeamEditor(id);
- if(b.hasAttribute("data-player-edit"))openPlayerEditor(b.dataset.playerEdit);
+ if(b.hasAttribute("data-player-edit")&&engine.state?.roomConfig?.features.playerManagement!==false)openPlayerEditor(b.dataset.playerEdit);
 });
 $("team-base").innerHTML=REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join("");
 function updateCities(selected=''){$('team-city').innerHTML= uiText('<option value="">Вся область / отдельная команда</option>')+CITIES.filter(c=>c.baseRegionId===$('team-base').value).map(c=>`<option value="${c.id}">${h(c.name)}</option>`).join('');$('team-city').value=selected}

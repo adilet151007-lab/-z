@@ -4,7 +4,7 @@ import {PlatformStore,memoryBackend} from '../platform-store.mjs';
 import {Platform} from '../platform-domain.mjs';
 import {createPortalServer} from '../portal-server.mjs';
 const ownerCode='authoring-synthetic-owner-code-at-least-32-characters';
-const draft=()=>({name:'История символов',subject:'Мәдениеттану',type:'strategy',config:{mode:'team',teamCount:2,capacity:6,duration:25,autoAdvance:true},questions:[{id:'custom_symbols_test',text:'Какое понятие описывает совместное толкование символа на нашем занятии?',options:['Культурный смысл','Масса предмета','Ускорение тела','Длина волны'],correct:0,points:25}],sources:{css:'.dock { border-radius: 20px; }',js:''}});
+const draft=()=>({name:'История символов',subject:'Мәдениеттану',type:'strategy',config:{mode:'team',teamCount:2,capacity:6,duration:25,autoAdvance:true},questions:[{id:'custom_symbols_test',text:'Какое понятие описывает совместное толкование символа на нашем занятии?',options:['Культурный смысл','Масса предмета','Ускорение тела','Длина волны'],correct:0,points:25}],features:{customCode:true},sources:{css:'.dock { border-radius: 20px; }',js:''}});
 async function fixture(t,userId='owner'){
  const store=await new PlatformStore(memoryBackend()).init(),p=new Platform(store,{ownerCode});
  for(const id of ['owner','teacher','student','other'])await p.authenticate({id:'google:'+id,name:id,email:id+'@example.test'});

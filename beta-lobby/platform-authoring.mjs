@@ -1,5 +1,6 @@
 import {createHash,randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
+import {normalizeFeatures,normalizeDesign} from '../room-layout.js';
 import {validateQuestions} from '../game-logic.js';
 
 export const managerFor=(s,id,r)=>{
@@ -30,7 +31,7 @@ export function validateTemplate(raw){
  const questions=validateQuestions(raw.questions.map(q=>({...q,id:q.id||'custom_'+randomUUID(),subject,points:q.points??25})));
  const sources={css:raw.sources?.css||'',js:raw.sources?.js||''};
  if(Object.values(sources).some(v=>typeof v!=='string'||Buffer.byteLength(v)>32768))fail('CSS и JavaScript ограничены 32 КБ каждый.');
- return {name,subject,type,config,questions,sources};
+ return {name,subject,type,config,questions,sources,features:normalizeFeatures(raw.features),design:normalizeDesign(raw.design||{accent:config.accent,gold:config.gold})};
 }
 export async function checkJavaScript(source){
  if(!source)return;
