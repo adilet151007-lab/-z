@@ -39,7 +39,7 @@ export function createPortalServer(options={}){
  const httpServer=createServer(app);
  if(runtime)httpServer.on('upgrade',(req,socket,head)=>runtime.upgrade(req,socket,head));
  return {app,httpServer,platform,runtime,
-  async listen(port=Number(process.env.PORT)||3000,host='0.0.0.0'){await new Promise((resolve,reject)=>{httpServer.once('error',reject);httpServer.listen(port,host,resolve);});return httpServer.address().port;},
+  async listen(port=Number(process.env.PORT)||3000,host='0.0.0.0'){if(platform)await platform.migrateCollections();await new Promise((resolve,reject)=>{httpServer.once('error',reject);httpServer.listen(port,host,resolve);});return httpServer.address().port;},
   async close(){closing=true;if(runtime)await runtime.close();if(options.platformStore)await options.platformStore.close();await new Promise((resolve,reject)=>httpServer.close(error=>error?reject(error):resolve()));}
  };
 }

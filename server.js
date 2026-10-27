@@ -68,6 +68,7 @@ export async function createGameServer(options = {}) {
     enforceRoomFeatures();
     game.stageRoundPublication(publishedGame.state.round?.id);
     await store.save(game.state);
+    if(options.syncCollections){const revision=game.state.revision;await options.syncCollections(game);if(game.state.revision!==revision)await store.save(game.state);}
     const activated=game.activateRoundPublication();publishedGame=game.snapshotCopy();
     if(activated)broadcast(true);
   }
@@ -315,6 +316,7 @@ export async function createGameServer(options = {}) {
     if(socket.data.portalTeacher&&auth.surface==='teacher')socket.data.teacherToken=signed({role:'teacher',epoch:game.state.accessControl.teacherEpoch||0,sessionId:randomUUID(),expires:Date.now()+86400000,passwordVersion:createHmac('sha256',secret).update(password).digest('hex')});
     socket.data.playerHash=typeof playerToken==='string'&&playerToken.length<=200?hashToken(playerToken):null;
     if(options.onPlayerJoined&&socket.data.playerHash){const p=publishedGame.findPlayer(socket.data.playerHash);if(p){await options.onPlayerJoined(socket.request,p);if(p.creatorId&&p.creatorId!==socket.data.portalCreatorId)throw new GameError('Войдите аккаунтом создателя.','FORBIDDEN');if(socket.data.portalCreatorId&&!p.creatorId)await enqueue(async()=>{if(game.state.regions.some(t=>t.members.some(m=>m.creatorId===socket.data.portalCreatorId&&m.pid!==p.pid)))throw new GameError('Сессия создателя уже занята.','PROTECTED_SESSION');const before=structuredClone(game.state);try{game.member(p.regionId,p.pid).creatorId=socket.data.portalCreatorId;game.touch();await persistGame();broadcast(true);}catch(e){game=new GameLogic(before);throw e;}});}}
+    if(options.syncCollections&&socket.data.playerHash)await enqueue(async()=>{await persistGame();broadcast(true);});
     const collectionToken=jar[cookieName('collection')];socket.data.collectionHash=typeof collectionToken==='string'&&collectionToken.length<=200?hashToken(collectionToken):null;
     const device=decodeCredential(jar[cookieName('device')],'device');socket.data.deviceHash=device&&typeof device.id==='string'?hashToken(device.id):null;
     next();
