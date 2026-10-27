@@ -27,7 +27,7 @@ function render() {
   document.documentElement.lang = language;
   document.documentElement.dataset.theme = theme;
   document.title = t('title');
-  document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#f4f3ec' : '#101a1b';
+  document.querySelector('meta[name="theme-color"]').content = theme === 'light' ? '#edf5fa' : '#0b131c';
   document.querySelectorAll('[data-i18n]').forEach(node => { node.textContent = t(node.dataset.i18n); });
   document.querySelectorAll('[data-i18n-placeholder]').forEach(node => { node.placeholder = t(node.dataset.i18nPlaceholder); });
   document.querySelectorAll('[data-i18n-aria]').forEach(node => { node.setAttribute('aria-label', t(node.dataset.i18nAria)); });
