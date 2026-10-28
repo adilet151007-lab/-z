@@ -3,7 +3,10 @@ const $=id=>document.getElementById(id);
 const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
 let overview=null,view='rooms',selected=null,room=null,busy=false,message='',issued='',roomTab='session',dirty=false;
 try{document.documentElement.dataset.theme=localStorage.getItem('cq_lobby_theme_v1')==='light'?'light':'dark';}catch{}
-async function api(path,data){const r=await fetch('/api/platform/'+path,{method:data===undefined?'GET':'POST',credentials:'same-origin',headers:data===undefined?{}:{'Content-Type':'application/json','X-CQ-Lobby':'1'},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(20000)});const d=await r.json();if(!r.ok)throw new Error(d.error||'Запрос не выполнен.');return d;}
+async function api(path,data){
+ try{const r=await fetch('/api/platform/'+path,{method:data===undefined?'GET':'POST',credentials:'same-origin',headers:data===undefined?{}:{'Content-Type':'application/json','X-CQ-Lobby':'1'},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(20000)});const d=await r.json();if(!r.ok)throw new Error(d.error||'Запрос не выполнен.');return d;}
+ catch(error){if(error.name==='TimeoutError')throw new Error('Сервер не ответил за 20 секунд. Обновите данные перед повтором: действие могло сохраниться.');throw error;}
+}
 const button=(title,fn)=>{const b=el('button',title,'button button-outline');b.type='button';b.disabled=busy;b.addEventListener('click',fn);return b;};
 function field(form,title,value='',type='text'){const l=el('label',title),i=el('input');i.type=type;i.value=value;i.required=true;i.maxLength=2000;l.append(i);form.append(l);return i;}
 function select(form,title,rows,value){const l=el('label',title),s=el('select');for(const [id,name]of rows){const o=el('option',name);o.value=id;s.append(o);}s.value=value||rows[0]?.[0]||'';l.append(s);form.append(l);return s;}
@@ -12,7 +15,22 @@ window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.return
 function markDirty(e){const designer=e.target.closest?.('.room-designer');if(designer&&designer!==e.target)return;if(e.target.closest?.('form')||designer)dirty=true;}
 $('creator-content').addEventListener('input',markDirty);
 $('creator-content').addEventListener('change',markDirty);
-async function run(fn){if(busy)return;busy=true;message='Сохраняем…';$('creator-message').textContent=message;document.querySelectorAll('.creator-page button').forEach(b=>b.disabled=true);try{await fn();await load();message='Сохранено.';busy=false;dirty=false;const y=window.scrollY,opened=[...document.querySelectorAll('.room-editor details')].map(n=>n.open);render();document.querySelectorAll('.room-editor details').forEach((n,i)=>{if(opened[i]!==undefined)n.open=opened[i];});window.scrollTo(0,y);}catch(e){message=e.message;busy=false;$('creator-message').textContent=message;document.querySelectorAll('.creator-page button').forEach(b=>b.disabled=false);}}
+async function run(fn){
+ if(busy)return;
+ const previousDisabled=new Map([...document.querySelectorAll('.creator-page button')].map(button=>[button,button.disabled]));
+ busy=true;message='Сохраняем…';$('creator-message').textContent=message;$('creator-content').setAttribute('aria-busy','true');
+ for(const button of previousDisabled.keys())button.disabled=true;
+ try{
+  await fn();await load();message='Сохранено.';busy=false;dirty=false;
+  const y=window.scrollY,opened=[...document.querySelectorAll('.room-editor details')].map(n=>n.open);
+  render();document.querySelectorAll('.room-editor details').forEach((n,i)=>{if(opened[i]!==undefined)n.open=opened[i];});window.scrollTo(0,y);
+ }catch(error){message=error.message; $('creator-message').textContent=message;}
+ finally{
+  busy=false;
+  for(const [button,disabled] of previousDisabled)if(button.isConnected)button.disabled=disabled;
+  $('creator-content').setAttribute('aria-busy','false');
+ }
+}
 async function control(action,data={}){return api('creator/rooms/'+selected+'/action',{action,data});}
 function render(){const host=$('creator-content');host.replaceChildren();$('creator-message').textContent=message;$('creator-identity').textContent=overview?overview.account.name+' · '+(overview.account.role==='owner'?'Адилет · высший доступ':'Ернур · создатель'):'';if(!overview)return;const ctx={api,run,control,overview,selected,room,issued,render,error:text=>{$('creator-message').textContent=text;},created:r=>{selected=r.room.id;issued=r.invitation.code;},setCode:code=>{issued=code;},deselect:()=>{selected=null;room=null;}};document.querySelectorAll('[data-view]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.view===view)));if(view==='templates'){builder(ctx,host);return;}if(view==='code'){sourceEditor(ctx,host);return;}
  if(view==='accounts'){const section=el('section',undefined,'platform-section');section.append(el('h2','Аккаунты и права'));section.append(button('Пригласить преподавателя',()=>run(async()=>{issued=(await api('invitations',{kind:'teacher'})).code;})));if(overview.account.role==='owner'&&!overview.accounts.some(a=>a.role==='creator'))section.append(button('Создать приглашение для Ернура',()=>run(async()=>{issued=(await api('invitations',{kind:'creator'})).code;})));if(issued){const l=el('label','Одноразовый код · действует 24 часа'),i=el('input');i.readOnly=true;i.value=issued;i.addEventListener('click',()=>i.select());l.append(i);section.append(l);}for(const a of overview.accounts){const row=el('article',undefined,'creator-account');row.append(el('strong',a.name),el('p',a.email),el('p',a.role+' · '+a.status));if(['owner','creator'].includes(a.role))row.append(el('p','Защищённый аккаунт создателя'));else{row.append(button(a.role==='teacher'?'Отозвать права преподавателя':'Выдать права преподавателя',()=>run(()=>api('accounts/role',{accountId:a.id,enabled:a.role!=='teacher'}))));row.append(button(a.status==='blocked'?'Разблокировать аккаунт':'Приостановить доступ',()=>{if(confirm('Изменить доступ аккаунта '+a.name+'?'))run(()=>api('creator/accounts/block',{accountId:a.id,blocked:a.status!=='blocked'}));}));}accountStats(ctx,row,a);section.append(row);}host.append(section);return;}
