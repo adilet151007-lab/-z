@@ -34,3 +34,12 @@ button,input{font:inherit}button,a,input{-webkit-tap-highlight-color:transparent
 .site-footer strong{letter-spacing:.06em}
 .site-footer{padding-bottom:140px}
 @media(max-width:600px){.brand strong{font-size:20px}.site-footer{padding-bottom:120px}}
+
+/* Local room QR: full white quiet zone, responsive projector and phone view. */
+.join-qr-dialog{box-sizing:border-box;width:min(650px,94vw);max-height:94dvh;overflow:auto;padding:24px;border:1px solid #008f79;border-radius:18px;background:#10232f;color:#edf8f4;text-align:center;box-shadow:0 20px 80px #0008}
+.join-qr-dialog::backdrop{background:#000b}
+.join-qr-dialog h2{margin:0 0 12px}.join-qr-dialog p{line-height:1.5}
+.join-qr-image{display:block;width:100%;max-width:512px;height:auto;margin:16px auto;background:white;image-rendering:pixelated}.join-qr-image[hidden]{display:none}
+.join-qr-link{display:block;overflow-wrap:anywhere;color:#73dfcd;font-size:13px;margin:12px 0}
+.join-qr-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}.join-qr-actions button{padding:12px 18px;border:1px solid #72c5b8;border-radius:10px;background:#19343f;color:#fff;cursor:pointer}
+@media(max-width:480px){.join-qr-dialog{padding:16px}}
