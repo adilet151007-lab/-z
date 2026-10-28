@@ -7,18 +7,20 @@
   <meta name="description" content="Выберите образовательную игру или присоединитесь к занятию по приглашению преподавателя.">
   <meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
-  <title>Мәдениеттану · Игровое лобби</title>
+  <title>ERADIS · Игровое лобби</title>
   <link rel="icon" type="image/svg+xml" href="mark.svg">
   <link rel="stylesheet" href="lobby.css">
+  <link rel="stylesheet" href="lumi.css">
+  <script type="module" src="lumi.js"></script>
   <script type="module" src="lobby.js"></script>
 </head>
 <body>
   <a class="skip-link" href="#games">Игры / Ойындар</a>
   <div class="page-shell">
     <header class="site-header">
-      <a class="brand" href="./" aria-label="Мәдениеттану">
+      <a class="brand" href="./" aria-label="ERADIS — главная / Басты бет">
         <img src="mark.svg" alt="" width="42" height="42">
-        <span><strong>Мәдениеттану<span class="brand-dot">.</span></strong><small data-i18n="platform">ИГРОВАЯ ПЛАТФОРМА</small></span>
+        <span><strong>ERADIS<span class="brand-dot">.</span></strong><small data-i18n="platform">ИГРОВАЯ ПЛАТФОРМА</small></span>
       </a>
       <nav class="header-nav" aria-label="Навигация / Навигация">
         <a href="#games" data-i18n="gamesNav">Игры</a>
@@ -39,7 +41,7 @@
       <section id="platform-section" class="platform-section" hidden aria-label="Игры и профиль"></section>
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span><span data-i18n="eyebrow">МӘДЕНИЕТТАНУ 3D / ОБЩЕЕ ЛОББИ</span><span class="beta-badge" data-i18n="beta">Бета</span></p>
+          <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span><span data-i18n="eyebrow">ERADIS / ОЙНА. ТАНЫ. ӨС.</span><span class="beta-badge" data-i18n="beta">Бета</span></p>
           <h1 id="hero-title"><span data-i18n="heroStart">Каждый ответ</span><em data-i18n="heroEnd">открывает мир.</em></h1>
           <p class="hero-intro" data-i18n="intro">Выбирайте игру, объединяйтесь в команды и превращайте знания в культурный капитал.</p>
           <a class="button button-gold browse-button" href="#games"><span data-i18n="browse">Выбрать игру</span><span aria-hidden="true">↓</span></a>
@@ -80,7 +82,7 @@
       </section>
     </main>
 
-    <footer class="site-footer"><div><span class="footer-symbol" aria-hidden="true">✳</span><strong>Мәдениеттану<span>.</span></strong><span class="footer-line" data-i18n="footerLine">Знания объединяют.</span></div><div><span data-i18n="authors">Создано Адилетом и Ернуром</span><a data-privacy href="https://culture-quest-z.onrender.com/privacy.html" data-i18n="privacy">Конфиденциальность</a></div></footer>
+    <footer class="site-footer"><div><img class="footer-symbol" src="mark.svg" alt="" width="28" height="28"><strong>ERADIS<span>.</span></strong><span class="footer-line" data-i18n="footerLine">Знания объединяют.</span></div><div><span data-i18n="authors">Создано Адилетом и Ернуром</span><a data-privacy href="https://culture-quest-z.onrender.com/privacy.html" data-i18n="privacy">Конфиденциальность</a></div></footer>
   </div>
   <dialog id="help-dialog" aria-labelledby="help-title"><div class="help-content"><span class="help-icon" aria-hidden="true">↗</span><h2 id="help-title" data-i18n="helpTitle">Как попасть в игру</h2><p data-i18n="helpText">Ссылку занятия создаёт преподаватель в пульте: «Вход и защита занятия» → «Открыть вход» → «Копировать ссылку».</p><p data-i18n="helpReturn">Если вы уже участвуете, нажмите «Открыть игру»: действующая сессия восстановится в том же браузере.</p><p data-i18n="helpAccess">Открытая ссылка ведёт на страницу участника. Регистрацию, наличие мест и доступ проверяет сервер игры.</p><button type="button" class="button button-mint" id="help-close" data-i18n="close">Понятно</button></div></dialog>
   <dialog id="account-dialog" aria-labelledby="account-title"><div class="help-content account-content"><span class="help-icon" aria-hidden="true">◈</span><h2 id="account-title">Ваш профиль</h2><p class="account-name" id="account-name"></p><p id="account-email"></p><p id="account-status" role="status" aria-live="polite"></p><a id="google-sign-in" class="button google-button" href="/auth/google" hidden>Войти через Google</a><button id="account-logout" type="button" class="button button-outline" hidden>Выйти из аккаунта</button><p id="account-note"></p><a class="account-privacy" id="account-privacy" href="lobby-privacy.html">Как используются данные аккаунта</a><button type="button" class="button button-mint" id="account-close">Закрыть</button></div></dialog>

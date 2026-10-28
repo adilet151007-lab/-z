@@ -5,7 +5,7 @@ import {GAME_ORIGIN} from './public/lobby-config.js';
 
 const publicDirectory = new URL('./public/', import.meta.url);
 await copyFile(new URL('../room-layout.js',import.meta.url),new URL('room-layout.js',publicDirectory));
-const allowed = ['index.html','mobile-preview.html','lobby-privacy.html','lobby.css','lobby.js','lobby-core.js','lobby-config.js','lobby-copy.js','lobby-account.js','lobby-platform.js','lobby-creators.js','lobby-creator-tools.js','lobby-designer.js','room-layout.js','creators.html','mark.svg','ornament.svg'];
+const allowed = ['index.html','mobile-preview.html','lobby-privacy.html','lobby.css','lumi.css','lumi.js','lobby.js','lobby-core.js','lobby-config.js','lobby-copy.js','lobby-account.js','lobby-platform.js','lobby-creators.js','lobby-creator-tools.js','lobby-designer.js','room-layout.js','creators.html','mark.svg','ornament.svg'];
 const actual = await readdir(publicDirectory);
 if (actual.length !== allowed.length || actual.some(name => !allowed.includes(name))) throw new Error('Publish directory contains unexpected files');
 for (const name of allowed.filter(name => name.endsWith('.js'))) {

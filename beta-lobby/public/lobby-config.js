@@ -4,5 +4,5 @@ export const GAME = Object.freeze({
   studentUrl: GAME_ORIGIN + '/student.html',
   teacherUrl: GAME_ORIGIN + '/teacher.html',
   privacyUrl: GAME_ORIGIN + '/privacy.html',
-  keywords: 'мәдениеттану культурология culture quest 3d команды solo жеке сайыс аймақтық одақ'
+  keywords: 'eradis эрадис мәдениеттану культурология culture quest 3d команды solo жеке сайыс аймақтық одақ'
 });

@@ -1,0 +1,17 @@
+/* Lumi stays local to the dock and below the browser's modal top layer. */
+.eradis-lumi{position:fixed;right:max(18px,env(safe-area-inset-right,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:30;width:112px;isolation:isolate;pointer-events:none}
+.eradis-lumi.lumi-editing{visibility:hidden}
+.eradis-lumi button{font:inherit;cursor:pointer;touch-action:manipulation;pointer-events:auto}
+.eradis-lumi button:focus-visible{outline:3px solid #008F79;outline-offset:4px}
+.eradis-lumi .lumi-character{display:block;width:100%;padding:0;border:0;border-radius:24px;background:transparent;line-height:0}
+.eradis-lumi .lumi-defs{position:absolute;left:0;top:0;overflow:hidden;pointer-events:none}
+.eradis-lumi .lw{width:100%!important;max-width:100%!important;pointer-events:none}
+.eradis-lumi .lw svg{display:block;width:100%;height:auto;overflow:visible}
+.eradis-lumi .eye{transform-box:fill-box;transform-origin:center}
+.eradis-lumi .mini .hl,.eradis-lumi .mini .fin,.eradis-lumi .mini .hold{display:none}
+.eradis-lumi .lumi-hide{position:absolute;top:0;right:0;width:32px;height:32px;padding:0;border:1px solid var(--line,#c4dccf);border-radius:50%;background:var(--surface,#fff);color:var(--ink,#152A3A);font-size:20px;line-height:1;box-shadow:0 3px 12px #0002}
+.eradis-lumi .lumi-restore{margin-left:auto;display:flex;align-items:center;gap:7px;min-height:44px;padding:8px 12px;border:1px solid var(--line,#c4dccf);border-radius:24px;background:var(--surface,#fff);color:var(--ink,#152A3A);font-size:12px;font-weight:700;box-shadow:0 4px 18px #0002}
+.eradis-lumi .lumi-bubble{position:absolute;right:0;bottom:100%;width:max-content;max-width:min(250px,calc(100vw - 40px));margin:0 0 6px;padding:10px 13px;border:1px solid #008F79;border-radius:15px 15px 4px 15px;background:var(--surface,#fff);color:var(--ink,#152A3A);font-size:13px;font-weight:600;line-height:1.5;box-shadow:0 6px 24px #0002;pointer-events:none}
+.eradis-lumi [hidden]{display:none!important}
+@media(max-width:600px){.eradis-lumi{width:88px;right:max(12px,env(safe-area-inset-right,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px))}.eradis-lumi .lumi-hide{top:-4px;width:28px;height:28px}}
+@media(prefers-reduced-motion:reduce){.eradis-lumi *{animation:none!important;transition:none!important}}
