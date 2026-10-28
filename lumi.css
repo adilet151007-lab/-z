@@ -1,0 +1,33 @@
+/* Lumi stays local to the dock and below the browser's modal top layer. */
+.eradis-lumi{position:fixed;right:max(18px,env(safe-area-inset-right,0px));bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:30;width:112px;isolation:isolate;pointer-events:none}
+.eradis-lumi.lumi-editing{visibility:hidden}
+.eradis-lumi button{font:inherit;cursor:pointer;touch-action:manipulation;pointer-events:auto}
+.eradis-lumi button:focus-visible{outline:3px solid #008F79;outline-offset:4px}
+.eradis-lumi .lumi-character{display:block;width:100%;padding:0;border:0;border-radius:24px;background:transparent;line-height:0}
+.eradis-lumi .lumi-defs{position:absolute;left:0;top:0;overflow:hidden;pointer-events:none}
+.eradis-lumi .lw{width:100%!important;max-width:100%!important;pointer-events:none}
+.eradis-lumi .lw svg{display:block;width:100%;height:auto;overflow:visible}
+.eradis-lumi .eye{transform-box:fill-box;transform-origin:center}
+.eradis-lumi .mini .hl,.eradis-lumi .mini .fin,.eradis-lumi .mini .hold{display:none}
+.eradis-lumi .lumi-hide{position:absolute;top:0;right:0;width:32px;height:32px;padding:0;border:1px solid var(--lumi-line);border-radius:50%;background:var(--lumi-surface);color:var(--ink,#152A3A);font-size:20px;line-height:1;box-shadow:0 3px 12px #0002}
+.eradis-lumi .lumi-restore{margin-left:auto;display:flex;align-items:center;gap:7px;min-height:44px;padding:8px 12px;border:1px solid var(--lumi-line);border-radius:24px;background:var(--lumi-surface);color:var(--ink,#152A3A);font-size:12px;font-weight:700;box-shadow:0 4px 18px #0002}
+.eradis-lumi .lumi-bubble{position:absolute;right:0;bottom:100%;width:max-content;max-width:min(250px,calc(100vw - 40px));margin:0 0 6px;padding:10px 13px;border:1px solid #008F79;border-radius:15px 15px 4px 15px;background:var(--lumi-surface);color:var(--ink,#152A3A);font-size:13px;font-weight:600;line-height:1.5;box-shadow:0 6px 24px #0002;pointer-events:none}
+.eradis-lumi [hidden]{display:none!important}
+@media(max-width:600px){.eradis-lumi{width:88px;right:max(12px,env(safe-area-inset-right,0px));bottom:calc(10px + env(safe-area-inset-bottom,0px))}.eradis-lumi .lumi-hide{top:-4px;width:28px;height:28px}}
+@media(prefers-reduced-motion:reduce){.eradis-lumi *{animation:none!important;transition:none!important}}
+
+/* The game has its own theme tokens and presentation modes. */
+.eradis-lumi{--lumi-surface:#10212d;--lumi-line:#355665}
+[data-theme="light"] .eradis-lumi{--lumi-surface:#fff;--lumi-line:#bfd3df}
+body:is(.projector-mode,.map-review-mode,.presentation-signal) .eradis-lumi{display:none}
+body:has(.project-credits:not([hidden])) .eradis-lumi{bottom:calc(190px + env(safe-area-inset-bottom,0px))}
+.eradis-login-brand{display:flex;align-items:center;justify-content:center;gap:12px;margin:2px 0 20px;color:var(--ink);font:800 26px/1.2 system-ui,sans-serif;letter-spacing:.08em}
+.eradis-login-brand img{width:50px;height:44px;object-fit:contain}
+.eradis-session-title{display:flex;flex-direction:column;gap:3px;min-width:0}
+.eradis-session-title>[data-brand-title]{font-weight:800;letter-spacing:.06em}
+.eradis-session-title small{font:500 11px/1.45 system-ui,sans-serif;color:var(--mut);letter-spacing:0}
+.reg-card>.brand-logo{align-self:center;margin:0 auto 9px}
+.reg-card>[data-brand-title]{letter-spacing:.05em}
+.eradis-lumi .lumi-hide,.eradis-lumi .lumi-restore{min-height:0}
+.eradis-lumi .lumi-character:hover,.eradis-lumi .lumi-character:active{background:transparent;border-color:transparent;box-shadow:none}
+@media(max-width:600px){.eradis-session-title small{font-size:10px}.eradis-login-brand{font-size:24px;margin-bottom:16px}}

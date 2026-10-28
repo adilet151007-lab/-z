@@ -4,9 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#07151e">
-<title>Мәдениеттану — преподаватель</title>
+<title>ERADIS — преподаватель</title>
 <script>for(const [key,attribute,values]of [['cq_ui_theme_v1','data-theme',['dark','light']],['cq_ui_language_v1','lang',['ru','kk']]])for(const name of ['localStorage','sessionStorage']){try{const value=window[name].getItem(key);if(values.includes(value)){document.documentElement.setAttribute(attribute,value);break}}catch{}}</script>
 <link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/svg+xml" href="eradis-mark.svg">
+<link rel="stylesheet" href="lumi.css">
+<script type="module" src="lumi.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -20,6 +23,7 @@
 
 <div id="teacher-login" class="reg-screen">
   <form id="teacher-login-form" class="reg-card glass">
+    <div class="eradis-login-brand" translate="no"><img src="eradis-mark.svg" alt="" width="50" height="44"><strong>ERADIS</strong></div>
     <h1>Панель преподавателя</h1>
     <p class="mut">Введите пароль управления этой игрой.</p>
     <label for="teacher-password" class="mut">Пароль преподавателя</label>
@@ -31,7 +35,7 @@
 </div>
 <div id="teacher-app" class="app" style="display:none">
   <div class="topbar">
-    <img class="brand-logo" data-brand-logo hidden alt="Логотип организации"><h1><span data-brand-subject>Мәдениеттану</span> · Преподаватель</h1>
+    <img class="brand-logo" data-brand-logo src="eradis-mark.svg" alt="ERADIS"><h1 class="eradis-session-title"><span data-brand-title>ERADIS</span><small><span data-brand-subject>Мәдениеттану</span> · Преподаватель</small></h1>
     <div class="spacer"></div>
     <span id="phase-pill" class="pill"></span>
     <span id="conn-status" class="pill"></span>

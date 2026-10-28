@@ -4,9 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#07151e">
-<title>Мәдениеттану — участник</title>
+<title>ERADIS — участник</title>
 <script>for(const [key,attribute,values]of [['cq_ui_theme_v1','data-theme',['dark','light']],['cq_ui_language_v1','lang',['ru','kk']]])for(const name of ['localStorage','sessionStorage']){try{const value=window[name].getItem(key);if(values.includes(value)){document.documentElement.setAttribute(attribute,value);break}}catch{}}</script>
 <link rel="stylesheet" href="styles.css">
+<link rel="icon" type="image/svg+xml" href="eradis-mark.svg">
+<link rel="stylesheet" href="lumi.css">
+<script type="module" src="lumi.js"></script>
 <script type="importmap">
 {
   "imports": {
@@ -20,7 +23,7 @@
 
 <div id="reg-screen" class="reg-screen">
   <div class="reg-card glass">
-    <img class="brand-logo" data-brand-logo hidden alt="Логотип организации"><span class="brand-university" data-brand-university>Учебный проект</span><h1 data-brand-title>Мәдениеттану 3D</h1><p class="mut small-note" data-brand-subject>Мәдениеттану</p>
+    <img class="brand-logo" data-brand-logo src="eradis-mark.svg" alt="ERADIS"><span class="brand-university" data-brand-university>Учебный проект</span><h1 data-brand-title>ERADIS</h1><p class="mut small-note" data-brand-subject>Мәдениеттану</p>
     <span id="registration-instruction" class="mut">Введите имя и выберите свободную область.</span>
     <label class="sr-only" for="name-input">Ваше имя</label><input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="120" autocomplete="off" enterkeyhint="go">
     <label class="privacy-consent"><input id="privacy-consent" type="checkbox"><span>Я прочитал <a href="privacy.html" target="_blank" rel="noopener">политику конфиденциальности</a> и согласен на обработку имени, ответов и сообщений для проведения занятия. Можно использовать согласованный с преподавателем псевдоним.</span></label>
@@ -33,7 +36,7 @@
 
 <div id="app" class="app" style="display:none">
   <div class="topbar">
-    <img class="brand-logo small" data-brand-logo hidden alt="Логотип организации"><h1 id="session-heading" style="font-size:20px" data-brand-subject>Мәдениеттану</h1>
+    <img class="brand-logo small" data-brand-logo src="eradis-mark.svg" alt="ERADIS"><h1 id="session-heading" class="eradis-session-title" style="font-size:20px"><span data-brand-title>ERADIS</span><small data-brand-subject>Мәдениеттану</small></h1>
     <span id="my-region-tag" class="region-tag"></span>
     <div class="spacer"></div>
     <span id="conn-status" class="pill"></span>

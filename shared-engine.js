@@ -23,10 +23,11 @@ export function setupAdmissionControls(engine,host){
 
 export function setupBranding(engine){
   let key='';engine.onChange(state=>{const b=state?.branding;if(!b)return;const next=JSON.stringify(b);if(key===next)return;key=next;
+    const title=!b.title||b.title==='Мәдениеттану 3D'?'ERADIS':b.title;
     document.documentElement.style.setProperty('--brand-accent',b.accent);document.documentElement.style.setProperty('--brand-gold',b.gold);
-    document.querySelectorAll('[data-brand-title]').forEach(node=>node.textContent=b.title);document.querySelectorAll('[data-brand-university]').forEach(node=>node.textContent=b.university==='Учебный проект'?uiText(b.university):b.university);document.querySelectorAll('[data-brand-subject]').forEach(node=>node.textContent=b.subject);
-    document.querySelectorAll('[data-brand-logo]').forEach(node=>{node.hidden=!b.logoUrl;if(b.logoUrl&&node.getAttribute('src')!==b.logoUrl)node.src=b.logoUrl});
-    document.title=b.subject+' · '+(b.university==='Учебный проект'?uiText(b.university):b.university);
+    document.querySelectorAll('[data-brand-title]').forEach(node=>node.textContent=title);document.querySelectorAll('[data-brand-university]').forEach(node=>node.textContent=b.university==='Учебный проект'?uiText(b.university):b.university);document.querySelectorAll('[data-brand-subject]').forEach(node=>node.textContent=b.subject);
+    document.querySelectorAll('[data-brand-logo]').forEach(node=>{node.hidden=false;const src=b.logoUrl||new URL('./eradis-mark.svg',import.meta.url).href;if(node.getAttribute('src')!==src)node.src=src;node.alt=b.logoUrl?uiText('Логотип организации'):'ERADIS'});
+    document.title=title+' · '+b.subject+' · '+(b.university==='Учебный проект'?uiText(b.university):b.university);
   });
 }
 const getToken = key => { for (const storage of ['localStorage','sessionStorage']) try { const value=globalThis[storage].getItem(key);if(value)return value; } catch {} };
