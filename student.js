@@ -54,20 +54,23 @@ function renderRegistration(state) {
   $('join-session').hidden=!solo&&!invite&&!(mobileStudent.matches&&selectedTeamId);$('join-session').textContent=invite? uiText('Продолжить вход по приглашению'): uiText('Присоединиться');$('join-session').disabled=!engine.connected||joining;$('region-grid').hidden=solo||invite;$('area-back').hidden=solo||invite||!selectedArea;
   const selected=state.regions.find(t=>t.id===selectedTeamId);$('registration-selection').hidden=!selected||solo;$('registration-selection').textContent=selected?uiTpl`Выбрана команда: ${selected.name}`:'';
   $('registration-instruction').textContent=state.admission?.required&&!state.admission.open?uiText('Регистрация закрыта. Обратитесь к преподавателю.'):solo? uiText('Жеке сайыс · введите имя и присоединитесь.'):selectedArea? uiText('Выберите команду области или её города.'): uiText('Шаг 1 · выберите область. Города находятся внутри неё.');
-  if(solo){$('team-search').hidden=true;$('registration-capacity').textContent= uiTpl`${state.regions.reduce((n,t)=>n+(t.occupied??t.members.length),0)} участников · личный рейтинг`;$('join-session').disabled=!engine.connected||joining;return}
+  if(solo){$('team-search').hidden=true;$('registration-clear-search').hidden=true;$('registration-empty').hidden=true;$('registration-capacity').textContent= uiTpl`${state.regions.reduce((n,t)=>n+(t.occupied??t.members.length),0)} участников · личный рейтинг`;$('join-session').disabled=!engine.connected||joining;return}
   $("team-search").hidden = invite||state.regions.length <= 8;
   const query = $("team-search").hidden ? "" : $("team-search").value.trim().toLocaleLowerCase();
   $("registration-capacity").textContent =  uiTpl`${state.regions.length} команд · ${state.regions.reduce((sum,t)=>sum+(t.occupied??t.members.length),0)} / ${totalCapacity(state.regions)} участников`;
   const matches=t=>!query||`${t.name} ${REGIONS.find(r=>r.id===metadataFor(t).baseRegionId).name}`.toLocaleLowerCase().includes(query);
+  const found=state.regions.some(t=>(!selectedArea||metadataFor(t).baseRegionId===selectedArea)&&matches(t));
+  $('registration-clear-search').hidden=solo||invite||!query;$('registration-empty').hidden=solo||invite||found;$('registration-empty').textContent=uiText(query?'По запросу ничего не найдено. Очистите поиск.':'В этой области нет команд. Вернитесь ко всем областям.');$('region-grid').hidden=solo||invite||!found;
   if(!selectedArea){$('region-grid').innerHTML=REGIONS.flatMap(base=>{const teams=state.regions.filter(t=>metadataFor(t).baseRegionId===base.id);if(!teams.length||!teams.some(matches))return [];const occupied=teams.reduce((n,t)=>n+(t.occupied??t.members.length),0),capacity=totalCapacity(teams);return [ uiTpl`<button class="region-card" data-area="${base.id}" ${!engine.connected||joining?'disabled':''} style="border-color:${base.color}66"><span class="rname" style="color:${base.color}">${h(base.name)}</span><span class="seats">${occupied} / ${capacity} мест</span><span class="members">${teams.length} команд · ${teams.filter(t=>t.cityId).length} городов</span><span class="region-open">Выбрать →</span></button>`]}).join('')|| uiText('<p class="mut">Области не найдены</p>');return}
   const teams=state.regions.filter(t=>metadataFor(t).baseRegionId===selectedArea&&matches(t));
   $("region-grid").innerHTML = teams.map(region => {
     const meta = metadataFor(region), capacity = capacityFor(region),count=region.occupied??region.members.length, full = count>=capacity;
     return `<button class="region-card ${selectedTeamId===meta.id?'selected':''}" aria-pressed="${selectedTeamId===meta.id}" data-region="${meta.id}" ${full&&!tokenCandidate||!engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${h(meta.name)}</span><span class="seats">${count}/${capacity} ${full ?  uiText("— команда заполнена") :  uiText("— свободно")}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") ||  uiText("Пока никого")}</span></button>`;
-  }).join("") ||  uiText('<p class="mut">Команды не найдены</p>');
+  }).join("");
 }
-$("team-search").addEventListener("input",()=>{if(engine.state)renderRegistration(engine.state)});
-$('area-back').addEventListener('click',()=>{selectedArea=null;selectedTeamId=null;renderRegistration(engine.state)});
+$("team-search").addEventListener("input",()=>{selectedArea=null;selectedTeamId=null;if(engine.state)renderRegistration(engine.state)});
+$('registration-clear-search').addEventListener('click',()=>{$('team-search').value='';selectedTeamId=null;renderRegistration(engine.state);});
+$('area-back').addEventListener('click',()=>{selectedArea=null;selectedTeamId=null;$('team-search').value='';renderRegistration(engine.state)});
 function openAccessDetails(regionId){pendingInvite=$('name-input').value.trim().split(/\s/,1)[0];$('access-name').value=$('name-input').value.trim().slice(pendingInvite.length).trim();$('access-team').innerHTML=engine.state.regions.map(t=>`<option value="${t.id}" ${(t.occupied??t.members.length)>=capacityFor(t)?'disabled':''}>${h(metadataFor(t).name)} · ${t.occupied??t.members.length}/${capacityFor(t)}</option>`).join('');if(regionId)$('access-team').value=regionId;const solo=engine.state.settings.mode==='solo';$('access-team').disabled=solo;$('access-team').required=!solo;$('access-error').textContent='';$('access-details').showModal();$('access-name').focus()}
 $('access-cancel').addEventListener('click',()=>{$('access-details').close();pendingInvite='';selectedTeamId=null;selectedArea=null;window.scrollTo(0,0)});
 $('access-details-form').addEventListener('submit',async e=>{e.preventDefault();$('name-input').value=pendingInvite+' '+$('access-name').value.trim();await join($('access-team').value,true)});
@@ -85,7 +88,7 @@ $('name-input').addEventListener('keydown',e=>{if(e.key==='Enter'&&engine.state?
 $('name-input').addEventListener('input',()=>{if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state)});
 $('join-session').addEventListener('click',()=>join(engine.state?.settings.mode==='solo'?null:selectedTeamId));
 $("region-grid").addEventListener("click", event => {
-  const area=event.target.closest('[data-area]');if(area&&!joining&&engine.connected){selectedArea=area.dataset.area;selectedTeamId=null;renderRegistration(engine.state);return}
+  const area=event.target.closest('[data-area]');if(area&&!joining&&engine.connected){selectedArea=area.dataset.area;selectedTeamId=null;$('team-search').value='';renderRegistration(engine.state);return}
   const card = event.target.closest("[data-region]");
   if (!card || joining || !engine.connected) return;
   if(mobileStudent.matches){selectedTeamId=card.dataset.region;renderRegistration(engine.state);$('join-session').scrollIntoView({block:'nearest',behavior:'auto'});return;}

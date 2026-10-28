@@ -540,3 +540,7 @@ body.telemetry-open,body.presentation-signal{overflow:hidden}
 @media(max-width:420px){.student-page #region-grid{grid-template-columns:minmax(0,1fr)}}
 
 .student-registering #cq-project-credits{display:none!important}
+
+.student-page #region-grid[hidden],.student-page #registration-empty[hidden],.student-page #registration-clear-search[hidden]{display:none!important}
+.student-page #registration-empty{padding:14px;border:1px solid var(--panel-brd);border-radius:10px;line-height:1.6;margin:12px 0;color:var(--ink)}
+.student-page #registration-clear-search{min-height:44px;margin-top:8px}
