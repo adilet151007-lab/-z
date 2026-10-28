@@ -14,7 +14,10 @@ setupAchievements(engine);
 const $ = id => document.getElementById(id);
 let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null, sceneLoading=false, mapCollapsed=false, teamKey='', questionKey='', registrationKey='';
 let sceneError = "";
-let selectedArea=null,pendingInvite='',marketKey='';
+const mobileStudent=window.matchMedia('(max-width: 700px), (pointer: coarse) and (max-width: 1000px)');
+let selectedArea=null,selectedTeamId=null,pendingInvite='',marketKey='';
+mapCollapsed=mobileStudent.matches;document.querySelector('.stage-wrap').hidden=mapCollapsed;$('map-visibility').textContent=uiText(mapCollapsed?'Показать карту':'Свернуть карту');$('map-visibility').setAttribute('aria-expanded',String(!mapCollapsed));
+mobileStudent.addEventListener('change',()=>{registrationKey='';if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state);});
 window.addEventListener('cq:map-review-change',()=>{if(mapCollapsed){mapCollapsed=false;document.querySelector('.stage-wrap').hidden=false;$('map-visibility').textContent= uiText('Свернуть карту');$('map-visibility').setAttribute('aria-expanded','true')}if(scene){scene.setVisible(true);scene.resize()}else ensureScene()});
 window.addEventListener('cq:world-achievement',()=>{if(!engine.state?.viewer.player||document.hidden)return;window.dispatchEvent(new Event('cq:map-review-change'));if(!/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName))document.querySelector('.stage-wrap').scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})});
 async function ensureScene(){
@@ -42,66 +45,77 @@ async function act(fn) {
   finally { actionPending = false; if (engine.state?.viewer.player) renderQuestion(engine.state); }
 }
 function renderRegistration(state) {
+  if(selectedTeamId&&!state.regions.some(t=>t.id===selectedTeamId))selectedTeamId=null;
   if(selectedArea&&!state.regions.some(t=>metadataFor(t).baseRegionId===selectedArea))selectedArea=null;
-  const key=JSON.stringify([state.settings.mode,state.regions,state.admission,engine.connected,joining,selectedArea,$('name-input').value,$('team-search').value]);
+  const key=JSON.stringify([state.settings.mode,state.regions,state.admission,engine.connected,joining,selectedArea,selectedTeamId,mobileStudent.matches,$('name-input').value,$('team-search').value]);
   if(key===registrationKey)return;registrationKey=key;
   const solo=state.settings.mode==='solo';
   const code=$('name-input').value.trim().split(/\s/,1)[0],tokenCandidate=code.length===26||code.startsWith('CQO-'),invite=/^(CQI|CQL)-/.test(code);
-  $('join-session').hidden=!solo&&!invite;$('join-session').textContent=invite? uiText('Продолжить вход по приглашению'): uiText('Присоединиться');$('join-session').disabled=!engine.connected||joining;$('region-grid').hidden=solo;$('area-back').hidden=solo||!selectedArea;
+  $('join-session').hidden=!solo&&!invite&&!(mobileStudent.matches&&selectedTeamId);$('join-session').textContent=invite? uiText('Продолжить вход по приглашению'): uiText('Присоединиться');$('join-session').disabled=!engine.connected||joining;$('region-grid').hidden=solo||invite;$('area-back').hidden=solo||invite||!selectedArea;
+  const selected=state.regions.find(t=>t.id===selectedTeamId);$('registration-selection').hidden=!selected||solo;$('registration-selection').textContent=selected?uiTpl`Выбрана команда: ${selected.name}`:'';
   $('registration-instruction').textContent=state.admission?.required&&!state.admission.open?uiText('Регистрация закрыта. Обратитесь к преподавателю.'):solo? uiText('Жеке сайыс · введите имя и присоединитесь.'):selectedArea? uiText('Выберите команду области или её города.'): uiText('Шаг 1 · выберите область. Города находятся внутри неё.');
-  if(solo){$('team-search').hidden=true;$('registration-capacity').textContent= uiTpl`${state.regions.reduce((n,t)=>n+(t.occupied??t.members.length),0)} участников · личный рейтинг`;$('join-session').disabled=!engine.connected||joining;return}
-  $("team-search").hidden = state.regions.length <= 8;
+  if(solo){$('team-search').hidden=true;$('registration-clear-search').hidden=true;$('registration-empty').hidden=true;$('registration-capacity').textContent= uiTpl`${state.regions.reduce((n,t)=>n+(t.occupied??t.members.length),0)} участников · личный рейтинг`;$('join-session').disabled=!engine.connected||joining;return}
+  $("team-search").hidden = invite||state.regions.length <= 8;
   const query = $("team-search").hidden ? "" : $("team-search").value.trim().toLocaleLowerCase();
   $("registration-capacity").textContent =  uiTpl`${state.regions.length} команд · ${state.regions.reduce((sum,t)=>sum+(t.occupied??t.members.length),0)} / ${totalCapacity(state.regions)} участников`;
   const matches=t=>!query||`${t.name} ${REGIONS.find(r=>r.id===metadataFor(t).baseRegionId).name}`.toLocaleLowerCase().includes(query);
+  const found=state.regions.some(t=>(!selectedArea||metadataFor(t).baseRegionId===selectedArea)&&matches(t));
+  $('registration-clear-search').hidden=solo||invite||!query;$('registration-empty').hidden=solo||invite||found;$('registration-empty').textContent=uiText(query?'По запросу ничего не найдено. Очистите поиск.':'В этой области нет команд. Вернитесь ко всем областям.');$('region-grid').hidden=solo||invite||!found;
   if(!selectedArea){$('region-grid').innerHTML=REGIONS.flatMap(base=>{const teams=state.regions.filter(t=>metadataFor(t).baseRegionId===base.id);if(!teams.length||!teams.some(matches))return [];const occupied=teams.reduce((n,t)=>n+(t.occupied??t.members.length),0),capacity=totalCapacity(teams);return [ uiTpl`<button class="region-card" data-area="${base.id}" ${!engine.connected||joining?'disabled':''} style="border-color:${base.color}66"><span class="rname" style="color:${base.color}">${h(base.name)}</span><span class="seats">${occupied} / ${capacity} мест</span><span class="members">${teams.length} команд · ${teams.filter(t=>t.cityId).length} городов</span><span class="region-open">Выбрать →</span></button>`]}).join('')|| uiText('<p class="mut">Области не найдены</p>');return}
   const teams=state.regions.filter(t=>metadataFor(t).baseRegionId===selectedArea&&matches(t));
   $("region-grid").innerHTML = teams.map(region => {
     const meta = metadataFor(region), capacity = capacityFor(region),count=region.occupied??region.members.length, full = count>=capacity;
-    return `<button class="region-card" data-region="${meta.id}" ${full&&!tokenCandidate||!engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${h(meta.name)}</span><span class="seats">${count}/${capacity} ${full ?  uiText("— команда заполнена") :  uiText("— свободно")}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") ||  uiText("Пока никого")}</span></button>`;
-  }).join("") ||  uiText('<p class="mut">Команды не найдены</p>');
+    return `<button class="region-card ${selectedTeamId===meta.id?'selected':''}" aria-pressed="${selectedTeamId===meta.id}" data-region="${meta.id}" ${full&&!tokenCandidate||!engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${h(meta.name)}</span><span class="seats">${count}/${capacity} ${full ?  uiText("— команда заполнена") :  uiText("— свободно")}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") ||  uiText("Пока никого")}</span></button>`;
+  }).join("");
 }
-$("team-search").addEventListener("input",()=>{if(engine.state)renderRegistration(engine.state)});
-$('area-back').addEventListener('click',()=>{selectedArea=null;renderRegistration(engine.state)});
+$("team-search").addEventListener("input",()=>{selectedArea=null;selectedTeamId=null;if(engine.state)renderRegistration(engine.state)});
+$('registration-clear-search').addEventListener('click',()=>{$('team-search').value='';selectedTeamId=null;renderRegistration(engine.state);});
+$('area-back').addEventListener('click',()=>{selectedArea=null;selectedTeamId=null;$('team-search').value='';renderRegistration(engine.state)});
 function openAccessDetails(regionId){pendingInvite=$('name-input').value.trim().split(/\s/,1)[0];$('access-name').value=$('name-input').value.trim().slice(pendingInvite.length).trim();$('access-team').innerHTML=engine.state.regions.map(t=>`<option value="${t.id}" ${(t.occupied??t.members.length)>=capacityFor(t)?'disabled':''}>${h(metadataFor(t).name)} · ${t.occupied??t.members.length}/${capacityFor(t)}</option>`).join('');if(regionId)$('access-team').value=regionId;const solo=engine.state.settings.mode==='solo';$('access-team').disabled=solo;$('access-team').required=!solo;$('access-error').textContent='';$('access-details').showModal();$('access-name').focus()}
-$('access-cancel').addEventListener('click',()=>{$('access-details').close();pendingInvite=''});
+$('access-cancel').addEventListener('click',()=>{$('access-details').close();pendingInvite='';selectedTeamId=null;selectedArea=null;window.scrollTo(0,0)});
 $('access-details-form').addEventListener('submit',async e=>{e.preventDefault();$('name-input').value=pendingInvite+' '+$('access-name').value.trim();await join($('access-team').value,true)});
 async function join(regionId,detailsConfirmed=false) {
   if(joining||!engine.connected)return;
+  if(!$('name-input').value.trim()){$('reg-error').textContent=uiText('Введите ваше имя.');$('name-input').focus();return;}
   if(!$('privacy-consent').checked){$('reg-error').textContent= uiText('Подтвердите согласие на обработку данных перед входом.');$('privacy-consent').focus();return;}
   const value=$('name-input').value.trim(),code=value.split(/\s/,1)[0];if(/^(CQI|CQL)-/.test(code)&&!detailsConfirmed&&(!value.slice(code.length).trim()||engine.state.settings.mode!=='solo'&&!regionId)){openAccessDetails(regionId);return}
   joining=true;$("reg-error").textContent= uiText("Подключение…");renderRegistration(engine.state);
-  try{await engine.joinTeam(regionId,$("name-input").value.trim(),true);$("name-input").value="";$("reg-error").textContent="";$('access-details').close();pendingInvite=''}
+  try{await engine.joinTeam(regionId,$("name-input").value.trim(),true);$("name-input").value="";$("reg-error").textContent="";$('access-details').close();pendingInvite='';selectedTeamId=null;selectedArea=null;window.scrollTo(0,0)}
   catch(error){$("reg-error").textContent=error.message;if($('access-details').open)$('access-error').textContent=error.message}
   finally{joining=false;if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state)}
 }
 $('name-input').addEventListener('keydown',e=>{if(e.key==='Enter'&&engine.state?.settings.mode==='solo'){e.preventDefault();join(null)}});
 $('name-input').addEventListener('input',()=>{if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state)});
-$('join-session').addEventListener('click',()=>join(null));
+$('join-session').addEventListener('click',()=>join(engine.state?.settings.mode==='solo'?null:selectedTeamId));
 $("region-grid").addEventListener("click", event => {
-  const area=event.target.closest('[data-area]');if(area&&!joining&&engine.connected){selectedArea=area.dataset.area;renderRegistration(engine.state);return}
+  const area=event.target.closest('[data-area]');if(area&&!joining&&engine.connected){selectedArea=area.dataset.area;selectedTeamId=null;$('team-search').value='';renderRegistration(engine.state);return}
   const card = event.target.closest("[data-region]");
   if (!card || joining || !engine.connected) return;
+  if(mobileStudent.matches){selectedTeamId=card.dataset.region;renderRegistration(engine.state);$('join-session').scrollIntoView({block:'nearest',behavior:'auto'});return;}
   join(card.dataset.region);
 });
 $("leave-btn").addEventListener("click", () => {
   if (confirm( uiText("Выйти из команды и освободить своё место?"))) act(() => engine.leaveTeam());
 });
 
+function developmentPanel(region){
+ const development=developmentFor(region.developmentPoints??region.points);
+ return uiTpl`<section class="development ${development.complete ? 'complete' : ''}" aria-label="Развитие региона"><div class="development-heading"><span>${development.complete ? '✦' : '⌂'} ${uiText(development.name)}</span><span>${Math.round(development.progress * 100)}%</span></div><div class="development-track" role="progressbar" aria-valuenow="${development.resource}" aria-valuemin="0" aria-valuemax="${development.goal}" aria-label="Строительство города"><i style="width:${development.progress * 100}%"></i>${DEVELOPMENT_STAGES.slice(1).filter(step=>step.at<=development.goal).map(step => `<span class="milestone ${development.resource >= step.at ? 'reached' : ''}" style="left:${step.at / development.goal * 100}%" title="${uiText(step.name)}: ${step.at}"></span>`).join('')}</div><p class="development-note">${uiTpl`Развитие территории: ${development.resource} / ${development.goal}. `}${uiText('Сохраняется между занятиями в этой комнате. Выше 1000 прогресс растёт только с активным ∞.')}${development.next?uiTpl` Далее: ${uiText(development.next.name)} · ${development.next.at}.`:uiText(' Орбитальная станция построена.')}</p></section>`;
+}
 function renderTeam(state) {
   const player = state.viewer.player;
   const region = state.regions.find(r => r.id === player.regionId);if(!region)return;
   const key=JSON.stringify([state.settings.mode,player,region,state.teamLeaderboard,state.leaderboard]);if(teamKey===key)return;teamKey=key;
   const meta = metadataFor(region);
-  const crisis = region.economy < CRISIS_THRESHOLD, development = developmentFor(region.points), teamRank = (state.teamLeaderboard||[]).find(t=>t.teamId===region.id)?.rank||0, topTeams = (state.teamLeaderboard||[]).filter(t=>t.rank).slice(0,5);
+  const crisis = region.economy < CRISIS_THRESHOLD, development = developmentFor(region.developmentPoints??region.points), teamRank = (state.teamLeaderboard||[]).find(t=>t.teamId===region.id)?.rank||0, topTeams = (state.teamLeaderboard||[]).filter(t=>t.rank).slice(0,5);
   $("my-name").textContent = player.name;
   if(state.settings.mode==='solo'){
     const rank=player.rank??state.leaderboard.findIndex(m=>m.pid===player.pid)+1,me=state.leaderboard.find(m=>m.pid===player.pid),total=player.rankingTotal??state.leaderboard.length;
-    $('my-region-tag').textContent= uiText('Жеке сайыс');$('team-panel').innerHTML= uiTpl`<h2>${h(player.name)}</h2><div class="stat-row"><div class="stat"><span>Культурный капитал</span><b class="gold">${me?.capital||0}<small> / ${player.scoreLimit===null?'∞':RESOURCE_CAP}</small></b></div><div class="stat"><span>Серия / множитель</span><b class="cyan">${me?.streak||0} · ×${me?.multiplier||1}</b></div></div><p class="small-note">Место: ${rank} из ${total}. Ошибки обнуляют серию и не влияют на экономику.</p><ol class="solo-mini">${state.leaderboard.slice(0,5).map(m=>`<li>${h(m.name)} <b>${m.capital}</b></li>`).join('')}</ol>`;return;
+    $('my-region-tag').textContent= uiText('Жеке сайыс');$('team-panel').innerHTML= uiTpl`<h2>${h(player.name)}</h2><div class="stat-row"><div class="stat"><span>Культурный капитал</span><b class="gold">${me?.capital||0}<small> / ${player.scoreLimit===null?'∞':RESOURCE_CAP}</small></b></div><div class="stat"><span>Серия / множитель</span><b class="cyan">${me?.streak||0} · ×${me?.multiplier||1}</b></div></div><p class="small-note">Место: ${rank} из ${total}. Ошибки обнуляют серию и не влияют на экономику.</p><ol class="solo-mini">${state.leaderboard.slice(0,5).map(m=>`<li>${h(m.name)} <b>${m.capital}</b></li>`).join('')}</ol>${developmentPanel(region)}`;return;
   }
   $("my-region-tag").textContent = meta.name;
   $("my-region-tag").style.color = meta.color;
-  $("team-panel").innerHTML =  uiTpl`<h2 style="color:${meta.color}">${h(meta.name)}</h2><div class="stat-row"><div class="stat"><span class="mut">Культурный ресурс</span><b class="gold">${region.points}<small> / ${region.scoreLimit===null?'∞':RESOURCE_CAP}</small></b></div><div class="stat"><span class="mut">Экономика</span><b class="${crisis ? "red" : "cyan"}">${region.economy}%</b></div></div><div class="bar"><i style="width:${region.economy}%;background:var(--${crisis ? "red" : "cyan"})"></i></div><p class="small-note">Рейтинг команды: <b class="gold">${teamRank>0? uiTpl`№${teamRank} из ${state.teamLeaderboard.length}`:'—'}</b> · ${region.points+region.economy*5} очков рейтинга</p>${region.economy<100? uiTpl`<p class="recovery-note">Каждый верный ответ восстанавливает до 25 процентных пунктов экономики. При достижении 100% ресурсы начнут начисляться со следующего верного ответа.</p>`:""}<section class="development ${development.complete ? 'complete' : ''}" aria-label="Развитие региона"><div class="development-heading"><span>${development.complete ? '✦' : '⌂'} ${uiText(development.name)}</span><span>${Math.round(development.progress * 100)}%</span></div><div class="development-track" role="progressbar" aria-valuenow="${Math.min(region.points,RESOURCE_CAP)}" aria-valuemin="0" aria-valuemax="${RESOURCE_CAP}" aria-label="Строительство города"><i style="width:${development.progress * 100}%"></i>${DEVELOPMENT_STAGES.slice(1).map(step => `<span class="milestone ${region.points >= step.at ? 'reached' : ''}" style="left:${step.at / RESOURCE_CAP * 100}%" title="${uiText(step.name)}: ${step.at}"></span>`).join('')}</div><p class="development-note">${development.complete ? (region.scoreLimit===null? uiText('Город построен. Перчатка активна — ресурс продолжает расти.'): uiText('Город построен. Предел ресурса — 1000. Вы можете продолжать отвечать вместе с группой.')) :  uiTpl`${uiText(development.description)}. Далее: ${uiText(development.next.name)} · ${development.next.at} ресурсов.`}</p></section><h3 style="margin-top:16px">Рейтинг областей</h3><ol class="solo-mini">${topTeams.map(t=>`<li>${h(t.name)} <b>${t.rating}</b></li>`).join('')|| uiText('<li class="mut">Команды ещё не присоединились.</li>')}</ol><h3 style="margin-top:16px">Команда (${region.members.length}/${capacityFor(region)})</h3><ul class="team-roster">${region.members.map(m => `<li><span class="presence ${m.online ? "online" : ""}"></span>${h(m.name)}${m.pid === player.pid ?  uiText(' <span class="mut">(вы)</span>') : ""}${!m.online ?  uiText(' <span class="mut">· вне сети</span>') : ""}</li>`).join("")}</ul>`;
+  $("team-panel").innerHTML =  uiTpl`<h2 style="color:${meta.color}">${h(meta.name)}</h2><div class="stat-row"><div class="stat"><span class="mut">Культурный ресурс</span><b class="gold">${region.points}<small> / ${region.scoreLimit===null?'∞':RESOURCE_CAP}</small></b></div><div class="stat"><span class="mut">Экономика</span><b class="${crisis ? "red" : "cyan"}">${region.economy}%</b></div></div><div class="bar"><i style="width:${region.economy}%;background:var(--${crisis ? "red" : "cyan"})"></i></div><p class="small-note">Рейтинг команды: <b class="gold">${teamRank>0? uiTpl`№${teamRank} из ${state.teamLeaderboard.length}`:'—'}</b> · ${region.points+region.economy*5} очков рейтинга</p>${region.economy<100? uiTpl`<p class="recovery-note">Каждый верный ответ восстанавливает до 25 процентных пунктов экономики. При достижении 100% ресурсы начнут начисляться со следующего верного ответа.</p>`:""}${developmentPanel(region)}<h3 style="margin-top:16px">Рейтинг областей</h3><ol class="solo-mini">${topTeams.map(t=>`<li>${h(t.name)} <b>${t.rating}</b></li>`).join('')|| uiText('<li class="mut">Команды ещё не присоединились.</li>')}</ol><h3 style="margin-top:16px">Команда (${region.members.length}/${capacityFor(region)})</h3><ul class="team-roster">${region.members.map(m => `<li><span class="presence ${m.online ? "online" : ""}"></span>${h(m.name)}${m.pid === player.pid ?  uiText(' <span class="mut">(вы)</span>') : ""}${!m.online ?  uiText(' <span class="mut">· вне сети</span>') : ""}</li>`).join("")}</ul>`;
 }
 
 function renderQuestion(state) {
@@ -172,6 +186,7 @@ engine.onChange(state => {
   $("leave-btn").disabled = !engine.connected;
   if (!state) return;
   const player = state.viewer.player;
+  document.body.classList.toggle('student-registering',!player);
   $("reg-screen").style.display = player ? "none" : "flex";
   $("app").style.display = player ? "flex" : "none";
   if (!player) { if(engine.sessionNotice)$('reg-error').textContent=engine.sessionNotice;renderRegistration(state); previousRound = null;teamKey='';questionKey='';scene?.setVisible(false);return; }

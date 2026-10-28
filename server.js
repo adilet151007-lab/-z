@@ -1,3 +1,4 @@
+import {issueQrTicket,validQrTicket} from './qr-admission.js';
 import "dotenv/config";
 import express from "express";
 import { ANIMATION_MODULES } from './achievement-animations.js';
@@ -103,8 +104,15 @@ export async function createGameServer(options = {}) {
   app.get('/api/public-settings',(_req,res)=>res.json({branding:publishedGame.publicBranding(),privacyVersion:PRIVACY_VERSION,consentRequired:requireConsent}));
   app.get('/api/logo', (req,res)=>{const logo=publishedGame.state.branding.logo;if(!logo||req.query.v!==hashToken(logo).slice(0,16))return res.sendStatus(404);const [header,data]=logo.split(',');res.setHeader('Cache-Control','public, max-age=86400, immutable');res.type(header.slice(5,header.indexOf(';'))).send(Buffer.from(data,'base64'))});
   app.get('/license-texts/:name', (req,res)=>{const licenses={three:'three/LICENSE','socket.io':'socket.io/LICENSE',express:'express/LICENSE',pg:'pg/LICENSE',dotenv:'dotenv/LICENSE',mammoth:'mammoth/LICENSE','pdfjs-dist':'pdfjs-dist/LICENSE'};const file=licenses[req.params.name];if(!file)return res.sendStatus(404);res.type('text/plain').sendFile(path.join(directory,'node_modules',file))});
+  app.get('/student.html',(req,res,next)=>{
+    if(!Object.hasOwn(req.query,'qr'))return next();
+    const entry=publishedGame.state.accessControl.admission;
+    if(!validQrTicket(req.query.qr,secret,options.resourcePrefix||'',entry.epoch,securityNow()))return res.status(410).type('text').send('QR-код устарел. Отсканируйте текущий код на экране преподавателя.');
+    if(requireAdmission&&(!entry.open||entry.expiresAt<=Date.now()))return res.status(403).type('text').send('Вход закрыт преподавателем.');
+    return res.redirect(303,(options.resourcePrefix||'')+'/student.html');
+  });
   const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
-  allowed.add('/ui-preferences.js');allowed.add('/ui-kz.js');
+  allowed.add('/territory-models.js');allowed.add('/join-qr.js');allowed.add('/qr-generator.js');allowed.add('/ui-preferences.js');allowed.add('/ui-kz.js');
   for(const file of ['/eradis-mark.svg','/lumi.css','/lumi.js'])allowed.add(file);
   for(const file of ['./award-2d.js','./achievement-player.js','./achievement-animations.js',...Object.values(ANIMATION_MODULES)])if(/^\.\/[a-z0-9-]+\.js$/.test(file))allowed.add(file.slice(1));
   app.use(async(req,res,next)=>{if(!allowed.has(req.path))return next();const file=path.join(directory,req.path.slice(1));if(req.path.endsWith('.html')){if(req.path==='/student.html'&&!decodeCredential(cookies(req)[cookieName('device')],'device'))cookie(res,'device',signed({role:'device',id:randomUUID(),expires:Date.now()+PROFILE_RETENTION_MS}),PROFILE_RETENTION_MS);return res.type('html').send((await readFile(file,'utf8')).replace(/<script(?=[\s>])/g,`<script nonce="${res.locals.nonce}"`))}res.sendFile(file)});
@@ -196,6 +204,13 @@ export async function createGameServer(options = {}) {
   const cookieName=role=>(secureCookies?'__Host-':'')+'cq-'+role;
   const cookies=req=>Object.fromEntries((req.headers.cookie||'').split(';').flatMap(part=>{const at=part.indexOf('=');if(at<0)return [];try{return [[part.slice(0,at).trim(),decodeURIComponent(part.slice(at+1))]]}catch{return []}}));
   const cookie=(res,role,value,maxAge)=>res.cookie(cookieName(role),value,{httpOnly:true,secure:secureCookies,sameSite:'strict',path:'/',maxAge});
+  app.get('/api/join-qr',async(req,res)=>{
+    const authorized=validTeacherToken(cookies(req)[cookieName('teacher')])||!!await options.portalCreator?.(req)||!!await options.authorizeTeacher?.(req);
+    if(!authorized)return res.status(403).json({error:'QR доступен только преподавателю или создателю.'});
+    const entry=publishedGame.state.accessControl.admission;
+    if(requireAdmission&&(!entry.open||entry.expiresAt<=Date.now()))return res.status(409).json({error:'Вход закрыт. Откройте вход в пульте преподавателя.'});
+    return res.json(issueQrTicket(secret,options.resourcePrefix||'',entry.epoch,securityNow()));
+  });
   const sameOrigin=req=>{const origin=req.headers.origin;if(!origin)return true;try{return new URL(origin).host===req.headers.host}catch{return false}};
   const bulkActions=new Set(['applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions']);
   const httpSocket=(req,res,next)=>{const socket=io.sockets.sockets.get(req.headers['x-cq-socket']);if(!sameOrigin(req)||req.headers['x-cq-client']!=='1'||!socket||typeof req.headers['x-cq-proof']!=='string'||!equal(req.headers['x-cq-proof'],socket.data.httpProof))return res.status(403).json({ok:false,error:'Сессия изменилась. Дождитесь подключения.',code:'FORBIDDEN'});req.gameSocket=socket;next()};

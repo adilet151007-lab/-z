@@ -481,3 +481,66 @@ body.telemetry-open,body.presentation-signal{overflow:hidden}
 [data-theme="light"] .presentation-blocker{color:#d6eeec}
 @media(max-width:600px){.ui-preferences{gap:4px}.ui-preferences select{width:90px;font-size:12px;min-height:40px}.topbar .ui-theme-button{min-width:40px;min-height:40px;padding:7px}.topbar .theme-word{display:none}.topbar>.ui-preferences{margin-left:auto}.reg-card>.ui-preferences{margin-bottom:12px}}
 @media(prefers-reduced-motion:reduce){.award-caption{transition:none}}
+
+/* Local room QR: full white quiet zone, responsive projector and phone view. */
+.join-qr-dialog{box-sizing:border-box;width:min(650px,94vw);max-height:94dvh;overflow:auto;padding:24px;border:1px solid #008f79;border-radius:18px;background:#10232f;color:#edf8f4;text-align:center;box-shadow:0 20px 80px #0008}
+.join-qr-dialog::backdrop{background:#000b}
+.join-qr-dialog h2{margin:0 0 12px}.join-qr-dialog p{line-height:1.5}
+.join-qr-image{display:block;width:100%;max-width:512px;height:auto;margin:16px auto;background:white;image-rendering:pixelated}.join-qr-image[hidden]{display:none}
+.join-qr-link{display:block;overflow-wrap:anywhere;color:#73dfcd;font-size:13px;margin:12px 0}
+.join-qr-actions{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}.join-qr-actions button{padding:12px 18px;border:1px solid #72c5b8;border-radius:10px;background:#19343f;color:#fff;cursor:pointer}
+@media(max-width:480px){.join-qr-dialog{padding:16px}}
+
+/* Student phone flow: document scrolling and top-aligned registration also work
+   when Safari does not support safe alignment or changes its visual viewport. */
+.registration-name-label{display:block;margin:12px 0 8px;font-size:14px;font-weight:600}
+#region-grid .region-card.selected{border-color:var(--cyan)!important;background:rgba(63,224,208,.12);box-shadow:inset 0 0 0 1px var(--cyan)}
+#registration-selection{margin:14px 0 8px;color:var(--cyan);overflow-wrap:anywhere}
+#join-session{width:100%;min-height:48px;margin-top:14px}
+@media(max-width:700px), (pointer:coarse) and (max-width:1000px){
+ html:has(body.student-page){height:auto;min-height:100%;scroll-padding-top:12px;scroll-padding-bottom:24px}
+ .student-page{height:auto;min-height:100%;overflow-y:auto;overflow-x:hidden;-webkit-text-size-adjust:100%}
+ .student-page .reg-screen{box-sizing:border-box;height:auto;min-height:100vh;min-height:100svh;align-items:flex-start;justify-content:center;overflow:visible;padding:16px 12px;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:max(24px,env(safe-area-inset-bottom))}
+ .student-page .reg-screen>.reg-card:not(form){display:block;max-height:none;overflow:visible}
+ .student-page #region-grid{max-height:none;overflow:visible;grid-template-columns:repeat(2,minmax(0,1fr));padding-right:0}
+ .student-page #region-grid .region-card{min-height:76px;height:auto}
+ .student-page #region-grid .members{max-height:none;overflow:visible}
+ .student-page .reg-card{box-sizing:border-box;width:100%;max-width:520px;min-width:0;padding:20px 16px}
+ .student-page .reg-card h1{font-size:28px;overflow-wrap:anywhere}
+ .student-page .reg-card .mut{margin-bottom:10px}
+ .student-page #registration-instruction{font-size:14px;line-height:1.5}
+ .student-page input:not([type=checkbox]),.student-page select,.student-page textarea{box-sizing:border-box;max-width:100%;min-width:0;font-size:16px!important;min-height:48px;scroll-margin:16px}
+ .student-page .privacy-consent{font-size:12px;line-height:1.6;align-items:flex-start;margin-top:14px}
+ .student-page .privacy-consent input{width:24px;height:24px;min-width:24px;flex:none;margin-top:2px}
+ .student-page .region-grid{gap:10px;margin-top:12px}
+ .student-page .region-card{min-height:76px;padding:14px;min-width:0;overflow-wrap:anywhere}
+ .student-page .region-card .rname{font-size:18px;line-height:1.3}
+ .student-page .region-card .members:empty{display:none}
+ .student-page .app{box-sizing:border-box;height:auto;min-height:100vh;min-height:100dvh;padding-bottom:max(16px,env(safe-area-inset-bottom))}
+ .student-page .topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 10px;padding:10px 12px}
+ .student-page .topbar .spacer{display:none}
+ .student-page .topbar #session-heading{grid-row:1;grid-column:1;font-size:17px!important;line-height:1.3;overflow-wrap:anywhere}
+ .student-page .topbar>.brand-logo{grid-row:1;grid-column:2;width:28px;height:28px}
+ .student-page #my-region-tag{grid-row:2;grid-column:1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+ .student-page #conn-status{grid-row:2;grid-column:2;font-size:10px}
+ .student-page #my-name{grid-row:3;grid-column:1;font-size:13px;overflow-wrap:anywhere}
+ .student-page #leave-btn{grid-row:3;grid-column:2;min-height:44px;font-size:12px;padding:8px}
+ .student-page .map-visibility{min-height:44px;margin:8px 12px;font-size:13px}
+ .student-page .stage-wrap[hidden]{display:none!important}
+ .student-page .session-utilities{flex-wrap:wrap;gap:6px;padding:8px 12px}
+ .student-page .session-utilities button{min-height:44px;font-size:12px}
+ .student-page .session-utilities .product-signature{display:none}
+ .student-page .dock{max-height:none;overflow:visible;grid-template-columns:minmax(0,1fr);padding:10px;gap:10px}
+ .student-page .dock-panel{min-width:0;padding:16px}
+ .student-page .opts{grid-template-columns:minmax(0,1fr)!important;gap:10px}
+ .student-page .opts .opt{min-height:56px;font-size:16px;padding:14px;text-align:left;line-height:1.4}
+ .student-page .qtext{font-size:22px;line-height:1.4}
+ .student-page .admin-dialog{width:calc(100% - 24px);max-height:85vh;max-height:85dvh;overflow:auto;-webkit-overflow-scrolling:touch}
+}
+@media(max-width:420px){.student-page #region-grid{grid-template-columns:minmax(0,1fr)}}
+
+.student-registering #cq-project-credits{display:none!important}
+
+.student-page #region-grid[hidden],.student-page #registration-empty[hidden],.student-page #registration-clear-search[hidden]{display:none!important}
+.student-page #registration-empty{padding:14px;border:1px solid var(--panel-brd);border-radius:10px;line-height:1.6;margin:12px 0;color:var(--ink)}
+.student-page #registration-clear-search{min-height:44px;margin-top:8px}

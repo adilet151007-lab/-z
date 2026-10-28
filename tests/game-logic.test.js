@@ -137,7 +137,7 @@ test("JSON-патч не обходит предел, а старое сохра
 test("на границах развития карта и интерфейс получают одинаковую стадию", async () => {
   const { developmentFor, RESOURCE_CAP } = await import("../game-config.js");
   assert.equal(RESOURCE_CAP, 1000);
-  for (const [points, buildings, complete] of [[0,0,false],[99,0,false],[100,4,false],[249,4,false],[250,12,false],[500,24,false],[750,42,false],[999,42,false],[1000,64,true],[1200,64,true]]) {
+  for (const [points, buildings, complete] of [[0,0,false],[99,0,false],[100,4,false],[249,4,false],[250,12,false],[500,24,false],[750,42,false],[999,42,false],[1000,64,false],[1200,64,false],[5000,24,false],[10000,16,true]]) {
     const stage = developmentFor(points);
     assert.equal(stage.buildings, buildings);
     assert.equal(stage.complete, complete);
