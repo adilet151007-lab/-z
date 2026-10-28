@@ -1,3 +1,4 @@
+import {createFutureTerritory,setFutureDetail} from './territory-models.js';
 import {ANIMATION_MODULES} from './achievement-animations.js';
 import {disposeAnimationScene} from './achievement-player.js';
 import * as THREE from "three";
@@ -95,8 +96,8 @@ function labelSprite() {
   sprite.center.set(.5,0);
   return { sprite, canvas, texture, key: "" };
 }
-function paintLabel(label, meta, points, economy, scoreLimit = RESOURCE_CAP) {
-  const key = `${meta.name}:${points}:${economy}:${scoreLimit}`; if (label.key === key) return; label.key = key;
+function paintLabel(label, meta, points, economy, scoreLimit = RESOURCE_CAP, developmentPoints=points) {
+  const key = `${meta.name}:${points}:${economy}:${scoreLimit}:${developmentPoints}`; if (label.key === key) return; label.key = key;
   const ctx = label.canvas.getContext("2d"), done = points >= RESOURCE_CAP, crisis = economy < CRISIS_THRESHOLD;
   const color = crisis ? "#ff7468" : done ? "#ffe2a1" : meta.glow;
   ctx.clearRect(0, 0, 768, 192); ctx.fillStyle = "rgba(5,18,25,.93)"; ctx.strokeStyle = color; ctx.lineWidth = 2;
@@ -104,8 +105,8 @@ function paintLabel(label, meta, points, economy, scoreLimit = RESOURCE_CAP) {
   ctx.fillStyle = color; ctx.font = "700 42px sans-serif"; ctx.textAlign = "center";
   ctx.fillText(meta.name + (done ? "  ✦" : ""), 384, 65);
   ctx.fillStyle = "#d8e8e7"; ctx.font = "25px sans-serif";
-  ctx.fillText(`${points} / ${scoreLimit===null?'∞':'1000'}   ·   ${economy}%   ·   ${developmentFor(points).name}`, 384, 113);
-  ctx.fillStyle = "#203c43"; ctx.fillRect(40, 143, 688, 7); ctx.fillStyle = color; ctx.fillRect(40, 143, 688 * Math.min(points,RESOURCE_CAP) / RESOURCE_CAP, 7);
+  ctx.fillText(`${points} / ${scoreLimit===null?'∞':'1000'}   ·   ${economy}%   ·   ${developmentFor(developmentPoints).name}`, 384, 113);
+  ctx.fillStyle = "#203c43"; ctx.fillRect(40, 143, 688, 7); ctx.fillStyle = color; ctx.fillRect(40, 143, 688 * developmentFor(developmentPoints).progress, 7);
   label.texture.needsUpdate = true;
 }
 
@@ -496,14 +497,22 @@ export function createScene(canvas, opts = {}) {
   let stateKey='';
   function update(state, selectedRegionId) {
     syncWorldAchievements(state);
-    latestState=state;if(selectedRegionId!==lastFocusId){mapPreview=selectedRegionId||null;lastFocusId=selectedRegionId}const previewId=mapPreview,key=JSON.stringify([previewId,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.cityId,r.points,r.economy,r.scoreLimit,r.occupied??r.members.length])]);if(key===stateKey)return;stateKey=key;
+    latestState=state;if(selectedRegionId!==lastFocusId){mapPreview=selectedRegionId||null;lastFocusId=selectedRegionId}const previewId=mapPreview,key=JSON.stringify([previewId,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.cityId,r.points,r.developmentPoints,r.economy,r.scoreLimit,r.occupied??r.members.length])]);if(key===stateKey)return;stateKey=key;
     const cityOptions=state.regions.filter(t=>t.cityId).map(t=>`<option value="${t.id}">${String(t.name).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</option>`).join('');if(regionSelect.dataset?.cities!==cityOptions){const value=regionSelect.value;regionSelect.innerHTML='<option value="">Найти регион…</option>'+REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')+(cityOptions?'<optgroup label="Команды городов · территория области">'+cityOptions+'</optgroup>':'');if(regionSelect.dataset)regionSelect.dataset.cities=cityOptions;regionSelect.value=value;regionSelect.title='Города команд показываются на территории своей области.';}
     const selectedTeam = state.regions.find(t=>t.id===previewId);
     const selectedBase = selectedTeam ? metadataFor(selectedTeam).baseRegionId : null;
     for (const r of mapRegionsFor(state.regions,previewId)) {
       const region = regions.find(item => item.meta.id === r.id); if (!region) continue;
       region.points = clamp(r.points, 0, RESOURCE_CAP); region.economy = r.economy;
-      region.stage = developmentFor(region.points).index;
+      region.stage = developmentFor(r.developmentPoints??r.points).index;
+      if(region.stage>=6&&region.future?.userData.stage!==region.stage){
+        if(region.future){region.group.remove(region.future);region.future.traverse(o=>o.geometry?.dispose());}
+        const unit=region.data.cityRadius*.86/3.8;
+        region.future=createFutureTerritory({stage:region.stage,unit,batch,box,cylinder,material,mobile});
+        region.future.userData.stage=region.stage;region.group.add(region.future);
+      }
+      const labelUnit=region.data.cityRadius*.86/3.8;region.label.sprite.position.y=region.stage>=6?1.5+labelUnit*4.5:1.2;region.stem.visible=region.stage<6;
+      if(region.future){region.future.visible=region.stage>=6;setFutureDetail(region.future,region.meta.id===selectedBase,lowPower);}
       region.targetY = .1 + region.points / RESOURCE_CAP * .9 - (1 - r.economy / 100) * 1.45;
       const crisis = r.economy < CRISIS_THRESHOLD;
       region.targetColor.set(crisis ? 0x634048 : 0xffffff).multiplyScalar(crisis ? 1 : .6 + r.economy / 250);
@@ -512,7 +521,7 @@ export function createScene(canvas, opts = {}) {
       for (const border of region.borders) { border.material.color.set(crisis ? 0xff655b : region.points === RESOURCE_CAP ? 0xffdf94 : region.meta.glow); border.material.opacity = region.meta.id === selectedBase || crisis || region.points === RESOURCE_CAP ? .95 : .5; }
       region.victoryRing.visible = region.points === RESOURCE_CAP;
       region.hasTeams = state.regions.some(t=>metadataFor(t).baseRegionId===r.id);
-      paintLabel(region.label, selectedBase===r.id?{...region.meta,name:selectedTeam.name}:region.meta, r.points, r.economy,r.scoreLimit);
+      paintLabel(region.label, selectedBase===r.id?{...region.meta,name:selectedTeam.name}:region.meta, r.points, r.economy,r.scoreLimit,r.developmentPoints);
     }
     wake(1500);
   }
@@ -540,7 +549,7 @@ export function createScene(canvas, opts = {}) {
   const clock = new THREE.Clock(), reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   function animate() {
     frame=0;if (disposed||!sceneVisible||!requestedVisible||personalCinema||document.hidden) return;
-    if(worldEffects.size&&lowPower&&performance.now()-lastWorldPaint<1000/30){frame=requestAnimationFrame(animate);return}lastWorldPaint=performance.now();
+    if((worldEffects.size||selected)&&lowPower&&performance.now()-lastWorldPaint<1000/30){frame=requestAnimationFrame(animate);return}lastWorldPaint=performance.now();
     const dt = Math.min(.05, clock.getDelta()), t = clock.elapsedTime, rate = reduceMotion ? 1 : 1 - Math.exp(-dt * 5);
     if (cameraTween) {
       camera.position.lerp(cameraTween.position, rate); controls.target.lerp(cameraTween.target, rate);
@@ -558,9 +567,17 @@ export function createScene(canvas, opts = {}) {
       }
       region.topTint.lerp(region.targetColor, rate); region.topMat.color.copy(region.topTint);
       for (let i = 0; i < region.stages.length; i++) {
-        const stage = region.stages[i], target = i < region.stage ? 1 : .001;
+        const stage = region.stages[i], target = region.stage<6&&i<region.stage ? 1 : .001;
         if(Math.abs(stage.scale.y-target)>.001)settling=true;
         stage.scale.y = THREE.MathUtils.lerp(stage.scale.y, target, rate); stage.visible = stage.scale.y > .012;
+      }
+      if(region.future?.visible){
+        setFutureDetail(region.future,region.meta.id===selected,lowPower);
+        if(region.meta.id===selected&&!reduceMotion){
+          if(region.stage===7)region.future.rotation.y+=dt*.08;
+          else if(region.future.userData.traffic){const unit=region.future.userData.unit,cars=region.future.userData.traffic.children;cars[0].position.x=((t*.55)%6.4-3.2)*unit;cars[0].position.z=unit*.4;cars[1].position.x=-unit*.4;cars[1].position.z=(3.2-(t*.44)%6.4)*unit;}
+          settling=true;
+        }
       }
       region.beacon.rotation.y += reduceMotion ? 0 : dt * .55; region.beacon.position.y = 2.6 + (reduceMotion ? 0 : Math.sin(t * 1.7) * .12);
       const opacity = region.economy < CRISIS_THRESHOLD ? (1 - region.economy / 100) * .32 : 0;
@@ -583,7 +600,7 @@ export function createScene(canvas, opts = {}) {
     const geometries = new Set(), mats = new Set(), textures = new Set();
     scene.traverse(object => { if (object.geometry) geometries.add(object.geometry); if (object.material) for (const mat of Array.isArray(object.material) ? object.material : [object.material]) { mats.add(mat); if (mat.map) textures.add(mat.map); } });
     geometries.forEach(g => g.dispose()); textures.forEach(t => t.dispose()); mats.forEach(m => m.dispose()); renderer.dispose();
-    box.dispose(); cone.dispose(); cylinder.dispose(); dome.dispose();
+    Object.values(materials).forEach(m=>m.dispose());box.dispose(); cone.dispose(); cylinder.dispose(); dome.dispose();
   }
   return { scene, camera, controls, renderer, update, focusRegion, overview, resize, setVisible,setLowPower,dispose };
 }

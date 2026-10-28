@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import { REGIONS, CITIES, SEAT_LIMIT, ECONOMY_PENALTY, ECONOMY_RECOVERY, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, MAX_PLAYERS, metadataFor, capacityFor, totalCapacity, normalizeRegionId, CREATOR_TEAM_ID, CREATOR_NAMES, isCreatorTeam, regularTeams } from "./game-config.js";
+import { REGIONS, CITIES, SEAT_LIMIT, ECONOMY_PENALTY, ECONOMY_RECOVERY, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, MAX_PLAYERS, metadataFor, capacityFor, totalCapacity, normalizeRegionId, CREATOR_TEAM_ID, CREATOR_NAMES, isCreatorTeam, regularTeams } from "./game-config.js";
 import { QUESTION_BANK,isPublicDemoQuestion } from "./question-bank.js";
 import {AWARD_CATALOG,awardDefinition,initializeAwards,validateAwardState,ensurePlayerProfile,profileFor,issueCollectionCookie,recordCollectionAward,scoreLimit,SAFE_SCORE,prepareAwardRound,answerElapsed,pauseAwardClock,evaluateAwardRound,evaluateAwardFinish,achievementView} from "./achievement-system.js";
 import { ANIMATION_DURATIONS } from './achievement-animations.js';
@@ -91,7 +91,8 @@ function validateRegions(regions, knownMembers = null, universal = false, mode =
     });
     const cityId=r.cityId||null;ensure(!cityId||CITIES.some(c=>c.id===cityId&&c.baseRegionId===baseRegionId),'Город не относится к выбранной области.');
     const recoveryAnswers=r.recoveryAnswers??0;ensure(integer(recoveryAnswers,0,1),'Повреждён прогресс восстановления экономики.');
-    return { id: r.id, name, baseRegionId, capacity, points: r.points, economy: r.economy,recoveryAnswers:0, members,...(cityId?{cityId}:{}),...(r.leaderPid&&members.some(m=>m.pid===r.leaderPid)?{leaderPid:r.leaderPid}:{}) };
+    const developmentPoints=r.developmentPoints??Math.min(DEVELOPMENT_CAP,r.points);ensure(integer(developmentPoints,0,DEVELOPMENT_CAP),"Повреждён прогресс территории.");
+    return { id: r.id, name, baseRegionId, capacity, developmentPoints, points: r.points, economy: r.economy,recoveryAnswers:0, members,...(cityId?{cityId}:{}),...(r.leaderPid&&members.some(m=>m.pid===r.leaderPid)?{leaderPid:r.leaderPid}:{}) };
   });
 }
 
@@ -153,7 +154,7 @@ export class GameLogic {
     this.state.branding ??= structuredClone(DEFAULT_BRANDING);
     this.state.accessControl ??= {keyOverrides:{},invitations:[]};
     this.state.match??=null;this.state.achievements??=[];
-    for(const team of this.state.regions)team.recoveryAnswers??=0;
+    for(const team of this.state.regions){team.recoveryAnswers??=0;team.developmentPoints??=Math.min(DEVELOPMENT_CAP,team.points);}
     initializeAwards(this);
     if(snapshot&&(!Object.hasOwn(snapshot,'achievements')||snapshot.regions.some(t=>(t.recoveryAnswers??0)!==0)||Object.values(snapshot.match?.stats||{}).some(s=>Object.hasOwn(s,'hitFloor'))))this.touch();
   }
@@ -184,6 +185,10 @@ export class GameLogic {
       return [t?.id,Math.max(current.get(t?.id)||0,perk?SAFE_SCORE:RESOURCE_CAP)];
     })),players:new Map(this.state.regions.flatMap(t=>t.members.map(m=>[m.pid,Math.max(m.capital||0,this.scoreLimit('player',m.pid))])))};
   }
+  growTerritory(team,amount,limit=this.scoreLimit('team',team.id)){
+    const current=team.developmentPoints??Math.min(DEVELOPMENT_CAP,team.points);
+    team.developmentPoints=Math.max(current,Math.min(limit>RESOURCE_CAP?DEVELOPMENT_CAP:RESOURCE_CAP,current+Math.max(0,amount)));
+  }
   adjustCapital(pid,delta){const m=this.state.regions.flatMap(t=>t.members).find(m=>m.pid===pid);ensure(m&&integer(delta,-100000,100000),'Некорректное изменение капитала.');m.capital=Math.min(Math.max(m.capital||0,this.scoreLimit('player',pid)),Math.max(0,(m.capital||0)+delta));this.touch()}
 
   updateBranding(raw){ensure(raw&&typeof raw==='object'&&!Array.isArray(raw),'Проверьте настройки организации.');const next=validateBranding({...this.state.branding,...raw});ensure(!this.state.round||this.state.round.resolved||next.subject===this.state.branding.subject,'Завершите вопрос перед сменой предмета.');this.state.branding=next;this.log('Обновлены оформление и настройки организации.');this.touch()}
@@ -213,7 +218,7 @@ export class GameLogic {
     const backup=structuredClone(this.state),old=this.state.regions;
     const templates=REGIONS.slice(0,10).map((r,i)=>({id:i===0?'saryarka':r.id,name:r.name,baseRegionId:r.id,capacity:4,points:0,economy:100,recoveryAnswers:0,members:[]}));
     const players=old.flatMap(t=>t.members.map(m=>({...m,capital:m.capital??0,streak:m.streak??0,_base:metadataFor(t).baseRegionId})));
-    for(const t of templates){const previous=old.find(r=>!isCreatorTeam(r)&&metadataFor(r).baseRegionId===t.baseRegionId);if(previous){t.points=previous.points;t.economy=Math.max(15,previous.economy)}}
+    for(const t of templates){const previous=old.find(r=>!isCreatorTeam(r)&&metadataFor(r).baseRegionId===t.baseRegionId);if(previous){t.points=previous.points;t.developmentPoints=previous.developmentPoints??Math.min(DEVELOPMENT_CAP,previous.points);t.economy=Math.max(15,previous.economy)}}
     const mode=players.filter(m=>!m.creatorId).length>40?'solo':'team';
     for(const m of players){let team=templates.find(t=>t.baseRegionId===m._base&&(mode==='solo'||m.creatorId||t.members.filter(p=>!p.creatorId).length<4));team??=templates.find(t=>mode==='solo'||m.creatorId||t.members.filter(p=>!p.creatorId).length<4);delete m._base;team.members.push(m)}
     this.state.regions=templates;this.state.settings={universal:true,mode,teamCapacity:4,perksEnabled:this.state.settings.perksEnabled??true};
@@ -243,7 +248,7 @@ export class GameLogic {
   settleTrade(regionId,pid,id,accept){this.requireTrading(regionId,pid);ensure(typeof accept==='boolean','Укажите решение.');const trade=this.state.trades?.find(t=>t.id===id);ensure(trade&&trade.status==='pending'&&trade.expiresAt>this.now(),'Предложение уже закрыто или истекло.');ensure(accept?trade.to===regionId:trade.to===regionId||trade.from===regionId,'Это предложение другой команды.','FORBIDDEN');if(accept){const from=this.region(trade.from),to=this.region(trade.to);ensure(from.points>=trade.resources&&to.points+trade.resources<=Math.max(to.points,this.scoreLimit('team',to.id))&&to.economy-trade.economy>=15&&from.economy+trade.economy<=100,'Баланс изменился или обмен превысит предел. Создайте новое предложение.');from.points-=trade.resources;to.points+=trade.resources;from.economy+=trade.economy;to.economy-=trade.economy;if(trade.economy){this.invalidateQuizRecovery(from.id);this.invalidateQuizRecovery(to.id)}if(from.economy===100)from.recoveryAnswers=0;if(to.economy===100)to.recoveryAnswers=0;trade.status='accepted';this.log('Команды «'+from.name+'» и «'+to.name+'» подтвердили обмен.')}else trade.status='declined';this.touch()}
   ranking(){return this.state.regions.flatMap(t=>t.members.map(m=>({pid:m.pid,name:m.name,teamId:t.id,capital:m.capital??0,streak:m.streak??0,multiplier:soloMultiplier(m.streak)}))).sort((a,b)=>b.capital-a.capital||b.streak-a.streak||a.name.localeCompare(b.name,'ru'))}
   teamRanking(){
-    const rows=regularTeams(this.state.regions).map(t=>({teamId:t.id,name:t.name,points:t.points,economy:t.economy,members:t.members.filter(m=>!m.creatorId).length,capacity:t.capacity,rating:t.points+t.economy*5,development:developmentFor(t.points).name})).sort((a,b)=>b.rating-a.rating||b.points-a.points||b.economy-a.economy||a.name.localeCompare(b.name,'ru'));
+    const rows=regularTeams(this.state.regions).map(t=>({teamId:t.id,name:t.name,points:t.points,economy:t.economy,members:t.members.filter(m=>!m.creatorId).length,capacity:t.capacity,rating:t.points+t.economy*5,development:developmentFor(t.developmentPoints??t.points).name})).sort((a,b)=>b.rating-a.rating||b.points-a.points||b.economy-a.economy||a.name.localeCompare(b.name,'ru'));
     const active=rows.filter(row=>this.region(row.teamId).members.length);return rows.map(row=>({...row,rank:this.region(row.teamId).members.length?1+active.filter(other=>other.rating>row.rating).length:null}));
   }
   log(msg,kind=this.logContext||'game') { this.state.log.unshift({ t: this.now(), msg,kind }); this.state.log = this.state.log.slice(0, 100); }
@@ -605,7 +610,7 @@ export class GameLogic {
     if(this.state.settings.mode==='solo'){
       for(const m of this.state.regions.flatMap(t=>t.members)){
         const chosen=round.submitted[m.pid]??round.ballots[m.pid]??null,correct=chosen===question.correct,multiplier=soloMultiplier(m.streak),awarded=correct?Math.max(0,Math.min(this.scoreLimit('player',m.pid)-m.capital,Math.round(25*multiplier))):0;
-        m.capital+=awarded;m.streak=correct?m.streak+1:0;round.submitted[m.pid]=chosen;round.results[m.pid]={chosen,correct,awarded,multiplier,reason:chosen===null?'no_votes':'personal'};
+        this.growTerritory(this.state.regions.find(t=>t.members.includes(m)),awarded,this.scoreLimit('player',m.pid));m.capital+=awarded;m.streak=correct?m.streak+1:0;round.submitted[m.pid]=chosen;round.results[m.pid]={chosen,correct,awarded,multiplier,reason:chosen===null?'no_votes':'personal'};
       }
       round.resolved=true;round.paused=false;round.deadline=null;round.remainingMs=0;this.completeMatchQuestion();this.touch();return;
     }
@@ -620,7 +625,7 @@ export class GameLogic {
       let economyRecovered=0;
       const awarded = correct&&!recovering ? Math.max(0,Math.min(this.state.settings.universal?25:question.points, this.scoreLimit('team',region.id) - region.points)) : 0;
       if(correct){
-        region.points+=awarded;
+        this.growTerritory(region,awarded);region.points+=awarded;
         if(recovering){region.economy=Math.min(100,region.economy+ECONOMY_RECOVERY);economyRecovered=region.economy-beforeEconomy;if(region.economy===100&&stats.hitCrisis)stats.recoveredByQuiz=true}
       }else{region.economy=Math.max(this.state.settings.universal?ECONOMY_FLOOR:0,region.economy-ECONOMY_PENALTY);if(this.state.settings.universal){stats.recoveredByQuiz=false;if(region.economy<CRISIS_THRESHOLD)stats.hitCrisis=true}}
       region.recoveryAnswers=0;
@@ -642,9 +647,10 @@ export class GameLogic {
   adjustPoints(regionId, delta) {
     ensure(integer(delta, -100000, 100000), "Некорректное изменение ресурса.");
     const region = this.region(regionId);
-    const previous = region.points;
+    const previous = region.points;region.developmentPoints??=Math.min(DEVELOPMENT_CAP,previous);
     region.points = Math.min(Math.max(region.points,this.scoreLimit('team',regionId)), Math.max(0, region.points + delta));
     const applied = region.points - previous;
+    this.growTerritory(region,applied);
     this.log(`Ресурс «${this.region(regionId).name}»: ${applied > 0 ? "+" : ""}${applied}. ${region.points}/${this.scoreLimit('team',regionId)>RESOURCE_CAP?'∞':RESOURCE_CAP}${region.points === RESOURCE_CAP ? " — город построен." : "."}`);
     this.touch();
   }
@@ -677,7 +683,7 @@ export class GameLogic {
     ensure(integer(points, 0, RESOURCE_CAP) && integer(economy, 0, 100), `Ресурс: 0–${RESOURCE_CAP}; экономика: 0–100.`);
     ensure(!this.state.settings.universal||economy>=15,'Экономика не ниже 15%.');ensure(!cityId||CITIES.some(c=>c.id===cityId&&c.baseRegionId===baseRegionId),'Город не относится к области.');
     const id = `team_${randomUUID()}`;
-    this.state.regions.push({id,name:cleanName,baseRegionId,capacity,points,economy,recoveryAnswers:0,members:[],...(cityId?{cityId}:{})});
+    this.state.regions.push({id,name:cleanName,baseRegionId,capacity,points,developmentPoints:points,economy,recoveryAnswers:0,members:[],...(cityId?{cityId}:{})});
     this.log(`Создана команда «${cleanName}».`); this.touch(); return {teamId:id};
   }
   expandTeams(count) {
@@ -730,6 +736,7 @@ export class GameLogic {
     const candidate = {...team,name:changes.name,baseRegionId:changes.baseRegionId,capacity:changes.capacity,points:changes.points,economy:changes.economy,cityId:Object.hasOwn(changes,'cityId')?changes.cityId:team.cityId??null};
     const validated = validateRegions(this.state.regions.map(t=>t.id===teamId?candidate:t),known,!!this.state.settings.universal,this.state.settings.mode,!!this.state.settings.flexibleTeams,this.editScoreLimits());
     if(candidate.economy!==team.economy)this.invalidateQuizRecovery(teamId);
+    const updated=validated.find(t=>t.id===teamId);this.growTerritory(updated,updated.points-team.points,this.scoreLimit('team',teamId));
     this.state.regions = validated;
     this.log(`Настройки команды «${candidate.name}» сохранены.`); this.touch();
   }
@@ -814,7 +821,7 @@ export class GameLogic {
     this.state.revision = revision;
     if(exitRequests)this.state.exitRequests=exitRequests;
     if(presentationEffectsEnabled!==undefined)this.state.presentationEffectsEnabled=presentationEffectsEnabled;
-    this.log("Игра сброшена. Банк вопросов сохранён.");
+    this.log("Игра сброшена. Банк вопросов и развитие территорий сохранены.");
     this.touch();
   }
   editorSnapshot() {
@@ -842,6 +849,7 @@ export class GameLogic {
     delete backup.restorePoints;
     this.state.hotfixBackup={at:this.now(),state:backup};
     for(const team of regions)if(this.state.regions.find(t=>t.id===team.id)?.economy!==team.economy)this.invalidateQuizRecovery(team.id);
+    for(const t of regions){const old=this.state.regions.find(r=>r.id===t.id);t.developmentPoints=old?.developmentPoints??Math.min(RESOURCE_CAP,t.points);if(old)this.growTerritory(t,t.points-old.points,this.scoreLimit('team',old.id));}
     this.state.regions = regions;
     const activePlayers = new Set(regions.flatMap(r => r.members.map(m => m.pid)));
     this.state.delegatedAdmins = (this.state.delegatedAdmins || []).filter(a => activePlayers.has(a.pid));

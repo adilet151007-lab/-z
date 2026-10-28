@@ -18,18 +18,22 @@ export const ECONOMY_RECOVERY = 25;
 export const ACHIEVEMENTS = [{id:'sky-breaker',title:'Ты смог, братец',description:'В одном матче: опуститься ниже 30% экономики из-за неверных ответов, восстановить её ответами до 100% и занять первое место в рейтинге при завершении сессии. Каждый верный ответ при экономике ниже 100% восстанавливает до 25 процентных пунктов без начисления ресурсов. При равном первом месте награду получают все лидеры, выполнившие условия.',icon:'⟐'}];
 export const CRISIS_THRESHOLD = 30;
 export const RESOURCE_CAP = 1000;
+export const DEVELOPMENT_CAP = 10000;
 export const DEVELOPMENT_STAGES = [
   { at: 0, name: "Территория", description: "Первые дома появятся на 100 ресурсах", buildings: 0 },
   { at: 100, name: "Поселение", description: "Жилые дома и первые улицы", buildings: 4 },
   { at: 250, name: "Ауыл", description: "Новые кварталы и культурный памятник", buildings: 12 },
   { at: 500, name: "Малый город", description: "Площадь, общественные здания и парк", buildings: 24 },
   { at: 750, name: "Большой город", description: "Многоэтажные кварталы и новые дороги", buildings: 42 },
-  { at: RESOURCE_CAP, name: "Город построен", description: "Максимальное развитие достигнуто", buildings: 64 }
+  { at: RESOURCE_CAP, name: "Завершённый культурный город", description: "Город завершён. С активным ∞ начинается путь к мегаполису", buildings: 64 },
+  { at: 5000, name: "Неоновый мегаполис", description: "Небоскрёбы, светящиеся магистрали и неоновые вывески", buildings: 24 },
+  { at: DEVELOPMENT_CAP, name: "Орбитальная станция", description: "Центральная башня, орбитальные кольца и стыковочные узлы", buildings: 16 }
 ];
 export function developmentFor(points) {
-  const resource = Math.max(0, Math.min(RESOURCE_CAP, Number(points) || 0));
+  const resource = Math.max(0, Math.min(DEVELOPMENT_CAP, Number(points) || 0));
   const index = DEVELOPMENT_STAGES.findLastIndex(stage => resource >= stage.at);
-  return { ...DEVELOPMENT_STAGES[index], index, next: DEVELOPMENT_STAGES[index + 1] || null, complete: resource >= RESOURCE_CAP, progress: resource / RESOURCE_CAP };
+  const goal=resource<1000?1000:resource<5000?5000:DEVELOPMENT_CAP;
+  return { ...DEVELOPMENT_STAGES[index], resource, goal, index, next: DEVELOPMENT_STAGES[index + 1] || null, complete: resource >= DEVELOPMENT_CAP, progress: resource / goal };
 }
 
 // One original drill mesh is shared by the local replay and the existing 3D map.
@@ -114,6 +118,6 @@ export function mapRegionsFor(teams, focusedTeamId = null) {
     const selected = focused && metadataFor(focused).baseRegionId === base.id ? [focused] : peers;
     const occupied = selected.filter(t => (t.occupied??t.members.length)>0||t.members.length>0);
     const source = occupied.length ? occupied : selected;
-    return { id: base.id,scoreLimit:source.some(t=>t.scoreLimit===null)?null:RESOURCE_CAP, points: source.length ? Math.round(source.reduce((sum, t) => sum + t.points, 0) / source.length) : 0, economy: source.length ? Math.round(source.reduce((sum, t) => sum + t.economy, 0) / source.length) : 100 };
+    return { id: base.id,developmentPoints:source.length?Math.max(...source.map(t=>t.developmentPoints??Math.min(DEVELOPMENT_CAP,t.points))):0,scoreLimit:source.some(t=>t.scoreLimit===null)?null:RESOURCE_CAP, points: source.length ? Math.round(source.reduce((sum, t) => sum + t.points, 0) / source.length) : 0, economy: source.length ? Math.round(source.reduce((sum, t) => sum + t.economy, 0) / source.length) : 100 };
   });
 }
