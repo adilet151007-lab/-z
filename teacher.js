@@ -5,6 +5,12 @@ import { setupCommunication } from "./chat-ui.js";
 
 setupUIPreferences();
 const $ = id => document.getElementById(id), engine = new GameEngine("teacher");
+const accountTeacher=document.documentElement.dataset.teacherAccess==='account';
+if(accountTeacher){
+ const form=$('teacher-login-form');form.querySelector('p.mut').textContent=uiText('Откройте комнату из лобби под аккаунтом преподавателя или создателя. Пароль основного сайта здесь не используется.');
+ form.querySelector('label[for="teacher-password"]').remove();$('teacher-password').hidden=true;$('teacher-password').disabled=true;$('teacher-password').required=false;$('teacher-login-btn').hidden=true;
+ const link=document.createElement('a');link.href='/';link.className='btn pri';link.textContent=uiText('Вернуться в лобби');link.id='teacher-account-entry';link.style.display='inline-flex';link.style.alignItems='center';form.append(link);
+}
 setupCommunication(engine);
 setupPresentationEffects(engine);
 setupBranding(engine);
@@ -27,7 +33,7 @@ async function ensureScene(){
 }
 
 $("teacher-login-form").addEventListener("submit",async e=>{
- e.preventDefault();if(loggingIn)return;loggingIn=true;$("teacher-login-btn").disabled=true;
+ e.preventDefault();if(accountTeacher||loggingIn)return;loggingIn=true;$("teacher-login-btn").disabled=true;
  try{await engine.teacherLogin($("teacher-password").value);$("teacher-password").value="";$("teacher-login-error").textContent=""}
  catch(error){$("teacher-login-error").textContent=error.message}
  finally{loggingIn=false;$("teacher-login-btn").disabled=!engine.connected}
