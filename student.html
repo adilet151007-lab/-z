@@ -16,18 +16,19 @@
 }
 </script>
 </head>
-<body class="student-page">
+<body class="student-page student-registering">
 
 <div id="reg-screen" class="reg-screen">
   <div class="reg-card glass">
     <img class="brand-logo" data-brand-logo hidden alt="Логотип организации"><span class="brand-university" data-brand-university>Учебный проект</span><h1 data-brand-title>Мәдениеттану 3D</h1><p class="mut small-note" data-brand-subject>Мәдениеттану</p>
     <span id="registration-instruction" class="mut">Введите имя и выберите свободную область.</span>
-    <label class="sr-only" for="name-input">Ваше имя</label><input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="120" autocomplete="off" enterkeyhint="go">
+    <label class="registration-name-label" for="name-input">Ваше имя</label><input id="name-input" type="text" placeholder="Введите ваше имя" maxlength="120" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done">
     <label class="privacy-consent"><input id="privacy-consent" type="checkbox"><span>Я прочитал <a href="privacy.html" target="_blank" rel="noopener">политику конфиденциальности</a> и согласен на обработку имени, ответов и сообщений для проведения занятия. Можно использовать согласованный с преподавателем псевдоним.</span></label>
-    <button id="join-session" class="pri" type="button" hidden>Присоединиться</button>
     <p id="reg-conn-status" class="mut" style="margin-top:10px"></p>
     <p id="registration-capacity" class="mut small-note"></p><input id="team-search" type="search" placeholder="Найти область, город или команду" aria-label="Поиск команды" autocomplete="off"><button id="area-back" class="ghost section-gap" type="button" hidden>← Все области</button><div id="region-grid" class="region-grid"></div>
-    <p id="reg-error" class="mut" style="margin-top:12px;min-height:18px"></p>
+    <p id="registration-selection" class="small-note" role="status" hidden></p>
+    <button id="join-session" class="pri" type="button" hidden>Присоединиться</button>
+    <p id="reg-error" role="alert" class="mut" style="margin-top:12px;min-height:18px"></p>
   </div>
 </div>
 

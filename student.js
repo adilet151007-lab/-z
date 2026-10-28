@@ -14,7 +14,10 @@ setupAchievements(engine);
 const $ = id => document.getElementById(id);
 let scene = null, joining = false, actionPending = false, previousRound = null, focusedRegion = null, sceneLoading=false, mapCollapsed=false, teamKey='', questionKey='', registrationKey='';
 let sceneError = "";
-let selectedArea=null,pendingInvite='',marketKey='';
+const mobileStudent=window.matchMedia('(max-width: 700px), (pointer: coarse) and (max-width: 1000px)');
+let selectedArea=null,selectedTeamId=null,pendingInvite='',marketKey='';
+mapCollapsed=mobileStudent.matches;document.querySelector('.stage-wrap').hidden=mapCollapsed;$('map-visibility').textContent=uiText(mapCollapsed?'Показать карту':'Свернуть карту');$('map-visibility').setAttribute('aria-expanded',String(!mapCollapsed));
+mobileStudent.addEventListener('change',()=>{registrationKey='';if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state);});
 window.addEventListener('cq:map-review-change',()=>{if(mapCollapsed){mapCollapsed=false;document.querySelector('.stage-wrap').hidden=false;$('map-visibility').textContent= uiText('Свернуть карту');$('map-visibility').setAttribute('aria-expanded','true')}if(scene){scene.setVisible(true);scene.resize()}else ensureScene()});
 window.addEventListener('cq:world-achievement',()=>{if(!engine.state?.viewer.player||document.hidden)return;window.dispatchEvent(new Event('cq:map-review-change'));if(!/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName))document.querySelector('.stage-wrap').scrollIntoView({block:'center',behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'})});
 async function ensureScene(){
@@ -42,15 +45,17 @@ async function act(fn) {
   finally { actionPending = false; if (engine.state?.viewer.player) renderQuestion(engine.state); }
 }
 function renderRegistration(state) {
+  if(selectedTeamId&&!state.regions.some(t=>t.id===selectedTeamId))selectedTeamId=null;
   if(selectedArea&&!state.regions.some(t=>metadataFor(t).baseRegionId===selectedArea))selectedArea=null;
-  const key=JSON.stringify([state.settings.mode,state.regions,state.admission,engine.connected,joining,selectedArea,$('name-input').value,$('team-search').value]);
+  const key=JSON.stringify([state.settings.mode,state.regions,state.admission,engine.connected,joining,selectedArea,selectedTeamId,mobileStudent.matches,$('name-input').value,$('team-search').value]);
   if(key===registrationKey)return;registrationKey=key;
   const solo=state.settings.mode==='solo';
   const code=$('name-input').value.trim().split(/\s/,1)[0],tokenCandidate=state.viewer.canJoinFull||code.length===26||code.startsWith('CQO-'),invite=/^(CQI|CQL)-/.test(code);
-  $('join-session').hidden=!solo&&!invite;$('join-session').textContent=invite? uiText('Продолжить вход по приглашению'): uiText('Присоединиться');$('join-session').disabled=!engine.connected||joining;$('region-grid').hidden=solo;$('area-back').hidden=solo||!selectedArea;
+  $('join-session').hidden=!solo&&!invite&&!(mobileStudent.matches&&selectedTeamId);$('join-session').textContent=invite? uiText('Продолжить вход по приглашению'): uiText('Присоединиться');$('join-session').disabled=!engine.connected||joining;$('region-grid').hidden=solo||invite;$('area-back').hidden=solo||invite||!selectedArea;
+  const selected=state.regions.find(t=>t.id===selectedTeamId);$('registration-selection').hidden=!selected||solo;$('registration-selection').textContent=selected?uiTpl`Выбрана команда: ${selected.name}`:'';
   $('registration-instruction').textContent=state.admission?.required&&!state.admission.open?uiText('Регистрация закрыта. Обратитесь к преподавателю.'):solo? uiText('Жеке сайыс · введите имя и присоединитесь.'):selectedArea? uiText('Выберите команду области или её города.'): uiText('Шаг 1 · выберите область. Города находятся внутри неё.');
   if(solo){$('team-search').hidden=true;$('registration-capacity').textContent= uiTpl`${state.regions.reduce((n,t)=>n+(t.occupied??t.members.length),0)} участников · личный рейтинг`;$('join-session').disabled=!engine.connected||joining;return}
-  $("team-search").hidden = state.regions.length <= 8;
+  $("team-search").hidden = invite||state.regions.length <= 8;
   const query = $("team-search").hidden ? "" : $("team-search").value.trim().toLocaleLowerCase();
   $("registration-capacity").textContent =  uiTpl`${state.regions.length} команд · ${state.regions.reduce((sum,t)=>sum+(t.occupied??t.members.length),0)} / ${totalCapacity(state.regions)} участников`;
   const matches=t=>!query||`${t.name} ${REGIONS.find(r=>r.id===metadataFor(t).baseRegionId).name}`.toLocaleLowerCase().includes(query);
@@ -58,30 +63,32 @@ function renderRegistration(state) {
   const teams=state.regions.filter(t=>metadataFor(t).baseRegionId===selectedArea&&matches(t));
   $("region-grid").innerHTML = teams.map(region => {
     const meta = metadataFor(region), capacity = capacityFor(region),count=region.occupied??region.members.length, full = count>=capacity;
-    return `<button class="region-card" data-region="${meta.id}" ${full&&!tokenCandidate||!engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${h(meta.name)}</span><span class="seats">${count}/${capacity} ${full ?  uiText("— команда заполнена") :  uiText("— свободно")}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") ||  uiText("Пока никого")}</span></button>`;
+    return `<button class="region-card ${selectedTeamId===meta.id?'selected':''}" aria-pressed="${selectedTeamId===meta.id}" data-region="${meta.id}" ${full&&!tokenCandidate||!engine.connected || joining ? "disabled" : ""} style="border-color:${meta.color}55"><span class="rname" style="color:${meta.color}">${h(meta.name)}</span><span class="seats">${count}/${capacity} ${full ?  uiText("— команда заполнена") :  uiText("— свободно")}</span><span class="members">${region.members.map(m => h(m.name)).join(", ") ||  uiText("Пока никого")}</span></button>`;
   }).join("") ||  uiText('<p class="mut">Команды не найдены</p>');
 }
 $("team-search").addEventListener("input",()=>{if(engine.state)renderRegistration(engine.state)});
-$('area-back').addEventListener('click',()=>{selectedArea=null;renderRegistration(engine.state)});
+$('area-back').addEventListener('click',()=>{selectedArea=null;selectedTeamId=null;renderRegistration(engine.state)});
 function openAccessDetails(regionId){pendingInvite=$('name-input').value.trim().split(/\s/,1)[0];$('access-name').value=$('name-input').value.trim().slice(pendingInvite.length).trim();$('access-team').innerHTML=engine.state.regions.map(t=>`<option value="${t.id}" ${(t.occupied??t.members.length)>=capacityFor(t)?'disabled':''}>${h(metadataFor(t).name)} · ${t.occupied??t.members.length}/${capacityFor(t)}</option>`).join('');if(regionId)$('access-team').value=regionId;const solo=engine.state.settings.mode==='solo';$('access-team').disabled=solo;$('access-team').required=!solo;$('access-error').textContent='';$('access-details').showModal();$('access-name').focus()}
-$('access-cancel').addEventListener('click',()=>{$('access-details').close();pendingInvite=''});
+$('access-cancel').addEventListener('click',()=>{$('access-details').close();pendingInvite='';selectedTeamId=null;selectedArea=null;window.scrollTo(0,0)});
 $('access-details-form').addEventListener('submit',async e=>{e.preventDefault();$('name-input').value=pendingInvite+' '+$('access-name').value.trim();await join($('access-team').value,true)});
 async function join(regionId,detailsConfirmed=false) {
   if(joining||!engine.connected)return;
+  if(!$('name-input').value.trim()){$('reg-error').textContent=uiText('Введите ваше имя.');$('name-input').focus();return;}
   if(!$('privacy-consent').checked){$('reg-error').textContent= uiText('Подтвердите согласие на обработку данных перед входом.');$('privacy-consent').focus();return;}
   const value=$('name-input').value.trim(),code=value.split(/\s/,1)[0];if(/^(CQI|CQL)-/.test(code)&&!detailsConfirmed&&(!value.slice(code.length).trim()||engine.state.settings.mode!=='solo'&&!regionId)){openAccessDetails(regionId);return}
   joining=true;$("reg-error").textContent= uiText("Подключение…");renderRegistration(engine.state);
-  try{await engine.joinTeam(regionId,$("name-input").value.trim(),true);$("name-input").value="";$("reg-error").textContent="";$('access-details').close();pendingInvite=''}
+  try{await engine.joinTeam(regionId,$("name-input").value.trim(),true);$("name-input").value="";$("reg-error").textContent="";$('access-details').close();pendingInvite='';selectedTeamId=null;selectedArea=null;window.scrollTo(0,0)}
   catch(error){$("reg-error").textContent=error.message;if($('access-details').open)$('access-error').textContent=error.message}
   finally{joining=false;if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state)}
 }
 $('name-input').addEventListener('keydown',e=>{if(e.key==='Enter'&&engine.state?.settings.mode==='solo'){e.preventDefault();join(null)}});
 $('name-input').addEventListener('input',()=>{if(engine.state&&!engine.state.viewer.player)renderRegistration(engine.state)});
-$('join-session').addEventListener('click',()=>join(null));
+$('join-session').addEventListener('click',()=>join(engine.state?.settings.mode==='solo'?null:selectedTeamId));
 $("region-grid").addEventListener("click", event => {
-  const area=event.target.closest('[data-area]');if(area&&!joining&&engine.connected){selectedArea=area.dataset.area;renderRegistration(engine.state);return}
+  const area=event.target.closest('[data-area]');if(area&&!joining&&engine.connected){selectedArea=area.dataset.area;selectedTeamId=null;renderRegistration(engine.state);return}
   const card = event.target.closest("[data-region]");
   if (!card || joining || !engine.connected) return;
+  if(mobileStudent.matches){selectedTeamId=card.dataset.region;renderRegistration(engine.state);$('join-session').scrollIntoView({block:'nearest',behavior:'auto'});return;}
   join(card.dataset.region);
 });
 $("leave-btn").addEventListener("click", () => {
@@ -176,6 +183,7 @@ engine.onChange(state => {
   $("leave-btn").disabled = !engine.connected;
   if (!state) return;
   const player = state.viewer.player;
+  document.body.classList.toggle('student-registering',!player);
   $("reg-screen").style.display = player ? "none" : "flex";
   $("app").style.display = player ? "flex" : "none";
   if (!player) { if(engine.sessionNotice)$('reg-error').textContent=engine.sessionNotice;renderRegistration(state); previousRound = null;teamKey='';questionKey='';scene?.setVisible(false);return; }
