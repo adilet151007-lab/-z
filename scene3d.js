@@ -294,81 +294,7 @@ export function createScene(canvas, opts = {}) {
     const glass = material("glass", 0x417e93, { metalness: .5, roughness: .24 });
     const windowMat = material("window", 0xffe5a2, { emissive: 0xffce76, emissiveIntensity: .6 });
     const road = material("road", 0x566064), pavement = material("pavement", 0xada48c), green = material("green", 0x446e4d);
-    const stages = [], lots = [];
-    for (let gx = -4; gx <= 4; gx++) for (let gz = -4; gz <= 4; gz++) {
-      if (!gx || !gz) continue;
-      lots.push({ x: gx * unit * .78, z: gz * unit * .78, order: Math.hypot(gx, gz) + random() * .28 });
-    }
-    lots.sort((a, b) => a.order - b.order);
-    const footY = .74;
-    for (let si = 1; si <= 5; si++) {
-      const b = batch(), from = developmentFor([0, 0, 100, 250, 500, 750][si]).buildings, to = [0, 4, 12, 24, 42, 64][si];
-      for (let k = from; k < to; k++) {
-        const lot = lots[k], x = lot.x, z = lot.z, size = unit * .48;
-        const floors = si <= 2 ? 1 : si === 3 ? 2 : si === 4 ? 3 + (k % 2) : 4 + (k % 4);
-        const h = unit * (.28 * floors + .12), w = size * (.85 + random() * .2), depth = size * (.9 + random() * .15);
-        b.add(box, pavement, x, footY + .025, z, unit * .65, .05, unit * .65);
-        b.add(box, k % 3 ? stone : white, x, footY + h / 2, z, w, h, depth);
-        if (floors <= 2) b.add(cone, roof, x, footY + h + unit * .13, z, w * .77, unit * .26, depth * .77, Math.PI / 4);
-        else {
-          b.add(box, roof, x, footY + h + unit * .035, z, w * 1.08, unit * .07, depth * 1.08);
-          b.add(box, glass, x + w * .505, footY + h * .55, z, unit * .015, h * .78, depth * .68);
-        }
-        for (let f = 0; f < floors; f++) for (const side of [-1, 1]) {
-          b.add(box, windowMat, x + side * w * .23, footY + unit * .15 + f * unit * .28, z + depth * .505, unit * .075, unit * .095, unit * .018);
-          b.add(box, windowMat, x + side * w * .23, footY + unit * .15 + f * unit * .28, z - depth * .505, unit * .075, unit * .095, unit * .018);
-        }
-      }
-      const extent = townRadius * [.0, .45, .58, .72, .9, 1.04][si];
-      if (si === 1 || si === 3 || si === 5) {
-        b.add(box, road, 0, footY + .015, 0, extent * 2, .022, unit * .22);
-        b.add(box, road, 0, footY + .018, 0, unit * .22, .022, extent * 2);
-        for (let k = -4; k <= 4; k++) if (Math.abs(k * unit * .4) < extent) b.add(box, gold, k * unit * .4, footY + .032, 0, unit * .12, .012, unit * .025);
-      }
-      if (si === 2) {
-        const x = -unit * .95, z = -unit * .05;
-        b.add(cylinder, pavement, x, footY + unit * .07, z, unit * .53, unit * .14, unit * .53);
-        b.add(box, stone, x, footY + unit * .3, z, unit * .55, unit * .5, unit * .5);
-        b.add(dome, roof, x, footY + unit * .55, z, unit * .38, unit * .44, unit * .38);
-        b.add(cylinder, gold, x, footY + unit * 1.03, z, unit * .025, unit * .13, unit * .025);
-      }
-      if (si === 3) {
-        b.add(box, pavement, 0, footY + .04, 0, unit * 1.1, .06, unit * 1.1);
-        b.add(cylinder, stone, 0, footY + unit * .17, 0, unit * .23, unit * .25, unit * .23);
-        b.add(cylinder, glass, 0, footY + unit * .4, 0, unit * .16, unit * .2, unit * .16);
-        b.add(box, green, unit * .88, footY + .03, 0, unit * .62, .04, unit * .5);
-      }
-      if (si === 4) {
-        for (const x of [-unit * .95, unit * .95]) {
-          b.add(box, stone, x, footY + unit * .22, unit * 3.1, unit * .7, unit * .44, unit * .5);
-          b.add(cone, roof, x, footY + unit * .55, unit * 3.1, unit * .52, unit * .25, unit * .4, Math.PI / 4);
-        }
-        for (const side of [-1, 1]) b.add(box, road, side * unit * 2.72, footY + .01, 0, unit * .15, .025, townRadius * 1.6);
-      }
-      if (si === 5) {
-        // A region-specific skyline completes the city at exactly 1000 resources.
-        const x = unit * .48, z = -unit * .18;
-        if (meta.id === "turkistan") {
-          b.add(box, stone, x, footY + unit * .45, z, unit * .92, unit * .9, unit * .7);
-          b.add(dome, roof, x, footY + unit * .9, z, unit * .45, unit * .57, unit * .45);
-          for (const side of [-1, 1]) {
-            b.add(cylinder, stone, x + side * unit * .6, footY + unit * .65, z, unit * .09, unit * 1.3, unit * .09);
-            b.add(cone, roof, x + side * unit * .6, footY + unit * 1.4, z, unit * .13, unit * .22, unit * .13);
-          }
-        } else if (meta.id === "astana" || meta.id === "karaganda") {
-          b.add(cylinder, white, x, footY + unit * .85, z, unit * .13, unit * 1.7, unit * .13);
-          b.add(dome, gold, x, footY + unit * 1.65, z, unit * .34, unit * .48, unit * .34);
-        } else {
-          for (let k = 0; k < 3; k++) {
-            const height = unit * (1.2 + k * .45);
-            b.add(box, k === 1 ? glass : white, x + (k - 1) * unit * .32, footY + height / 2, z, unit * .27, height, unit * .35);
-            b.add(box, gold, x + (k - 1) * unit * .32, footY + height, z, unit * .29, unit * .06, unit * .37);
-          }
-        }
-      }
-      const stage = b.finish(); stage.visible = false; stage.scale.y = .001;
-      group.add(stage); stages.push(stage);
-    }
+    const stages = [];
     // Vegetation and pale rock formations are permanent parts of the landscape.
     const nature = batch();
     for (let k = 0; k < 140; k++) {
@@ -505,14 +431,14 @@ export function createScene(canvas, opts = {}) {
       const region = regions.find(item => item.meta.id === r.id); if (!region) continue;
       region.points = clamp(r.points, 0, RESOURCE_CAP); region.economy = r.economy;
       region.stage = developmentFor(r.developmentPoints??r.points).index;
-      if(region.stage>=6&&region.future?.userData.stage!==region.stage){
-        if(region.future){region.group.remove(region.future);region.future.traverse(o=>o.geometry?.dispose());}
-        const unit=region.data.cityRadius*.86/3.8;
-        region.future=createFutureTerritory({stage:region.stage,unit,batch,box,cylinder,material,mobile});
-        region.future.userData.stage=region.stage;region.group.add(region.future);
-      }
-      const labelUnit=region.data.cityRadius*.86/3.8;region.label.sprite.position.y=region.stage>=6?1.5+labelUnit*4.5:1.2;region.stem.visible=region.stage<6;
-      if(region.future){region.future.visible=region.stage>=6;setFutureDetail(region.future,region.meta.id===selectedBase,lowPower);}
+      const resource=r.developmentPoints??r.points,unit=region.data.cityRadius*.86/3.8;
+      if(!region.future&&resource>=100){region.future=createFutureTerritory({unit,mobile,palette:region.meta.biome});region.group.add(region.future);region.buildValue=resource;}
+      if(region.future){
+        region.buildTarget=resource;region.future.visible=resource>=100||region.buildValue>=100;
+        region.future.userData.update(region.buildValue);setFutureDetail(region.future,region.meta.id===selectedBase,lowPower);
+        region.label.sprite.position.y=.82+region.future.userData.inspect().height*unit+.4;
+      }else region.label.sprite.position.y=1.2;
+      region.stem.visible=resource<100;
       region.targetY = .1 + region.points / RESOURCE_CAP * .9 - (1 - r.economy / 100) * 1.45;
       const crisis = r.economy < CRISIS_THRESHOLD;
       region.targetColor.set(crisis ? 0x634048 : 0xffffff).multiplyScalar(crisis ? 1 : .6 + r.economy / 250);
@@ -571,13 +497,13 @@ export function createScene(canvas, opts = {}) {
         if(Math.abs(stage.scale.y-target)>.001)settling=true;
         stage.scale.y = THREE.MathUtils.lerp(stage.scale.y, target, rate); stage.visible = stage.scale.y > .012;
       }
-      if(region.future?.visible){
+      if(region.future){
+        const delta=region.buildTarget-region.buildValue;
+        if(Math.abs(delta)>.1){region.buildValue=THREE.MathUtils.lerp(region.buildValue,region.buildTarget,reduceMotion?1:rate*1.7);settling=true;}else region.buildValue=region.buildTarget;
+        region.future.visible=region.buildValue>=100;region.future.userData.update(region.buildValue);
         setFutureDetail(region.future,region.meta.id===selected,lowPower);
-        if(region.meta.id===selected&&!reduceMotion){
-          if(region.stage===7)region.future.rotation.y+=dt*.08;
-          else if(region.future.userData.traffic){const unit=region.future.userData.unit,cars=region.future.userData.traffic.children;cars[0].position.x=((t*.55)%6.4-3.2)*unit;cars[0].position.z=unit*.4;cars[1].position.x=-unit*.4;cars[1].position.z=(3.2-(t*.44)%6.4)*unit;}
-          settling=true;
-        }
+        region.label.sprite.position.y=.82+region.future.userData.inspect().height*(region.data.cityRadius*.86/3.8)+.4;
+        if(region.buildValue>5000&&region.meta.id===selected&&!reduceMotion){region.future.userData.tick(t);settling=true;}
       }
       region.beacon.rotation.y += reduceMotion ? 0 : dt * .55; region.beacon.position.y = 2.6 + (reduceMotion ? 0 : Math.sin(t * 1.7) * .12);
       const opacity = region.economy < CRISIS_THRESHOLD ? (1 - region.economy / 100) * .32 : 0;
