@@ -25,6 +25,9 @@ test('сцена: камера следует высоте города, кра�
   api.update({regions:[{id:'astana',baseRegionId:'astana',name:'Астана',points:1000,economy:100,members:[]}]},'astana');step();
   api.focusRegion('astana');step();const group=api.scene.children.find(g=>g.children.some(o=>o.userData.regionId==='astana'));
   assert.ok(group);assert.ok(Math.abs(api.controls.target.y-(group.position.y+.71))<.01);
+  const city=group.children.find(o=>o.name==='territory-construction');assert.ok(city);city.traverse(o=>{if(o.isMesh)assert.equal(o.userData.regionId,'astana');});
+  api.update({regions:[{id:'astana',baseRegionId:'astana',name:'Астана',points:0,developmentPoints:0,economy:100,members:[]}]},'astana');assert.equal(city.visible,false,'empty development must remove the cached city immediately');
+  api.update({regions:[{id:'astana',baseRegionId:'astana',name:'Астана',points:1000,developmentPoints:1000,economy:100,members:[]}]},'astana');for(let i=0;i<30;i++)step();
   const before=api.controls.target.y;api.update({regions:[{id:'astana',baseRegionId:'astana',name:'Астана',points:1000,economy:15,members:[]}]},'astana');step();assert.ok(api.controls.target.y<before);assert.ok(Math.abs(api.controls.target.y-(group.position.y+.71))<.01);
   api.camera.position.copy(api.controls.target).add(new THREE.Vector3(0,.79,.71).normalize().multiplyScalar(2.5));api.camera.lookAt(api.controls.target);api.controls.dispatchEvent({type:'change'});step();
   const label=group.children.find(o=>o.isSprite),projected=label.getWorldPosition(new THREE.Vector3()).project(api.camera);

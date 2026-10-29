@@ -98,14 +98,14 @@ function labelSprite() {
 }
 function paintLabel(label, meta, points, economy, scoreLimit = RESOURCE_CAP, developmentPoints=points) {
   const key = `${meta.name}:${points}:${economy}:${scoreLimit}:${developmentPoints}`; if (label.key === key) return; label.key = key;
-  const ctx = label.canvas.getContext("2d"), done = points >= RESOURCE_CAP, crisis = economy < CRISIS_THRESHOLD;
+  const ctx = label.canvas.getContext("2d"), done = developmentPoints >= RESOURCE_CAP, crisis = economy < CRISIS_THRESHOLD;
   const color = crisis ? "#ff7468" : done ? "#ffe2a1" : meta.glow;
   ctx.clearRect(0, 0, 768, 192); ctx.fillStyle = "rgba(5,18,25,.93)"; ctx.strokeStyle = color; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.roundRect(4, 4, 760, 180, 24); ctx.fill(); ctx.stroke();
   ctx.fillStyle = color; ctx.font = "700 42px sans-serif"; ctx.textAlign = "center";
   ctx.fillText(meta.name + (done ? "  ✦" : ""), 384, 65);
   ctx.fillStyle = "#d8e8e7"; ctx.font = "25px sans-serif";
-  ctx.fillText(`${points} / ${scoreLimit===null?'∞':'1000'}   ·   ${economy}%   ·   ${developmentFor(developmentPoints).name}`, 384, 113);
+  ctx.fillText(`${developmentFor(developmentPoints).resource} / ${developmentFor(developmentPoints).goal}   ·   ${economy}%   ·   ${developmentFor(developmentPoints).name}`, 384, 113);
   ctx.fillStyle = "#203c43"; ctx.fillRect(40, 143, 688, 7); ctx.fillStyle = color; ctx.fillRect(40, 143, 688 * developmentFor(developmentPoints).progress, 7);
   label.texture.needsUpdate = true;
 }
@@ -386,7 +386,7 @@ export function createScene(canvas, opts = {}) {
     wake();
   }
   function overview() {
-    selected = null;mapPreview=null;regionSelect.value="";if(latestState)update(latestState,lastFocusId);
+    selected = null;mapPreview=null;regionSelect.value="";const teamPicker=document.getElementById?.('map-team-select');if(teamPicker)teamPicker.value='';if(latestState)update(latestState,lastFocusId);
     const halfFov = THREE.MathUtils.degToRad(camera.fov / 2), distance = Math.max(44, 44 / (Math.tan(halfFov) * camera.aspect));
     moveCamera(new THREE.Vector3(0, 0, 0), Math.min(138, distance));
   }
@@ -394,7 +394,7 @@ export function createScene(canvas, opts = {}) {
   function focusRegion(id) {
     const team=latestState?.regions.find(t=>t.id===id),baseId=team?metadataFor(team).baseRegionId:id;
     const region = regions.find(r => r.meta.id === baseId); if (!region) return;
-    selected = baseId;regionSelect.value=id;mapPreview=team?.id||null;if(latestState)update(latestState,lastFocusId);
+    selected = baseId;regionSelect.value=id;const teamPicker=document.getElementById?.('map-team-select');if(teamPicker)teamPicker.value=team?.id||'';mapPreview=team?.id||null;if(latestState)update(latestState,lastFocusId);
     const width = region.data.bounds[2] - region.data.bounds[0], depth = region.data.bounds[3] - region.data.bounds[1];
     const target = new THREE.Vector3(region.data.city[0], region.group.position.y + .71, region.data.city[1]);
     const distance = Math.max(4, Math.max(width / Math.max(.8, camera.aspect), depth * .9) * 1.65);
@@ -408,7 +408,7 @@ export function createScene(canvas, opts = {}) {
   const onUp = e => {
     if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6) return;
     const rect = canvas.getBoundingClientRect(); pointer.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1);
-    raycaster.setFromCamera(pointer, camera); const hit = raycaster.intersectObjects(surfaces, false)[0];
+    scene.updateMatrixWorld(true);raycaster.setFromCamera(pointer, camera);const pickable=surfaces.filter(o=>{if(o.isInstancedMesh&&!o.count)return false;for(let parent=o;parent;parent=parent.parent)if(!parent.visible)return false;return true;});const hit=raycaster.intersectObjects(pickable,false)[0];
     if (hit) focusRegion(hit.object.userData.regionId); down = null;
   };
   canvas.addEventListener("pointerdown", onDown); canvas.addEventListener("pointerup", onUp);
@@ -423,7 +423,7 @@ export function createScene(canvas, opts = {}) {
   let stateKey='';
   function update(state, selectedRegionId) {
     syncWorldAchievements(state);
-    latestState=state;if(selectedRegionId!==lastFocusId){mapPreview=selectedRegionId||null;lastFocusId=selectedRegionId}const previewId=mapPreview,key=JSON.stringify([previewId,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.cityId,r.points,r.developmentPoints,r.economy,r.scoreLimit,r.occupied??r.members.length])]);if(key===stateKey)return;stateKey=key;
+    latestState=state;if(selectedRegionId!==lastFocusId){mapPreview=selectedRegionId||null;lastFocusId=selectedRegionId}const previewId=mapPreview,key=JSON.stringify([previewId,selected,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.cityId,r.points,r.developmentPoints,r.economy,r.scoreLimit,r.occupied??r.members.length])]);if(key===stateKey)return;stateKey=key;
     const cityOptions=state.regions.filter(t=>t.cityId).map(t=>`<option value="${t.id}">${String(t.name).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}</option>`).join('');if(regionSelect.dataset?.cities!==cityOptions){const value=regionSelect.value;regionSelect.innerHTML='<option value="">Найти регион…</option>'+REGIONS.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')+(cityOptions?'<optgroup label="Команды городов · территория области">'+cityOptions+'</optgroup>':'');if(regionSelect.dataset)regionSelect.dataset.cities=cityOptions;regionSelect.value=value;regionSelect.title='Города команд показываются на территории своей области.';}
     const selectedTeam = state.regions.find(t=>t.id===previewId);
     const selectedBase = selectedTeam ? metadataFor(selectedTeam).baseRegionId : null;
@@ -432,9 +432,9 @@ export function createScene(canvas, opts = {}) {
       region.points = clamp(r.points, 0, RESOURCE_CAP); region.economy = r.economy;
       region.stage = developmentFor(r.developmentPoints??r.points).index;
       const resource=r.developmentPoints??r.points,unit=region.data.cityRadius*.86/3.8;
-      if(!region.future&&resource>=100){region.future=createFutureTerritory({unit,mobile,palette:region.meta.biome});region.group.add(region.future);region.buildValue=resource;}
+      if(!region.future&&resource>=100){region.future=createFutureTerritory({unit,mobile,palette:region.meta.biome});region.future.userData.regionId=region.meta.id;region.future.traverse(o=>{if(o.isMesh){o.userData.regionId=region.meta.id;surfaces.push(o);}});region.group.add(region.future);region.buildValue=resource;}
       if(region.future){
-        region.buildTarget=resource;region.future.visible=resource>=100||region.buildValue>=100;
+        region.buildTarget=resource;if(resource<100)region.buildValue=resource;region.future.visible=(resource>=100||region.buildValue>=100)&&(!selected||region.meta.id===selected);
         region.future.userData.update(region.buildValue);setFutureDetail(region.future,region.meta.id===selectedBase,lowPower);
         region.label.sprite.position.y=.82+region.future.userData.inspect().height*unit+.4;
       }else region.label.sprite.position.y=1.2;
@@ -468,7 +468,7 @@ export function createScene(canvas, opts = {}) {
       const box={x:x-pixelWidth/2,y:y-pixelWidth/4,w:pixelWidth,h:pixelWidth/4};
       const inView=projected.z>-1&&projected.z<1&&x>0&&x<width&&y>0&&y<height;
       const overlaps=placed.some(b=>box.x<b.x+b.w&&box.x+box.w>b.x&&box.y<b.y+b.h&&box.y+box.h>b.y);
-      r.label.sprite.visible=inView&&(!overlaps||r.meta.id===selected);
+      r.label.sprite.visible=inView&&(!selected||r.meta.id===selected)&&(!overlaps||r.meta.id===selected);
       if(r.label.sprite.visible)placed.push(box);
     }
   }
@@ -500,7 +500,7 @@ export function createScene(canvas, opts = {}) {
       if(region.future){
         const delta=region.buildTarget-region.buildValue;
         if(Math.abs(delta)>.1){region.buildValue=THREE.MathUtils.lerp(region.buildValue,region.buildTarget,reduceMotion?1:rate*1.7);settling=true;}else region.buildValue=region.buildTarget;
-        region.future.visible=region.buildValue>=100;region.future.userData.update(region.buildValue);
+        region.future.visible=region.buildValue>=100&&(!selected||region.meta.id===selected);region.future.userData.update(region.buildValue);
         setFutureDetail(region.future,region.meta.id===selected,lowPower);
         region.label.sprite.position.y=.82+region.future.userData.inspect().height*(region.data.cityRadius*.86/3.8)+.4;
         if(region.buildValue>5000&&region.meta.id===selected&&!reduceMotion){region.future.userData.tick(t);settling=true;}

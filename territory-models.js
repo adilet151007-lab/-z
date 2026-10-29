@@ -112,7 +112,7 @@ export function createFutureTerritory({stage=0,unit=1,mobile=false,palette='step
     const strips=detailed&&!lowPower?7:3;for(let k=0;k<strips;k++)put('light',x-.75+k*1.5/(strips-1),lift+.64,z,.015,.008,.7,0x91c4de);
    }
   }
-  for(const [k,mesh]of Object.entries(layer.meshes)){mesh.count=count[k];mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;}
+  for(const [k,mesh]of Object.entries(layer.meshes)){mesh.count=count[k];mesh.boundingSphere=null;mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;}
  }
  function update(value=resource){resource=clamp(value,0,10000);const key=resource+':'+focused+':'+lowPower;if(key===last)return;last=key;const plan=territoryPlan(resource);draw(focused?detail:simple,plan,focused);root.userData.plan=plan;root.userData.detail.visible=focused;root.userData.simple.visible=!focused;}
  root.userData.simple=simple.group;root.userData.detail=detail.group;
