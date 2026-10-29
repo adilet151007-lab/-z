@@ -1,3 +1,4 @@
+import {setupSessionFinale} from './session-finale.js';
 import {createJoinQrButton} from './join-qr.js';
 import {applyRoomPresentation} from './room-layout.js';
 import {t as uiText,tx as uiTpl} from './ui-preferences.js';
@@ -213,6 +214,7 @@ function collectionArtwork(effect){
 }
 
 export function setupAchievements(engine){
+  const stopFinale=setupSessionFinale(engine);
   let layer=null,timer=null,worldTimer=null,worldActive=false,worldMatchId=null,stopDrill=()=>{},identity='',ready=false,shelfKey='';const seen=new Set(),worldSeen=new Set(),queue=[],noticed=new Set();
   try{for(const id of JSON.parse(localStorage.getItem('cq_awards_seen_v1')||'[]'))if(typeof id==='string')seen.add(id)}catch{}
   const close=()=>{clearTimeout(timer);stopDrill();stopDrill=()=>{};layer?.remove();layer=null;document.body.classList.remove('achievement-playing','achievement-notice')};
@@ -288,7 +290,7 @@ export function setupAchievements(engine){
   const keydown=event=>{if(event.key==='Escape'){queue.length=0;close()}},visibility=()=>{if(document.hidden){queue.length=0;close();clearWorld()}};
   document.addEventListener('click',replay);document.addEventListener('keydown',keydown);document.addEventListener('visibilitychange',visibility);engine.socket.on('achievement:preview',preview);
   const off=engine.onChange(render),tools=document.getElementById('achievement-tools'),stopTools=tools?setupAchievementControls(engine,tools):null;
-  return()=>{queue.length=0;close();clearWorld();off();stopTools?.();document.removeEventListener('click',replay);document.removeEventListener('keydown',keydown);document.removeEventListener('visibilitychange',visibility);engine.socket.off('achievement:preview',preview)};
+  return()=>{stopFinale();queue.length=0;close();clearWorld();off();stopTools?.();document.removeEventListener('click',replay);document.removeEventListener('keydown',keydown);document.removeEventListener('visibilitychange',visibility);engine.socket.off('achievement:preview',preview)};
 }
 
 export class GameEngine {
