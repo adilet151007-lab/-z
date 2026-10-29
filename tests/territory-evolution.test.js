@@ -1,10 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as THREE from 'three';
-import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {GameLogic} from '../game-logic.js';
 import {developmentFor,mapRegionsFor} from '../game-config.js';
-import {createFutureTerritory,setFutureDetail} from '../territory-models.js';
+import {createFutureTerritory,setFutureDetail,territoryPlan} from '../territory-models.js';
 
 function fixture(){const g=new GameLogic();g.enableUniversal();g.enableFlexibleTeams();const j=g.joinTeam('saryarka','Студент');return {g,pid:j.player.pid};}
 function answer(g){g.startRound(g.state.questions[0].id,60);const t=g.region('saryarka'),p=t.members[0];g.castVote(t.id,p.pid,g.state.round.questionSnapshot.correct,g.state.round.id);g.confirmVote(t.id,p.pid,p.pid,g.state.round.id);g.resolveRound();}
@@ -25,20 +23,23 @@ test('old saves migrate existing resources; malformed progress is rejected; econ
  assert.equal(new GameLogic(old).region(t.id).developmentPoints,750);
  const bad=structuredClone(g.state);bad.regions[0].developmentPoints=10001;assert.throws(()=>new GameLogic(bad));
  g.adjustEconomy(t.id,-20);answer(g);assert.equal(t.developmentPoints,750);assert.equal(t.economy,100);
- g.adjustPoints(t.id,-100);assert.equal(t.developmentPoints,750);
- const patch=g.editorSnapshot();patch.regions[0].developmentPoints=10000;g.applyRawState(patch);assert.equal(g.region(t.id).developmentPoints,750);
+ g.adjustPoints(t.id,-100);assert.equal(t.developmentPoints,650);
+ const patch=g.editorSnapshot();patch.regions[0].developmentPoints=10000;g.applyRawState(patch);assert.equal(g.region(t.id).developmentPoints,650);
 });
-test('future models have bounded merged geometry, no lights/shadows and only focused detail',()=>{
- const materials=new Map(),geometries=new Set(),material=(key,color,extra)=>{if(!materials.has(key))materials.set(key,new THREE.MeshStandardMaterial({color,...extra}));return materials.get(key);};
- const box=new THREE.BoxGeometry(),cylinder=new THREE.CylinderGeometry(1,1,1,12);
- function batch(){const entries=new Map();return {add(g,m,x,y,z,sx,sy,sz,r=0){const matrix=new THREE.Matrix4().compose(new THREE.Vector3(x,y,z),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),r),new THREE.Vector3(sx,sy,sz));if(!entries.has(m))entries.set(m,[]);entries.get(m).push(g.clone().applyMatrix4(matrix));},finish(){const root=new THREE.Group();for(const[m,gs]of entries){root.add(new THREE.Mesh(mergeGeometries(gs),m));gs.forEach(g=>g.dispose());}return root;}};}
- for(const stage of [6,7])for(const mobile of [true,false]){
-  const root=createFutureTerritory({stage,unit:1,batch,box,cylinder,material,mobile});let triangles=0,meshes=0;
-  root.traverse(o=>{assert.equal(!!o.isLight,false);if(o.isMesh){meshes++;triangles+=(o.geometry.index?.count??o.geometry.attributes.position.count)/3;assert.equal(o.castShadow,false);geometries.add(o.geometry);}});
-  assert.ok(meshes<=14);assert.ok(triangles<12000);
-  setFutureDetail(root,true,false);assert.equal(root.userData.detail.visible,true);assert.equal(root.userData.simple.visible,false);
-  setFutureDetail(root,false,false);assert.equal(root.userData.detail.visible,false);
-  setFutureDetail(root,true,true);assert.equal(root.userData.detail.visible,false);
- }
- geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());box.dispose();cylinder.dispose();
+test('city loses storeys and regresses across thresholds when cultural resource falls',()=>{
+ const {g,pid}=fixture();g.grantAchievement('infinity-gauntlet','player',pid);g.adjustPoints('saryarka',5000);
+ const before=territoryPlan(g.region('saryarka').developmentPoints);g.adjustPoints('saryarka',-25);
+ const after=territoryPlan(g.region('saryarka').developmentPoints);assert.equal(after.resource,4975);assert.ok(after.totalFloors<before.totalFloors);assert.equal(developmentFor(after.resource).index,5);
+ g.adjustPoints('saryarka',-4475);assert.equal(g.region('saryarka').developmentPoints,500);assert.equal(developmentFor(500).index,3);
+ const restored=new GameLogic(structuredClone(g.state));assert.equal(restored.region('saryarka').developmentPoints,500);
+ const solo=fixture();solo.g.setGameMode('solo');solo.g.adjustCapital(solo.pid,100);solo.g.adjustCapital(solo.pid,-25);assert.equal(solo.g.region('saryarka').developmentPoints,75);
+});
+test('floor construction changes inside milestones; instanced models are bounded and reversible',()=>{
+ assert.ok(territoryPlan(525).totalFloors>territoryPlan(500).totalFloors);assert.ok(territoryPlan(2525).totalFloors>territoryPlan(2500).totalFloors);
+ const root=createFutureTerritory({unit:1,mobile:true});setFutureDetail(root,true,true);
+ for(const resource of [0,100,500,1000,2525,5000,7500,9999,10000,4975,0]){root.userData.update(resource);assert.equal(root.userData.inspect().resource,resource);}
+ root.userData.update(5000);const high=root.userData.inspect().totalFloors;root.userData.update(4975);assert.ok(root.userData.inspect().totalFloors<high);
+ let calls=0,triangles=0;const geometries=new Set(),materials=new Set();root.traverse(o=>{assert.equal(!!o.isLight,false);if(o.isMesh){assert.equal(o.castShadow,false);assert.equal(o.receiveShadow,false);geometries.add(o.geometry);materials.add(o.material);if(o.parent.visible&&o.count){calls++;triangles+=(o.geometry.index?.count??o.geometry.attributes.position.count)/3*o.count;}}});assert.ok(calls<=8);assert.ok(triangles<100000);
+ assert.equal(root.userData.detail.visible,true);setFutureDetail(root,false,true);assert.equal(root.userData.detail.visible,false);
+ geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());
 });
