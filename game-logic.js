@@ -189,7 +189,7 @@ export class GameLogic {
     const current=team.developmentPoints??Math.min(DEVELOPMENT_CAP,team.points);
     team.developmentPoints=amount<0?Math.max(0,current+amount):Math.max(current,Math.min(limit>RESOURCE_CAP?DEVELOPMENT_CAP:RESOURCE_CAP,current+amount));
   }
-  adjustCapital(pid,delta){const m=this.state.regions.flatMap(t=>t.members).find(m=>m.pid===pid);ensure(m&&integer(delta,-100000,100000),'Некорректное изменение капитала.');const before=m.capital||0;m.capital=Math.min(Math.max(before,this.scoreLimit('player',pid)),Math.max(0,before+delta));if(this.state.settings.mode==='solo')this.growTerritory(this.state.regions.find(t=>t.members.includes(m)),m.capital-before,this.scoreLimit('player',pid));this.touch()}
+  adjustCapital(pid,delta){const m=this.state.regions.flatMap(t=>t.members).find(m=>m.pid===pid);ensure(m&&integer(delta,-100000,100000),'Некорректное изменение капитала.');const before=m.capital||0;m.capital=Math.min(Math.max(before,this.scoreLimit('player',pid)),Math.max(0,before+delta));if(this.state.settings.mode==='solo')this.growTerritory(this.state.regions.find(t=>t.members.includes(m)),delta<0?delta:m.capital-before,this.scoreLimit('player',pid));this.touch()}
 
   updateBranding(raw){ensure(raw&&typeof raw==='object'&&!Array.isArray(raw),'Проверьте настройки организации.');const next=validateBranding({...this.state.branding,...raw});ensure(!this.state.round||this.state.round.resolved||next.subject===this.state.branding.subject,'Завершите вопрос перед сменой предмета.');this.state.branding=next;this.log('Обновлены оформление и настройки организации.');this.touch()}
   publicBranding(){const {logo,...publicSettings}=this.state.branding;return {...publicSettings,subjects:[...publicSettings.subjects],logoUrl:logo?'/api/logo?v='+hashToken(logo).slice(0,16):''}}
@@ -650,7 +650,7 @@ export class GameLogic {
     const previous = region.points;region.developmentPoints??=Math.min(DEVELOPMENT_CAP,previous);
     region.points = Math.min(Math.max(region.points,this.scoreLimit('team',regionId)), Math.max(0, region.points + delta));
     const applied = region.points - previous;
-    this.growTerritory(region,applied);
+    this.growTerritory(region,delta<0?delta:applied);
     this.log(`Ресурс «${this.region(regionId).name}»: ${applied > 0 ? "+" : ""}${applied}. ${region.points}/${this.scoreLimit('team',regionId)>RESOURCE_CAP?'∞':RESOURCE_CAP}${region.points === RESOURCE_CAP ? " — город построен." : "."}`);
     this.touch();
   }
@@ -811,7 +811,7 @@ export class GameLogic {
     const questions = this.state.questions, revision = this.state.revision, settings = this.state.settings;
     const awardProfiles=this.state.awardProfiles;
     const exitRequests=this.state.exitRequests,presentationEffectsEnabled=this.state.presentationEffectsEnabled,branding=this.state.branding,restorePoints=this.state.restorePoints,accessControl=this.state.accessControl;
-    const teams = this.state.regions.map(r => ({...r,points:0,economy:100,members:r.members.filter(m=>m.creatorId).map(m=>({...m,...(settings.universal?{capital:0,streak:0}:{})}))}));
+    const teams = this.state.regions.map(r => ({...r,points:0,developmentPoints:0,economy:100,members:r.members.filter(m=>m.creatorId).map(m=>({...m,...(settings.universal?{capital:0,streak:0}:{})}))}));
     this.state = freshState();
     this.state.match=null;this.state.achievements=[];this.state.awardProfiles=awardProfiles;this.state.awardSystemVersion=1;
     this.state.questions = questions;
@@ -821,7 +821,7 @@ export class GameLogic {
     this.state.revision = revision;
     if(exitRequests)this.state.exitRequests=exitRequests;
     if(presentationEffectsEnabled!==undefined)this.state.presentationEffectsEnabled=presentationEffectsEnabled;
-    this.log("Игра сброшена. Банк вопросов и развитие территорий сохранены.");
+    this.log("Игра сброшена. Очки и развитие территорий обнулены. Банк вопросов сохранён.");
     this.touch();
   }
   editorSnapshot() {

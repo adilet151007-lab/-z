@@ -6,13 +6,13 @@ import {createFutureTerritory,setFutureDetail,territoryPlan} from '../territory-
 
 function fixture(){const g=new GameLogic();g.enableUniversal();g.enableFlexibleTeams();const j=g.joinTeam('saryarka','Студент');return {g,pid:j.player.pid};}
 function answer(g){g.startRound(g.state.questions[0].id,60);const t=g.region('saryarka'),p=t.members[0];g.castVote(t.id,p.pid,g.state.round.questionSnapshot.correct,g.state.round.id);g.confirmVote(t.id,p.pid,p.pid,g.state.round.id);g.resolveRound();}
-test('territory survives lesson resets and persistence; Infinity gates growth past 1000',()=>{
+test('full reset clears city development; persistence and Infinity growth work',()=>{
  let {g,pid}=fixture();g.adjustPoints('saryarka',1000);g.resetGame();
- assert.equal(g.region('saryarka').points,0);assert.equal(g.region('saryarka').developmentPoints,1000);
- pid=g.joinTeam('saryarka','Другой студент').player.pid;answer(g);assert.equal(g.region('saryarka').developmentPoints,1000);
+ assert.equal(g.region('saryarka').points,0);assert.equal(g.region('saryarka').developmentPoints,0);
+ pid=g.joinTeam('saryarka','Другой студент').player.pid;answer(g);assert.equal(g.region('saryarka').developmentPoints,25);
  g.grantAchievement('infinity-gauntlet','player',pid);g.region('saryarka').developmentPoints=4975;answer(g);g.resolveRound();
  assert.equal(g.region('saryarka').developmentPoints,5000);assert.equal(developmentFor(5000).name,'Неоновый мегаполис');
- g=new GameLogic(structuredClone(g.state));g.resetGame();assert.equal(g.region('saryarka').developmentPoints,5000);
+ g=new GameLogic(structuredClone(g.state));assert.equal(g.region('saryarka').developmentPoints,5000);g.resetGame();assert.equal(g.region('saryarka').developmentPoints,0);
  pid=g.joinTeam('saryarka','Третий студент').player.pid;g.grantAchievement('infinity-gauntlet','player',pid);g.region('saryarka').developmentPoints=9975;answer(g);
  assert.equal(g.region('saryarka').developmentPoints,10000);assert.equal(developmentFor(10000).complete,true);
  g.setPerksEnabled(false);answer(g);assert.equal(g.region('saryarka').developmentPoints,10000);
@@ -33,6 +33,13 @@ test('city loses storeys and regresses across thresholds when cultural resource 
  g.adjustPoints('saryarka',-4475);assert.equal(g.region('saryarka').developmentPoints,500);assert.equal(developmentFor(500).index,3);
  const restored=new GameLogic(structuredClone(g.state));assert.equal(restored.region('saryarka').developmentPoints,500);
  const solo=fixture();solo.g.setGameMode('solo');solo.g.adjustCapital(solo.pid,100);solo.g.adjustCapital(solo.pid,-25);assert.equal(solo.g.region('saryarka').developmentPoints,75);
+});
+test('legacy saved city can be reduced with zero lesson points, in team and Solo modes',()=>{
+ const {g,pid}=fixture(),t=g.region('saryarka');t.points=0;t.developmentPoints=6600;
+ g.adjustPoints(t.id,-1000);assert.equal(t.points,0);assert.equal(t.developmentPoints,5600);
+ g.adjustPoints(t.id,-100000);assert.equal(t.developmentPoints,0);
+ g.setGameMode('solo');t.developmentPoints=150;g.adjustCapital(pid,-100);assert.equal(t.developmentPoints,50);
+ g.resetGame();assert.ok(g.state.regions.every(r=>r.points===0&&r.developmentPoints===0));
 });
 test('floor construction changes inside milestones; instanced models are bounded and reversible',()=>{
  assert.ok(territoryPlan(525).totalFloors>territoryPlan(500).totalFloors);assert.ok(territoryPlan(2525).totalFloors>territoryPlan(2500).totalFloors);

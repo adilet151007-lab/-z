@@ -39,7 +39,7 @@ $("teacher-login-form").addEventListener("submit",async e=>{
  finally{loggingIn=false;$("teacher-login-btn").disabled=!engine.connected}
 });
 $("logout-btn").addEventListener("click",()=>act(()=>engine.teacherLogout()));
-$("reset-btn").addEventListener("click",()=>{if(confirm( uiText("Сбросить очки, обычных участников и раунд? Персональные администраторы, названия команд, развитие территорий и банк вопросов сохранятся.")))act(()=>engine.resetGame(), uiText("Новая игра начата."))});
+$("reset-btn").addEventListener("click",()=>{if(confirm( uiText("Сбросить очки, развитие всех городов, обычных участников и раунд? Персональные администраторы, названия команд и банк вопросов сохранятся.")))act(()=>engine.resetGame(), uiText("Новая игра начата."))});
 let adminCollapsed=false;
 $("collapse-admin-btn").addEventListener("click",()=>{adminCollapsed=!adminCollapsed;document.body.classList.toggle("teacher-ui-collapsed",adminCollapsed);$("collapse-admin-btn").textContent=adminCollapsed? uiText("Развернуть управление"): uiText("Свернуть управление");scene?.resize()});
 async function removeParticipant(regionId,pid){const result=await engine.freeSlot(regionId,pid);message(result.exitRequested? uiText('Запрос на выход отправлен. Участник должен принять или отклонить его.'): uiText('Участник исключён, место освобождено.'))}
