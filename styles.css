@@ -544,3 +544,29 @@ body.telemetry-open,body.presentation-signal{overflow:hidden}
 .student-page #region-grid[hidden],.student-page #registration-empty[hidden],.student-page #registration-clear-search[hidden]{display:none!important}
 .student-page #registration-empty{padding:14px;border:1px solid var(--panel-brd);border-radius:10px;line-height:1.6;margin:12px 0;color:var(--ink)}
 .student-page #registration-clear-search{min-height:44px;margin-top:8px}
+
+/* Map header and footer controls stay outside the render surface. */
+.teacher-page .atlas-projector{box-sizing:border-box;padding:60px 0 78px}
+.student-page .stage-wrap{box-sizing:border-box;padding:60px 0 24px}
+:is(.atlas-projector,.stage-wrap) .map-tools{top:8px;left:10px;right:10px;max-width:none;flex-direction:row;align-items:center;gap:6px}
+:is(.atlas-projector,.stage-wrap) .map-tools button{min-height:44px;padding:8px;font-size:11px;flex:none}
+:is(.atlas-projector,.stage-wrap) .map-tools select{height:44px;min-width:0;max-width:none;width:0;flex:1;font-size:14px;padding:6px}
+:is(.atlas-projector,.stage-wrap) .map-caption,:is(.atlas-projector,.stage-wrap) .hint{display:none}
+.teacher-page .map-team-picker{left:10px;right:10px;bottom:8px;width:auto;max-width:none;font-size:10px;gap:2px}
+.teacher-page .map-team-picker select{height:44px;min-height:44px;font-size:14px;padding:8px}
+.teacher-page .atlas-projector .map-credit{left:12px;bottom:68px;max-width:calc(100% - 24px);font-size:8px;line-height:1.2}
+.student-page .stage-wrap .map-credit{left:12px;bottom:7px;max-width:calc(100% - 24px);font-size:8px}
+/* Phone map controls occupy their own bands, outside the rendered canvas. */
+@media(max-width:700px), (pointer:coarse) and (max-width:1000px){
+ .teacher-page .atlas-projector,html[data-room-layout] body.teacher-page .room-layout-grid>.atlas-projector{box-sizing:border-box;height:380px!important;min-height:380px!important;max-height:380px!important;padding:60px 0 78px!important}
+ .student-page .stage-wrap,html[data-room-layout] body.student-page .room-layout-grid>.stage-wrap{box-sizing:border-box;height:340px!important;min-height:340px!important;max-height:340px!important;flex:0 0 340px!important;padding:60px 0 24px!important}
+ .teacher-page .atlas-projector #scene-canvas,.student-page .stage-wrap #scene-canvas{height:100%;width:100%}
+ :is(.atlas-projector,.stage-wrap) .map-tools{top:8px;left:10px;right:10px;max-width:none;flex-direction:row!important;align-items:center;gap:6px}
+ :is(.atlas-projector,.stage-wrap) .map-tools button{min-height:44px;padding:8px;font-size:11px;flex:none}
+ :is(.atlas-projector,.stage-wrap) .map-tools select{height:44px;min-width:0;max-width:none;width:0;flex:1;font-size:16px;padding:6px}
+ :is(.atlas-projector,.stage-wrap) .map-caption,:is(.atlas-projector,.stage-wrap) .hint{display:none}
+ .teacher-page .map-team-picker{left:10px;right:10px;bottom:8px;width:auto;max-width:none;font-size:10px;gap:2px}
+ .teacher-page .map-team-picker select{height:44px;min-height:44px;font-size:16px;padding:8px}
+ .teacher-page .atlas-projector .map-credit{left:12px;bottom:68px;max-width:calc(100% - 24px);font-size:8px;line-height:1.2}
+ .student-page .stage-wrap .map-credit{left:12px;bottom:7px;max-width:calc(100% - 24px);font-size:8px}
+}
