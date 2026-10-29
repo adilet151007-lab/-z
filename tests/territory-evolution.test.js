@@ -43,3 +43,13 @@ test('floor construction changes inside milestones; instanced models are bounded
  assert.equal(root.userData.detail.visible,true);setFutureDetail(root,false,true);assert.equal(root.userData.detail.visible,false);
  geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());
 });
+
+test('one territory renders exactly one evolution era, including backward transitions',()=>{
+ const root=createFutureTerritory({unit:1});setFutureDetail(root,true,false);
+ const counts=()=>Object.fromEntries(root.userData.detail.children.map(m=>[m.userData.part,m.count]));
+ for(const value of [5000,6600,9999]){root.userData.update(value);const c=counts();assert.equal(root.userData.inspect().kind,'neon');assert.equal(c.roof,0);assert.equal(c.hull,0);assert.equal(c.ring,0);assert.ok(c.glass>0);}
+ root.userData.update(10000);let c=counts();assert.equal(root.userData.inspect().kind,'orbital');assert.equal(c.roof,0);assert.equal(c.road,0);assert.equal(c.glass,0);assert.equal(c.stone,4);assert.ok(c.ring>0);
+ root.userData.update(6600);c=counts();assert.equal(c.ring,0);assert.equal(c.hull,0);assert.ok(c.glass>0);
+ root.userData.update(500);c=counts();assert.equal(root.userData.inspect().kind,'city');assert.ok(c.roof>0);assert.equal(c.ring,0);
+ const geometry=new Set(),materials=new Set();root.traverse(o=>{if(o.isMesh){geometry.add(o.geometry);materials.add(o.material);}});geometry.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());
+});
