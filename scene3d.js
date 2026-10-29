@@ -302,7 +302,7 @@ export function createScene(canvas, opts = {}) {
       if (!data.polygons.some(p => polygonContains(p, x, z)) || Math.hypot(x - data.city[0], z - data.city[1]) < data.cityRadius * 1.3) continue;
       const h = heightAt(meta.id, x, z, data), scale = .1 + random() * .13;
       if (meta.biome === "desert") {
-        nature.add(cylinder, stone, x - data.city[0], h + scale, z - data.city[1], scale * .7, scale * 2.8, scale * .65);
+        nature.add(dome, stone, x - data.city[0], h + .015, z - data.city[1], scale * 1.5, scale * .9, scale * 1.1);
       } else if (h < 2.3) {
         nature.add(cone, green, x - data.city[0], h + scale * 1.5, z - data.city[1], scale, scale * 3, scale);
       }

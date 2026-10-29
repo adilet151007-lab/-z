@@ -5,19 +5,24 @@ const plots=[];
 for(let x=-4;x<=4;x++)for(let z=-4;z<=4;z++)if(x&&z)plots.push({x:x*.76,z:z*.76,d:Math.hypot(x,z),seed:(x+5)*17+(z+5)*11});
 plots.sort((a,b)=>a.d-b.d||a.seed-b.seed);
 plots.forEach((p,i)=>{p.base=1+i%4;p.top=i<24?14+i%5*3:p.base;});
-const baseQueue=[],towerQueue=[];
+const baseQueue=[],towerQueue=[],neonQueue=[];
 plots.forEach((p,i)=>{for(let f=1;f<=p.base;f++)baseQueue.push({i,f,cost:p.d+f*1.3});for(let f=p.base+1;f<=p.top;f++)towerQueue.push({i,f,cost:(f-p.base)*.7+p.d*.2});});
 baseQueue.sort((a,b)=>a.cost-b.cost||a.i-b.i);towerQueue.sort((a,b)=>a.cost-b.cost||a.i-b.i);
+plots.forEach((p,i)=>{for(let f=1;f<=(i<24?6:2);f++)neonQueue.push({i,f,cost:f+p.d*.2});});neonQueue.sort((a,b)=>a.cost-b.cost||a.i-b.i);
 
 // A reversible construction plan: each resource interval adds actual storeys,
 // rather than scaling a finished skyline or swapping it at one threshold.
 export function territoryPlan(value){
- const resource=clamp(Number(value)||0,0,10000),floors=plots.map(()=>0);
- const base=resource<100?0:Math.min(baseQueue.length,4+Math.floor((Math.min(resource,1000)-100)/900*(baseQueue.length-4)));
- const extra=Math.floor(clamp((resource-1000)/4000,0,1)*towerQueue.length);
- for(let k=0;k<base;k++)floors[baseQueue[k].i]++;
- for(let k=0;k<extra;k++)floors[towerQueue[k].i]++;
- return {resource,floors,totalFloors:base+extra,buildings:floors.filter(Boolean).length,neon:clamp((resource-1000)/4000,0,1),orbital:clamp((resource-5000)/5000,0,1)};
+ const resource=clamp(Number(value)||0,0,10000),kind=resource<100?'terrain':resource<5000?'city':resource<10000?'neon':'orbital',floors=plots.map(()=>0);
+ if(kind==='neon'){
+  plots.forEach((p,i)=>{floors[i]=Math.max(5,p.top);});
+  const extra=Math.floor((resource-5000)/5000*neonQueue.length);for(let k=0;k<extra;k++)floors[neonQueue[k].i]++;
+ }else if(kind==='city'){
+  const base=Math.min(baseQueue.length,4+Math.floor((Math.min(resource,1000)-100)/900*(baseQueue.length-4)));
+  const extra=Math.floor(clamp((resource-1000)/4000,0,1)*towerQueue.length);
+  for(let k=0;k<base;k++)floors[baseQueue[k].i]++;for(let k=0;k<extra;k++)floors[towerQueue[k].i]++;
+ }
+ return {resource,kind,floors,totalFloors:floors.reduce((a,b)=>a+b,0),buildings:floors.filter(Boolean).length,neon:kind==='neon'?1:0,orbital:kind==='orbital'?1:0};
 }
 
 export function createFutureTerritory({stage=0,unit=1,mobile=false,palette='steppe'}={}){
@@ -33,10 +38,10 @@ export function createFutureTerritory({stage=0,unit=1,mobile=false,palette='step
   ring:new THREE.MeshStandardMaterial({color:0xcedce8,emissive:0x23506b,emissiveIntensity:.25,metalness:.55,roughness:.4})
  };
  const geometry={stone:new THREE.BoxGeometry(),glass:new THREE.BoxGeometry(),trim:new THREE.BoxGeometry(),roof:new THREE.ConeGeometry(1,1,4),road:new THREE.BoxGeometry(),light:new THREE.BoxGeometry(),hull:new THREE.CylinderGeometry(1,1,1,12),ring:new THREE.TorusGeometry(2.55,.12,6,4,Math.PI*2/48*.98)};
- const capacity={stone:900,glass:3600,trim:2000,roof:128,road:128,light:1400,hull:160,ring:128};
+ const capacity={stone:1100,glass:3600,trim:2000,roof:128,road:128,light:1400,hull:160,ring:128};
  const dummy=new THREE.Object3D(),color=new THREE.Color();
  const warm={steppe:[0xd8c8a3,0xb9ad93,0xe9dfc8],mountain:[0xd6d5c9,0xb0bfc2,0xe9e5d5],desert:[0xe2cda6,0xc5a47c,0xeee0c4],south:[0xd5d6bd,0xc8b89b,0xf0e3c5]}[palette]||[0xd8c8a3,0xb9ad93,0xe9dfc8];
- function layer(name){const group=new THREE.Group();group.name=name;const meshes={};for(const k of Object.keys(mats)){const mesh=new THREE.InstancedMesh(geometry[k],mats[k],capacity[k]);mesh.count=0;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;mesh.castShadow=false;mesh.receiveShadow=false;group.add(mesh);meshes[k]=mesh;}root.add(group);return {group,meshes};}
+ function layer(name){const group=new THREE.Group();group.name=name;const meshes={};for(const k of Object.keys(mats)){const mesh=new THREE.InstancedMesh(geometry[k],mats[k],capacity[k]);mesh.userData.part=k;mesh.count=0;mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);mesh.frustumCulled=false;mesh.castShadow=false;mesh.receiveShadow=false;group.add(mesh);meshes[k]=mesh;}root.add(group);return {group,meshes};}
  const simple=layer('overview-silhouette'),detail=layer('focused-detail');detail.group.visible=false;
  let resource=stage===7?10000:stage===6?5000:0,focused=false,lowPower=mobile,last='';
  function draw(layer,plan,detailed){
@@ -46,19 +51,19 @@ export function createFutureTerritory({stage=0,unit=1,mobile=false,palette='step
    dummy.position.set(x,y,z);if(k==='ring')dummy.rotation.set(rx,0,angle);else dummy.rotation.set(rx,angle,0);dummy.scale.set(sx,sy,sz);dummy.updateMatrix();mesh.setMatrixAt(i,dummy.matrix);mesh.setColorAt(i,color.set(tint));
   }
   const {floors,neon,orbital}=plan;
-  if(plan.resource>=100){
+  if(plan.resource>=100&&plan.kind!=='orbital'){
    // Stone paving, intersecting avenues, lanes and neighbourhood streets.
    put('road',0,-.02,0,7,.06,.36);put('road',0,-.015,0,.36,.06,7);
    for(let i=-6;i<=6;i++){put('light',i*.5,.02,0,.19,.012,.025,0xf4d58d);put('light',0,.025,i*.5,.025,.012,.19,0xf4d58d);}
    for(const side of [-1,1]){put('trim',side*.25,.01,0,.08,.055,7);put('trim',0,.01,side*.25,7,.055,.08);}
   }
-  if(plan.resource<10000){
+  if(plan.kind==='city'||plan.kind==='neon'){
    floors.forEach((n,i)=>{
-    if(!n)return;const p=plots[i],height=.22,neonTower=n>p.base,w=neonTower?.62+(i%3)*.04:.48+(i%3)*.025;
+    if(!n)return;const p=plots[i],height=.22,highRise=n>p.base,neonTower=plan.kind==='neon',w=highRise?.62+(i%3)*.04:.48+(i%3)*.025;
     put('trim',p.x,.025,p.z,.64,.05,.64,0xb6b3a6);
     const steps=detailed?n:1;
     for(let f=0;f<steps;f++){
-     const real=detailed?f:0,levels=detailed?1:n,setback=neonTower?Math.max(.58,1-Math.floor(real/5)*.09):1,ww=w*setback;
+     const real=detailed?f:0,levels=detailed?1:n,setback=highRise?Math.max(.58,1-Math.floor(real/5)*.09):1,ww=w*setback;
      const tint=neonTower?([0x2b4052,0x32494f,0x445368][i%3]):warm[i%3];
      put('stone',p.x,.07+(real+levels/2)*height,p.z,ww,levels*height-.014,ww*.9,tint);
      if(detailed){
@@ -78,12 +83,11 @@ export function createFutureTerritory({stage=0,unit=1,mobile=false,palette='step
     }
    });
    // Public square and a regional cultural pavilion; roofs are not floating.
-   if(plan.resource>=250){put('trim',.65,.05,.65,.92,.1,.92,0xd0c6aa);put('stone',.65,.24,.65,.52,.38,.52,0xe7dbc2);put('hull',.65,.47,.65,.32,.12,.32,0x659b99);put('hull',.65,.64,.65,.025,.24,.025,0xe2c57b);}
+   if(plan.kind==='city'&&plan.resource>=250){put('trim',.65,.05,.65,.92,.1,.92,0xd0c6aa);put('stone',.65,.24,.65,.52,.38,.52,0xe7dbc2);put('hull',.65,.47,.65,.32,.12,.32,0x659b99);put('hull',.65,.64,.65,.025,.24,.025,0xe2c57b);}
    if(neon>0){for(const side of [-1,1]){put('light',0,.045,side*.17,6.8*neon,.018,.025,0x6cddeb);put('light',side*.17,.05,0,.025,.018,6.8*neon,0xe09bca);}}
   }
-  if(orbital>0){
-   // The station is assembled module by module above the skyline. Its command
-   // spine, habitat ring, docking pods and solar wings have distinct silhouettes.
+  if(plan.kind==='orbital'){
+   // The orbital stage replaces every ground-city component.
    const budget=Math.floor(orbital*96),lift=3.2,central=Math.min(10,budget);
    for(let i=0;i<central;i++){
     const r=[.44,.6,.8,.72,.58,.42,.32,.26,.2,.12][i];
@@ -117,7 +121,7 @@ export function createFutureTerritory({stage=0,unit=1,mobile=false,palette='step
  function update(value=resource){resource=clamp(value,0,10000);const key=resource+':'+focused+':'+lowPower;if(key===last)return;last=key;const plan=territoryPlan(resource);draw(focused?detail:simple,plan,focused);root.userData.plan=plan;root.userData.detail.visible=focused;root.userData.simple.visible=!focused;}
  root.userData.simple=simple.group;root.userData.detail=detail.group;
  root.userData.setDetail=(focus,low)=>{focused=!!focus;lowPower=!!low;update();};root.userData.update=update;
- root.userData.inspect=()=>({resource,totalFloors:root.userData.plan.totalFloors,buildings:root.userData.plan.buildings,orbital:root.userData.plan.orbital,focused,lowPower,height:Math.max(root.userData.plan.orbital>0?6.5:0,...root.userData.plan.floors.map(n=>n*.22+.65))});
+ root.userData.inspect=()=>({resource,totalFloors:root.userData.plan.totalFloors,buildings:root.userData.plan.buildings,orbital:root.userData.plan.orbital,kind:root.userData.plan.kind,focused,lowPower,height:Math.max(root.userData.plan.orbital>0?6.5:0,...root.userData.plan.floors.map(n=>n*.22+.65))});
  root.userData.tick=seconds=>{(focused?detail:simple).meshes.ring.rotation.y=seconds*.06;};
  update(resource);return root;
 }
