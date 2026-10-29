@@ -112,7 +112,7 @@ export async function createGameServer(options = {}) {
     return res.redirect(303,(options.resourcePrefix||'')+'/student.html');
   });
   const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
-  allowed.add('/territory-models.js');allowed.add('/join-qr.js');allowed.add('/qr-generator.js');allowed.add('/ui-preferences.js');allowed.add('/ui-kz.js');
+  allowed.add('/session-finale.js');allowed.add('/territory-models.js');allowed.add('/join-qr.js');allowed.add('/qr-generator.js');allowed.add('/ui-preferences.js');allowed.add('/ui-kz.js');
   for(const file of ['/eradis-mark.svg','/lumi.css','/lumi.js'])allowed.add(file);
   for(const file of ['./award-2d.js','./achievement-player.js','./achievement-animations.js',...Object.values(ANIMATION_MODULES)])if(/^\.\/[a-z0-9-]+\.js$/.test(file))allowed.add(file.slice(1));
   app.use(async(req,res,next)=>{if(!allowed.has(req.path))return next();const file=path.join(directory,req.path.slice(1));if(req.path.endsWith('.html')){if(req.path==='/student.html'&&!decodeCredential(cookies(req)[cookieName('device')],'device'))cookie(res,'device',signed({role:'device',id:randomUUID(),expires:Date.now()+PROFILE_RETENTION_MS}),PROFILE_RETENTION_MS);return res.type('html').send((await readFile(file,'utf8')).replace(/<script(?=[\s>])/g,`<script nonce="${res.locals.nonce}"`))}res.sendFile(file)});

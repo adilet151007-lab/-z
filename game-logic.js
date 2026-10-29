@@ -474,6 +474,10 @@ export class GameLogic {
     const match=this.state.match;ensure(match&&match.completedQuestionIds.length,'Сначала подведите итоги хотя бы одного вопроса.');ensure(!this.state.round||this.state.round.resolved,'Сначала подведите итоги текущего вопроса.');
     if(match.finishedAt!==null)return {finished:true,winnerTeamIds:[...match.winnerTeamIds]};
     const ranking=this.state.settings.mode==='solo'?this.ranking().map(m=>({id:m.pid,score:m.capital})):this.teamRanking().filter(t=>this.region(t.teamId).members.length).map(t=>({id:t.teamId,score:t.rating}));
+    const solo=this.state.settings.mode==='solo';
+    const rows=solo?this.ranking().map(m=>({id:m.pid,name:m.name,score:m.capital,points:m.capital})):this.teamRanking().filter(t=>t.rank!==null).map(t=>({id:t.teamId,name:t.name,score:t.rating,points:t.points,economy:t.economy}));
+    match.finalMode=solo?'solo':'team';
+    match.finalists=rows.map(row=>({...row,rank:1+rows.filter(other=>other.score>row.score).length})).filter(row=>row.rank<=3);
     match.finishedAt=this.now();match.winnerTeamIds=ranking.length?ranking.filter(t=>t.score===ranking[0].score).map(t=>t.id):[];
     if(this.state.settings.mode!=='solo')for(const id of match.winnerTeamIds){const stats=Object.hasOwn(match.stats,id)?match.stats[id]:null,team=this.region(id);if(stats?.hitCrisis&&stats.recoveredByQuiz&&team.economy===100)this.grantAchievement('sky-breaker','team',id,'comeback','ranking')}
     evaluateAwardFinish(this);
@@ -902,7 +906,7 @@ export class GameLogic {
     view.worldAchievements=player||teacher?frame.worldAchievements:[];
     view.achievements=player?view.collection.awards:teacher?awards:[];
     const match=this.state.match;
-    view.match=match?{id:match.id,completedCount:match.completedQuestionIds.length,totalQuestions:match.questionIds.length,currentIsFinal:this.state.round?.questionId===match.questionIds.at(-1),finishedAt:match.finishedAt,winnerTeamIds:[...match.winnerTeamIds],awards:adminView?awards.filter(a=>a.matchId===match.id):view.achievements.filter(a=>a.matchId===match.id)}:null;
+    view.match=match?{id:match.id,completedCount:match.completedQuestionIds.length,totalQuestions:match.questionIds.length,currentIsFinal:this.state.round?.questionId===match.questionIds.at(-1),finishedAt:match.finishedAt,finalMode:match.finalMode,finalists:structuredClone(match.finalists||[]),winnerTeamIds:[...match.winnerTeamIds],awards:adminView?awards.filter(a=>a.matchId===match.id):view.achievements.filter(a=>a.matchId===match.id)}:null;
     view.achievementProgress=player?{...(Object.hasOwn(match?.stats||{},player.regionId)?match.stats[player.regionId]:{hitCrisis:false,recoveredByQuiz:false}),resources:this.region(player.regionId).points,economy:this.region(player.regionId).economy}:null;
     view.achievementCounters=player?{fast:this.state.match?.questStats?.['p:'+player.pid]?.fast||0,fastRun:this.state.match?.questStats?.['p:'+player.pid]?.fastRun||0,studied:view.collection.studied,lastAnswerMs:this.state.match?.questStats?.['p:'+player.pid]?.lastAnswerMs??null,lastAnswerStatus:this.state.match?.questStats?.['p:'+player.pid]?.lastAnswerStatus??null}:null;
     if(player){
