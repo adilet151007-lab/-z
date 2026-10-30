@@ -466,7 +466,7 @@ export class GameEngine {
   deleteQuestion(questionId) { return this.request("deleteQuestion",{questionId}); }
   importQuestions(questions) { return this.request("importQuestions",{questions}); }
   async analyzeSyllabus(text) { return this.request("analyzeSyllabus",{text}); }
-  async generateQuestions(text,topics,count) { return this.request("generateQuestions",{text,topics,count}); }
+  async generateQuestions(text,topics,count,options={}) { return this.request("generateQuestions",{text,topics,count,options}); }
   resetGame() { return this.request("resetGame"); }
   applyRawState(snapshot) { return this.request("applyRawState", snapshot); }
   async getSnapshot() { return (await this.request("getSnapshot")).snapshot; }
