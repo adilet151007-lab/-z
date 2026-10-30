@@ -582,7 +582,7 @@ export async function createGameServer(options = {}) {
       game.createRestorePoint('Перед восстановлением');game.restoreBackup(snapshot,game.state.revision);return {};
     });
     handle("analyzeSyllabus", "teacher", data => analyzeSyllabus(data.text));
-    handle("generateQuestions", "teacher", data => generateSyllabusQuestions(data.text,data.topics,data.count));
+    handle("generateQuestions", "teacher", data => generateSyllabusQuestions(data.text,data.topics,data.count,data.options));
     handle("resetGame", "teacher", () => game.resetGame());
     handle("applyRawState", "teacher", data => game.applyRawState(data));
     handle("getSnapshot", "teacher", () => ({ snapshot: game.editorSnapshot() }));
