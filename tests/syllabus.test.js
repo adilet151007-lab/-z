@@ -89,3 +89,78 @@ test('wrapped lines, duplicate facts, section boundaries and maximum-size input 
  const r=generateSyllabusQuestions(text,['Основы информатики'],60);assert.equal(r.questions.length,6);assert.ok(r.questions.every(q=>q.topic==='Основы информатики'));assert.ok(r.questions.some(q=>q.sourceExcerpt.includes('последовательность команд')));
  const large=(computing+'\n').repeat(200).slice(0,120000);const start=performance.now();const result=generateSyllabusQuestions(large,['Основы информатики'],60);assert.ok(result.questions.length<=60);assert.ok(performance.now()-start<2000);assert.equal(new Set(result.questions.map(q=>q.text)).size,result.questions.length);
 });
+
+test('v3 imports ready tests with explicit inline answers, separate keys and author order',()=>{
+ const text=`Тема 1. География
+1. Какая столица Казахстана?
+A) Алматы
+B) Астана
+C) Шымкент
+D) Тараз
+2) Қазақстанның астанасы қай қала?
+А) Алматы  В) Астана  С) Ақтау  D) Семей
+Дұрыс жауап: В
+Ответы:
+1 — B; 2 — В`;
+ const a=analyzeSyllabus(text),r=generateSyllabusQuestions(text,a.topics,20);
+ assert.equal(a.authored,2);assert.equal(r.questions.length,2);assert.equal(r.questions[0].text,'Какая столица Казахстана?');
+ for(const q of r.questions){assert.equal(q.options[q.correct],'Астана');assert.equal(q.options[0],'Алматы');assert.equal(q.type,'authored');}
+ const marked=generateSyllabusQuestions('Вопрос: Какой вариант отмечен автором?\nА) Первый\n+ Б) Второй\nВ) Третий\nГ) Четвёртый',['Вопросы из документа'],20);
+ assert.equal(marked.questions[0].correct,1);
+});
+test('v3 preserves Q/A, wrapped answers and tables as incomplete editable drafts',()=>{
+ const text=`Вопрос 1: Что такое алгоритм?
+Ответ: Конечная последовательность команд
+для решения задачи.
+
+Вопрос 2: Что такое массив?
+Ответ: Совокупность элементов одного типа.
+
+Вопрос\tОтвет
+Что такое стек?\tСтруктура данных с правилом LIFO.`;
+ const a=analyzeSyllabus(text),r=generateSyllabusQuestions(text,a.topics,20);
+ assert.equal(a.authored,3);assert.equal(r.drafts.length,3);assert.equal(r.questions.length,0);
+ assert.equal(r.drafts[0].options[0],'Конечная последовательность команд для решения задачи.');
+ assert.ok(r.drafts.every(q=>q.correct===0&&q.options.length===4&&q.problems.includes('missing_options')));
+ const sparse='Тема 1. История\nКультура — совокупность духовных ценностей человека.\nРитуал — установленный порядок символических действий.\nВ 1991 году Казахстан обрёл независимость.';
+ const s=generateSyllabusQuestions(sparse,['История'],20);assert.equal(s.drafts.length,3);assert.equal(s.questions.length,0);assert.ok(s.drafts.some(q=>q.type==='year'&&q.options[0]==='1991'));assert.equal(s.diagnostics.sparseDrafts,3);
+});
+test('v3 keeps unknown, conflicting and multiple answer keys unresolved',()=>{
+ for(const answer of ['', '\nОтвет: A\nПравильный ответ: B','\nОтвет: A, C','\nОтвет: неизвестный вариант']){
+  const text='1. Выберите вариант из текста?\nA) Первый\nB) Второй\nC) Третий\nD) Четвёртый'+answer;
+  const r=generateSyllabusQuestions(text,['Вопросы из документа'],20);assert.equal(r.questions.length,0);assert.equal(r.drafts.length,1);assert.equal(r.drafts[0].correct,null);
+ }
+ const extra='1. Выберите вариант из текста?\nA) Первый\nB) Второй\nC) Третий\nD) Четвёртый\nE) Пятый\nОтвет: E';
+ const r=generateSyllabusQuestions(extra,['Вопросы из документа'],20);assert.equal(r.drafts[0].options.length,5);assert.equal(r.drafts[0].correct,4);assert.equal(r.questions.length,0);
+});
+test('v3 rejects colon false definitions, supports definition verbs and emits one question per source',()=>{
+ const text=`Тема 1. Культурология
+К основным функциям культуры относятся: познавательная, регулятивная и коммуникативная.
+Под культурой понимают совокупность материальных и духовных ценностей.
+Термин «ритуал» означает установленный порядок символических действий.
+Культурология — это наука, которая используется для изучения общества и возникла в 1909 году.`;
+ const definitions=definitionsFrom(text);assert.equal(definitions.length,3);assert.ok(!definitions.some(f=>f.term.startsWith('К основным')));
+ const r=generateSyllabusQuestions(text,['Культурология'],20);assert.equal(r.drafts.length,4);assert.equal(new Set(r.drafts.map(q=>q.sourceId)).size,4);assert.ok(r.diagnostics.suppressedSameSource>=1);assert.equal(r.drafts.filter(q=>q.type==='list').length,1);
+});
+test('v3 does not reverse long definitions or silently truncate their meaning; drafts validate after editing',async()=>{
+ const {assessDraft}=await import('../syllabus-draft.js');
+ const long='Совокупность различных материальных и духовных ценностей, '+ 'которые передаются между поколениями и изменяются в обществе, '.repeat(5)+'сохраняя историческую связь.';
+ const r=generateSyllabusQuestions('Тема 1. Культура\nКультура — '+long,['Культура'],20);
+ assert.equal(r.drafts.length,1);const q=r.drafts[0];assert.match(q.text,/Какое определение/);assert.ok(q.text.length<240);assert.equal(q.options[0],long.replace(/\.$/,''));assert.ok(q.problems.includes('long_text_review'));
+ q.options=['Совокупность материальных и духовных ценностей','Только природная среда','Только генетические признаки','Только климатические условия'];q.reviewed=true;assert.equal(assessDraft(q).ready,true);
+ q.correct=null;assert.equal(assessDraft(q).ready,false);
+});
+test('v3 mixed documents preserve facts outside authored tests and report unsupported passages',()=>{
+ const text=`Тема 1. Информатика
+1. Какой вариант указан автором?
+A) Алгоритм
+B) Массив
+C) Стек
+D) Очередь
+Ответ: A
+
+Алгоритм — конечная последовательность команд для решения задачи.
+Массив — упорядоченная совокупность элементов одного типа.
+Сложный учебный абзац свободной формы без явного определения.`;
+ const r=generateSyllabusQuestions(text,['Информатика'],20);assert.equal(r.documentType,'mixed');assert.equal(r.drafts.length,3);assert.equal(r.drafts.filter(q=>q.type==='authored').length,1);assert.ok(r.diagnostics.unrecognizedUnits>0);assert.ok(r.diagnostics.samples.length>0);
+});
