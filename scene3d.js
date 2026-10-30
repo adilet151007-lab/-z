@@ -397,7 +397,8 @@ export function createScene(canvas, opts = {}) {
     selected = baseId;regionSelect.value=id;const teamPicker=document.getElementById?.('map-team-select');if(teamPicker)teamPicker.value=team?.id||'';mapPreview=team?.id||null;if(latestState)update(latestState,lastFocusId);
     const width = region.data.bounds[2] - region.data.bounds[0], depth = region.data.bounds[3] - region.data.bounds[1];
     const target = new THREE.Vector3(region.data.city[0], region.group.position.y + .71, region.data.city[1]);
-    const distance = Math.max(4, Math.max(width / Math.max(.8, camera.aspect), depth * .9) * 1.65);
+    const stationHeight=(region.buildTarget>=10000?11.2:0)*(region.data.cityRadius*.86/3.8);
+    const distance = Math.max(4, stationHeight*2.2, Math.max(width / Math.max(.8, camera.aspect), depth * .9) * 1.65);
     moveCamera(target, distance);
   }
   const stopTween = () => { cameraTween = null; };
@@ -502,8 +503,8 @@ export function createScene(canvas, opts = {}) {
         if(Math.abs(delta)>.1){region.buildValue=THREE.MathUtils.lerp(region.buildValue,region.buildTarget,reduceMotion?1:rate*1.7);settling=true;}else region.buildValue=region.buildTarget;
         region.future.visible=region.buildValue>=100&&(!selected||region.meta.id===selected);region.future.userData.update(region.buildValue);
         setFutureDetail(region.future,region.meta.id===selected,lowPower);
+        if(region.future.userData.tick(t,{animate:!reduceMotion,spin:region.meta.id===selected&&!reduceMotion}))settling=true;
         region.label.sprite.position.y=.82+region.future.userData.inspect().height*(region.data.cityRadius*.86/3.8)+.4;
-        if(region.buildValue>5000&&region.meta.id===selected&&!reduceMotion){region.future.userData.tick(t);settling=true;}
       }
       region.beacon.rotation.y += reduceMotion ? 0 : dt * .55; region.beacon.position.y = 2.6 + (reduceMotion ? 0 : Math.sin(t * 1.7) * .12);
       const opacity = region.economy < CRISIS_THRESHOLD ? (1 - region.economy / 100) * .32 : 0;

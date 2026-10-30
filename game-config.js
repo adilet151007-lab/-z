@@ -27,7 +27,8 @@ export const DEVELOPMENT_STAGES = [
   { at: 750, name: "Большой город", description: "Многоэтажные кварталы и новые дороги", buildings: 42 },
   { at: RESOURCE_CAP, name: "Завершённый культурный город", description: "Город завершён. С активным ∞ начинается путь к мегаполису", buildings: 64 },
   { at: 5000, name: "Неоновый мегаполис", description: "Небоскрёбы, светящиеся магистрали и неоновые вывески", buildings: 24 },
-  { at: DEVELOPMENT_CAP, name: "Орбитальная станция", description: "Центральная башня, орбитальные кольца и стыковочные узлы", buildings: 16 }
+  { at: 9000, name: "Сборка космической станции", description: "Сборка модулей на наземной площадке внутри мегаполиса", buildings: 40 },
+  { at: DEVELOPMENT_CAP, name: "Орбитальная станция", description: "Станция над мегаполисом: жилые кольца, стыковочные узлы и солнечные панели", buildings: 40 }
 ];
 export function developmentFor(points) {
   const resource = Math.max(0, Math.min(DEVELOPMENT_CAP, Number(points) || 0));
