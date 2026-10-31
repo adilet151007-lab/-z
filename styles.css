@@ -570,3 +570,5 @@ body.telemetry-open,body.presentation-signal{overflow:hidden}
  .teacher-page .atlas-projector .map-credit{left:12px;bottom:68px;max-width:calc(100% - 24px);font-size:8px;line-height:1.2}
  .student-page .stage-wrap .map-credit{left:12px;bottom:7px;max-width:calc(100% - 24px);font-size:8px}
 }
+
+.studio-entry-link{position:fixed;left:14px;bottom:14px;z-index:9000;background:#111c2d;color:#14b8a6;border:1px solid #eab308;padding:9px 13px;border-radius:12px;text-decoration:none;font:600 12px system-ui;box-shadow:0 8px 24px #0004}

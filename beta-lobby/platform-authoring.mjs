@@ -1,3 +1,4 @@
+import {normalizeStudio,compileStudio} from '../studio-schema.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {normalizeFeatures,normalizeDesign} from '../room-layout.js';
@@ -28,10 +29,12 @@ export function validateTemplate(raw){
  for(const k of ['autoAdvance','perksEnabled','tradingEnabled'])if(typeof config[k]!=='boolean')fail('Проверьте переключатели.');
  for(const k of ['accent','gold'])if(!/^#[a-f0-9]{6}$/i.test(config[k]))fail('Цвет задаётся как #RRGGBB.');
  if(!Array.isArray(raw.questions)||raw.questions.length>100)fail('В шаблоне можно хранить до 100 вопросов.');
- const questions=validateQuestions(raw.questions.map(q=>({...q,id:q.id||'custom_'+randomUUID(),subject,points:q.points??25})));
+ const canvasData=normalizeStudio(raw.canvasData);if(canvasData)canvasData.settings.subject=subject;
+ const inputQuestions=canvasData?compileStudio(canvasData).questions:raw.questions;
+ const questions=validateQuestions(inputQuestions.map(q=>({...q,id:q.id||'custom_'+randomUUID(),subject,points:q.points??25})));
  const sources={css:raw.sources?.css||'',js:raw.sources?.js||''};
  if(Object.values(sources).some(v=>typeof v!=='string'||Buffer.byteLength(v)>32768))fail('CSS и JavaScript ограничены 32 КБ каждый.');
- return {name,subject,type,config,questions,sources,features:normalizeFeatures(raw.features),design:normalizeDesign(raw.design||{accent:config.accent,gold:config.gold})};
+ return {name,subject,type,config,questions,sources,...(canvasData?{canvasData}:{}),features:normalizeFeatures(raw.features),design:normalizeDesign(raw.design||{accent:config.accent,gold:config.gold})};
 }
 export async function checkJavaScript(source){
  if(!source)return;

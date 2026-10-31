@@ -381,7 +381,7 @@ export class GameEngine {
   }
   request(event, data = {}) {
     if (!this.connected||this.legacyToken) return Promise.reject(new Error(this.legacyToken? uiText('Идёт восстановление прежнего входа. Дождитесь подключения.'): uiText('Нет связи с сервером. Дождитесь подключения.')));
-    if(this.cookieSessions&&['applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions'].includes(event))return this.httpRequest('/api/bulk/'+event,data);
+    if(this.cookieSessions&&['applyStudio','applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions'].includes(event))return this.httpRequest('/api/bulk/'+event,data);
     const input=['castVote','confirmVote','cancelVote','voteLeader','teamSubmit'].includes(event);
     if(input){const requestId=globalThis.crypto?.randomUUID?.()||('req_'+Date.now()+'_'+Math.random().toString(36).slice(2));data={...data,requestId};this.inputStatus={requestId,roundId:data.roundId,optionIdx:data.optionIdx,status:'sending'};this.emit();}
     const inputDone=status=>{if(input&&this.inputStatus?.requestId===data.requestId){this.inputStatus={...this.inputStatus,status};this.emit();}};

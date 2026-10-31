@@ -22,10 +22,10 @@ async function run(fn){
  busy=true;message='Сохраняем…';$('creator-message').textContent=message;$('creator-content').setAttribute('aria-busy','true');
  for(const button of previousDisabled.keys())button.disabled=true;
  try{
-  await fn();await load();message='Сохранено.';busy=false;dirty=false;
+  const result=await fn();await load();message='Сохранено.';busy=false;dirty=false;
   const y=window.scrollY,opened=[...document.querySelectorAll('.room-editor details')].map(n=>n.open);
-  render();document.querySelectorAll('.room-editor details').forEach((n,i)=>{if(opened[i]!==undefined)n.open=opened[i];});window.scrollTo(0,y);
- }catch(error){message=error.message; $('creator-message').textContent=message;}
+  render();document.querySelectorAll('.room-editor details').forEach((n,i)=>{if(opened[i]!==undefined)n.open=opened[i];});window.scrollTo(0,y);return result??true;
+ }catch(error){message=error.message; $('creator-message').textContent=message;return false;}
  finally{
   busy=false;
   for(const [button,disabled] of previousDisabled)if(button.isConnected)button.disabled=disabled;

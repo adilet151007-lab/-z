@@ -1,7 +1,9 @@
+import {createStudioEditor} from './studio-editor.js';
+export const createRoomDesigner=(initial={},options={})=>createStudioEditor(initial,options);
 import {ROOM_FEATURES,MINIMAL_FEATURES,BLOCKS,BLOCK_FEATURE,ESSENTIAL_BLOCKS,COLLAPSIBLE_BLOCKS,defaultDesign,normalizeDesign,normalizeFeatures} from './room-layout.js';
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 const button=(text,fn)=>{const b=el('button',text);b.type='button';b.addEventListener('click',fn);return b;};
-export function createRoomDesigner(initial={}){
+export function createLegacyRoomDesigner(initial={}){
  let features=normalizeFeatures(initial.features),design=normalizeDesign(initial.design||{accent:initial.config?.accent||'#3fe0d0',gold:initial.config?.gold||'#f3c25d'}),surface='teacher',selected='map',device='desktop',light=false,dragged=null,tab='layout';
  const original=JSON.stringify({features,design}),history=[];
  const snapshot=()=>JSON.stringify({features,design});

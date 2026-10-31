@@ -6,7 +6,9 @@ import {GAME_ORIGIN} from './public/lobby-config.js';
 const publicDirectory = new URL('./public/', import.meta.url);
 await copyFile(new URL('../room-layout.js',import.meta.url),new URL('room-layout.js',publicDirectory));
 for(const file of ['join-qr.js','qr-generator.js'])await copyFile(new URL('../'+file,import.meta.url),new URL(file,publicDirectory));
-const allowed = ['join-qr.js','qr-generator.js','index.html','mobile-preview.html','lobby-privacy.html','lobby.css','lumi.css','lumi.js','lobby.js','lobby-core.js','lobby-config.js','lobby-copy.js','lobby-account.js','lobby-platform.js','lobby-creators.js','lobby-creator-tools.js','lobby-designer.js','room-layout.js','creators.html','mark.svg','ornament.svg'];
+const studioFiles=['studio.css','studio-schema.js', 'studio-flow.js', 'studio-model.js', 'studio-math.js', 'studio-canvas.js', 'studio-widgets.js', 'studio-editor.js', 'studio-i18n.js', 'studio-audio.js', 'studio-layout.js', 'studio-room.css', 'syllabus-files.js', 'region-geography.js', 'game-config.js'];
+for(const file of studioFiles)await copyFile(new URL('../'+file,import.meta.url),new URL(file,publicDirectory));
+const allowed = [...studioFiles,'join-qr.js','qr-generator.js','index.html','mobile-preview.html','lobby-privacy.html','lobby.css','lumi.css','lumi.js','lobby.js','lobby-core.js','lobby-config.js','lobby-copy.js','lobby-account.js','lobby-platform.js','lobby-creators.js','lobby-creator-tools.js','lobby-designer.js','room-layout.js','creators.html','mark.svg','ornament.svg'];
 const actual = await readdir(publicDirectory);
 if (actual.length !== allowed.length || actual.some(name => !allowed.includes(name))) throw new Error('Publish directory contains unexpected files');
 for (const name of allowed.filter(name => name.endsWith('.js'))) {

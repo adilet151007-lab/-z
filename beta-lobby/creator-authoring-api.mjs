@@ -1,3 +1,5 @@
+import {analyzeSyllabus,generateSyllabusQuestions} from '../syllabus-engine.js';
+import {normalizeStudio,compileStudio} from '../studio-schema.js';
 import express from 'express';
 import {readFile} from 'node:fs/promises';
 import {PlatformError} from './platform-domain.mjs';
@@ -5,6 +7,15 @@ import {validateTemplate} from './platform-authoring.mjs';
 const engineFiles=['student.html','student.js','teacher.html','teacher.js','shared-engine.js','scene3d.js','styles.css','game-config.js','game-logic.js','server.js'];
 export function authoringAPI({platform,runtime}){
  const router=express.Router();
+ router.get('/rooms/:id/studio-live',async(req,res)=>{const r=await runtime.get(req.params.id);if(!r)throw new PlatformError('Комната закрыта.',410);const s=r.server.game.state;res.json({phase:s.phase,settings:s.settings,round:s.round?{id:s.round.id,resolved:s.round.resolved}:null,achievements:s.achievements||[],log:s.log.slice(-30),teams:s.regions.map(t=>({id:t.id,name:t.name,points:t.points,economy:t.economy,capacity:t.capacity}))});});
+ router.post('/studio/analyze',(req,res)=>res.json(analyzeSyllabus(req.body.text)));
+ router.post('/studio/generate',(req,res)=>res.json(generateSyllabusQuestions(req.body.text,req.body.topics,req.body.count,req.body.options)));
+ router.post('/rooms/:id/studio',async(req,res)=>{
+  const canvasData=normalizeStudio(req.body.canvasData);compileStudio(canvasData);
+  const r=await runtime.get(req.params.id);if(!r)throw new PlatformError('Комната закрыта.',410);
+  const result=await r.server.platformControl(req.platformCreator.id,'studio',{canvasData,revision:req.body.revision});
+  const config=await platform.setRoomConfiguration(req.platformCreator.id,req.params.id,{...req.body,canvasData});await runtime.refreshConfiguration(req.params.id);res.json({ok:true,result,configuration:config});
+ });
  router.get('/templates',async(req,res)=>res.json({templates:await platform.templates(req.platformCreator.id)}));
  router.get('/templates/:id',async(req,res)=>res.json(await platform.template(req.platformCreator.id,req.params.id)));
  router.post('/templates/save',async(req,res)=>{const result=await platform.saveTemplate(req.platformCreator.id,req.body.id||null,req.body.value,req.body.expectedVersion);await runtime.refreshTemplate(result.id);res.json(result);});
@@ -21,7 +32,7 @@ export function authoringAPI({platform,runtime}){
  router.post('/rooms/:id/reopen',async(req,res)=>res.json({room:await platform.reopenRoom(req.platformCreator.id,req.params.id)}));
  router.post('/rooms/:id/sleep',async(req,res)=>{const r=await platform.room(req.params.id);if(!r)throw new PlatformError('Комната не найдена.',404);await runtime.stop(r.id);res.json({ok:true});});
  router.post('/rooms/:id/restart',async(req,res)=>{const room=await platform.room(req.params.id);if(!room||room.closedAt)throw new PlatformError('Комната закрыта.',410);await runtime.stop(room.id);await runtime.get(room.id);res.json({ok:true});});
- router.post('/rooms/:id/configuration',async(req,res)=>{const config=await platform.setRoomConfiguration(req.platformCreator.id,req.params.id,req.body);await runtime.refreshConfiguration(req.params.id);res.json(config);});
+ router.post('/rooms/:id/configuration',async(req,res)=>{if(req.body.canvasData){const r=await runtime.get(req.params.id);await r.server.platformControl(req.platformCreator.id,'studio',{canvasData:req.body.canvasData,revision:req.body.revision});}const config=await platform.setRoomConfiguration(req.platformCreator.id,req.params.id,req.body);await runtime.refreshConfiguration(req.params.id);res.json(config);});
  router.post('/rooms/:id/template',async(req,res)=>{const template=await platform.template(req.platformCreator.id,req.body.templateId),r=await runtime.get(req.params.id);if(!r)throw new PlatformError('Комната закрыта.',410);await r.server.platformControl(req.platformCreator.id,'configure',{...template,replaceQuestions:true});await platform.attachTemplate(req.platformCreator.id,req.params.id,template.id);await platform.setRoomConfiguration(req.platformCreator.id,req.params.id,template);await runtime.refreshConfiguration(req.params.id);await runtime.refreshTemplate(template.id);res.json({ok:true});});
  router.get('/source',async(_req,res)=>res.json({files:engineFiles,editable:'Клиентские CSS/JavaScript-расширения в шаблонах. Серверные файлы изменяются через Git и деплой.'}));
  router.get('/source/:file',async(req,res)=>{if(!engineFiles.includes(req.params.file))throw new PlatformError('Файл недоступен.',404);res.json({file:req.params.file,content:await readFile(new URL('../'+req.params.file,import.meta.url),'utf8'),readOnly:true});});

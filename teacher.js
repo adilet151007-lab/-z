@@ -1,3 +1,5 @@
+import {setupStudioCheckpoint} from './studio-live.js';
+import {applyRoomPresentation as applyStudioPresentation} from './room-layout.js';
 import {t as uiText,tx as uiTpl,setupUIPreferences} from './ui-preferences.js';
 import { GameEngine, REGIONS, CITIES,capacityFor, totalCapacity, regularTeams, isCreatorTeam, MAX_TEAMS, CRISIS_THRESHOLD, RESOURCE_CAP, developmentFor, metadataFor, setupPresentationEffects, setupBranding,setupAchievements,setupAdmissionControls, escapeHTML as h } from "./shared-engine.js";
 import { setupSyllabus } from "./syllabus-ui.js";
@@ -5,6 +7,7 @@ import { setupCommunication } from "./chat-ui.js";
 
 setupUIPreferences();
 const $ = id => document.getElementById(id), engine = new GameEngine("teacher");
+setupStudioCheckpoint(engine);
 const accountTeacher=document.documentElement.dataset.teacherAccess==='account';
 if(accountTeacher){
  const form=$('teacher-login-form');form.querySelector('p.mut').textContent=uiText('Откройте комнату из лобби под аккаунтом преподавателя или создателя. Пароль основного сайта здесь не используется.');
@@ -44,7 +47,7 @@ let adminCollapsed=false;
 $("collapse-admin-btn").addEventListener("click",()=>{adminCollapsed=!adminCollapsed;document.body.classList.toggle("teacher-ui-collapsed",adminCollapsed);$("collapse-admin-btn").textContent=adminCollapsed? uiText("Развернуть управление"): uiText("Свернуть управление");scene?.resize()});
 async function removeParticipant(regionId,pid){const result=await engine.freeSlot(regionId,pid);message(result.exitRequested? uiText('Запрос на выход отправлен. Участник должен принять или отклонить его.'): uiText('Участник исключён, место освобождено.'))}
 $("projector-btn").addEventListener("click",()=>{
- projector=!projector;document.body.classList.toggle("projector-mode",projector);
+ projector=!projector;document.body.classList.toggle("projector-mode",projector);if(engine.state)applyStudioPresentation(engine.state);
  if(projector)window.dispatchEvent(new Event('cq:hide-chat'));
  $("projector-btn").textContent=projector? uiText("Вернуться к управлению"): uiText("Режим проектора");
  scene?.resize();

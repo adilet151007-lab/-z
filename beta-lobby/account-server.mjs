@@ -6,7 +6,7 @@ import {OAuth2Client} from 'google-auth-library';
 import {clientAddress, RequestLimiter} from '../security-controls.js';
 
 const publicDirectory = new URL('./public/', import.meta.url);
-const assets = new Set(['join-qr.js','qr-generator.js','lobby.js','lobby.css','lumi.css','lumi.js','lobby-core.js','lobby-copy.js','lobby-account.js','lobby-platform.js','lobby-creators.js','lobby-creator-tools.js','lobby-designer.js','room-layout.js','mark.svg','ornament.svg','mobile-preview.html','lobby-privacy.html']);
+const assets = new Set(['studio-schema.js', 'studio-flow.js', 'studio-model.js', 'studio-math.js', 'studio-canvas.js', 'studio-widgets.js', 'studio-editor.js', 'studio-i18n.js', 'studio-audio.js', 'studio-layout.js', 'studio-room.css', 'syllabus-files.js', 'region-geography.js', 'game-config.js'].concat(['studio.css','join-qr.js','qr-generator.js','lobby.js','lobby.css','lumi.css','lumi.js','lobby-core.js','lobby-copy.js','lobby-account.js','lobby-platform.js','lobby-creators.js','lobby-creator-tools.js','lobby-designer.js','room-layout.js','mark.svg','ornament.svg','mobile-preview.html','lobby-privacy.html']));
 const hash = value => createHash('sha256').update(String(value)).digest();
 const equal = (left, right) => timingSafeEqual(hash(left), hash(right));
 const random = () => randomBytes(32).toString('base64url');
