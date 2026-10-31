@@ -14,10 +14,23 @@ export function applyStudio(game,raw,revision,validateQuestions){
  game.createRestorePoint('Перед применением ERADIS Studio',false);game.state.canvasData=canvasData;game.state.questions=next;game.state.round=null;game.state.match=null;game.state.phase='lobby';game.touch();return {questions:questions.length};
 }
 function applyEffects(game,effects,questionBonus=false){
- const results=game.state.round.results||{},personTeam=id=>game.state.settings.mode==='solo'?game.state.regions.find(t=>t.members.some(m=>m.pid===id))?.id:id;
- const correctTeams=[...new Set(Object.entries(results).filter(([,r])=>r.correct).map(([id])=>personTeam(id)).filter(Boolean))];
- for(const effect of effects){if(questionBonus&&!correctTeams.length)continue;const targets=effect.regionId?[effect.regionId]:questionBonus?correctTeams:[...new Set(Object.keys(results).filter(id=>!results[id].skipped).map(personTeam).filter(Boolean))];
-  for(const id of targets){const team=game.state.regions.find(t=>t.id===id)||game.state.regions.find(t=>normalizeRegionId(t.id)===normalizeRegionId(id));if(!team)continue;if(effect.resourceDelta)game.adjustPoints(team.id,effect.resourceDelta);if(effect.economyDelta){const stats=game.state.match?.stats?.[team.id],recovered=stats?.recoveredByQuiz,before=team.economy;game.adjustEconomy(team.id,effect.economyDelta);if(stats&&correctTeams.includes(team.id)&&effect.economyDelta>0&&team.economy===100&&(recovered||stats.hitCrisis&&before<100))stats.recoveredByQuiz=true;}}
+ const results=game.state.round.results||{},solo=game.state.settings.mode==='solo';
+ const participants=game.state.regions.flatMap(team=>team.members.map(member=>({member,team})));
+ const teamFor=id=>solo?participants.find(row=>row.member.pid===id)?.team.id:id;
+ const correctIds=Object.entries(results).filter(([,result])=>result.correct).map(([id])=>id);
+ const correctTeams=new Set(correctIds.map(teamFor).filter(Boolean));
+ for(const effect of effects){
+  if(questionBonus&&!correctIds.length)continue;
+  const region=effect.regionId&&(game.state.regions.find(team=>team.id===effect.regionId)||game.state.regions.find(team=>normalizeRegionId(team.id)===normalizeRegionId(effect.regionId)));
+  if(effect.regionId&&!region)continue;
+  const ids=region?(solo?region.members.map(member=>member.pid):[region.id]):questionBonus?correctIds:Object.keys(results).filter(id=>!results[id].skipped);
+  if(effect.resourceDelta)for(const id of new Set(ids)){if(solo)game.adjustCapital(id,effect.resourceDelta);else game.adjustPoints(id,effect.resourceDelta);}
+  if(!effect.economyDelta)continue;
+  for(const id of new Set(ids.map(teamFor).filter(Boolean))){
+   const team=game.state.regions.find(row=>row.id===id),stats=game.state.match?.stats?.[id],recovered=stats?.recoveredByQuiz,before=team.economy;
+   game.adjustEconomy(id,effect.economyDelta);
+   if(!solo&&stats&&correctTeams.has(id)&&effect.economyDelta>0&&team.economy===100&&(recovered||stats.hitCrisis&&before<100))stats.recoveredByQuiz=true;
+  }
  }
 }
 function saveRoute(game,step,outcome){game.state.round.studioRoute={nextQuestionId:step.next?.data.questionId||null,outcome,checkpoint:step.checkpoint?{id:step.checkpoint.id,text:step.checkpoint.data.text||step.checkpoint.name}:null};}

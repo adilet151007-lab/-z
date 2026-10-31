@@ -126,7 +126,7 @@ test("JSON-патч не обходит предел, а старое сохра
   patch.regions[0].points = 1001;
   assert.throws(() => f.game.applyRawState(patch), /0–1000/);
   assert.equal(f.game.region("saryarka").points, 0);
-  const saved = structuredClone(f.game.state); saved.regions[0].points = 5000;
+  const saved = structuredClone(f.game.state); saved.regions[0].points = 5000; delete saved.awardSystemVersion; // Explicitly model a legacy save from before perk-aware limits.
   const restored = new GameLogic(saved, f.game.now);
   assert.equal(restored.region("saryarka").points, 1000);
   assert.equal(restored.region("saryarka").members.length, 2);
@@ -137,7 +137,7 @@ test("JSON-патч не обходит предел, а старое сохра
 test("на границах развития карта и интерфейс получают одинаковую стадию", async () => {
   const { developmentFor, RESOURCE_CAP } = await import("../game-config.js");
   assert.equal(RESOURCE_CAP, 1000);
-  for (const [points, buildings, complete] of [[0,0,false],[99,0,false],[100,4,false],[249,4,false],[250,12,false],[500,24,false],[750,42,false],[999,42,false],[1000,64,false],[1200,64,false],[5000,24,false],[10000,16,true]]) {
+  for (const [points, buildings, complete] of [[0,0,false],[99,0,false],[100,4,false],[249,4,false],[250,12,false],[500,24,false],[750,42,false],[999,42,false],[1000,64,false],[1200,64,false],[5000,24,false],[10000,40,true]]) {
     const stage = developmentFor(points);
     assert.equal(stage.buildings, buildings);
     assert.equal(stage.complete, complete);

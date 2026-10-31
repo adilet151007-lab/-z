@@ -205,7 +205,7 @@ test("150 независимых клиентов в 38 командах: вхо
 });
 test("редактор и генератор доступны преподавателю и сохраняются без раскрытия ответов",async t=>{
  const f=await fixture(t),teacher=await f.connect(),student=await f.connect();await login(teacher);
- const text="Тема 1. Семиотика культуры\nСемиотика — наука о знаках и знаковых системах.";
+ const text="Тема 1. Семиотика культуры\nСемиотика — наука о знаках и знаковых системах.\nМифология — система мифов и преданий народа.\nФольклор — устное народное творчество.\nОбряд — традиционное символическое действие.";
  const analysis=await command(teacher,"analyzeSyllabus",{text});assert.equal(analysis.topics.length,1);
  const drafts=await command(teacher,"generateQuestions",{text,topics:analysis.topics,count:5});assert.ok(drafts.questions.length>0);
  const saved=await command(teacher,"importQuestions",{questions:drafts.questions});assert.ok(saved.added>0);

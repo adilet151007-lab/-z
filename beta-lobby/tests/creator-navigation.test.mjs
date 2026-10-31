@@ -7,7 +7,7 @@ import vm from 'node:vm';
 // content buttons; the static navigation must survive that replacement.
 async function fixture({failLoad=false,failRender=false,fetch:fetchOverride}={}){
  const source=(await readFile(new URL('../public/lobby-creators.js',import.meta.url),'utf8'))
-  .replace(/^import .*\n/,'').replace(/load\(\)\.then\(render\)\.catch\(.*$/m,'');
+  .replace(/^import .*\n/gm,'').replace(/load\(\)\.then\(render\)\.catch\(.*$/m,'');
  const button=disabled=>({disabled,isConnected:true,addEventListener(){}});
  const nav=button(false),refresh=button(false),action=button(false),unavailable=button(true);
  let controls=[nav,refresh,action,unavailable];

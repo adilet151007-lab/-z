@@ -7,4 +7,4 @@ export function nextStudioStep(doc,nodeId,isCorrect){
  return {next:null,effects};
 }
 export function routeOutcome(results,teamId=''){const entries=Object.entries(results).filter(([,r])=>!r.skipped&&r.chosen!==null);if(teamId&&results[teamId])return results[teamId].correct===true;return entries.length>0&&entries.filter(([,r])=>r.correct).length>entries.length/2;}
-export function rewardPreview(teams,regionId,resources=0,economy=0){const target=regionId&&(teams.find(t=>t.id===regionId)||teams.find(t=>normalizeRegionId(t.id)===normalizeRegionId(regionId)))?.id;return teams.map(t=>!regionId||t.id===target?{...t,points:Math.max(0,Math.min(t.limit||1000,t.points+resources)),economy:Math.max(0,Math.min(100,t.economy+economy))}:t);}
+export function rewardPreview(teams,regionId,resources=0,economy=0){const target=regionId&&(teams.find(t=>t.id===regionId)||teams.find(t=>normalizeRegionId(t.id)===normalizeRegionId(regionId)))?.id;return teams.map(t=>!regionId||t.id===target?{...t,points:Math.max(0,Math.min(t.limit??1000,t.points+resources)),economy:Math.max(0,Math.min(100,t.economy+economy))}:t);}

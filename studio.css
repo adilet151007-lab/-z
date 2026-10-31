@@ -9,3 +9,8 @@
 .studio-preview .studio-port,.studio-preview .studio-port-input{display:none}.eradis-studio .studio-drawer-close{display:none}.eradis-studio .studio-node table{width:100%;border-collapse:collapse}.eradis-studio .studio-node td{border:1px solid #64748b66;padding:8px}@media(max-width:760px){.eradis-studio .studio-drawer-close{display:block;position:sticky;top:0;margin-left:auto;padding:8px 14px;z-index:2}}
 @media(max-width:760px){.studio-dock{z-index:2000}}.studio-viewport{-webkit-user-select:none;-webkit-touch-callout:none}.studio-node [contenteditable=true]{-webkit-user-select:text;-webkit-touch-callout:default}
 body:has(#studio-app){margin:0;background:#0b131e;min-height:100dvh}#studio-app>.eradis-studio{height:100dvh;min-height:0;max-height:none;margin:0;border:0;border-radius:0}
+
+/* Port centers agree with the geometry used by SVG connectors. */
+.studio-port{right:calc(-13px - var(--studio-node-border-width,1px))!important;transform:translateY(-50%)}.studio-port-input{left:calc(-7px - var(--studio-node-border-width,1px));top:50%;width:14px;height:14px;display:grid;place-items:center;transform:translateY(-50%)}
+.eradis-studio .studio-preview-clock{font:700 24px monospace;color:var(--st-gold)}.eradis-studio .studio-preview-navigation{position:sticky;top:0;z-index:2;padding:8px 0;background:var(--st-panel)}
+@media(max-width:760px){.studio-handle{transform:translate(-3px,-3px)}.studio-handle.rotate{transform:none}}

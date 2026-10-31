@@ -15,8 +15,8 @@ test('клиент: fallback хранилища, согласие, перепо�
   timeout(){return this}emit(name,data,callback){if(name==='clock:sync'){data(null,{serverTime:Date.now()});return;}this.last={name,data};if(data.requestId)this.events.get('answer:received')?.({requestId:data.requestId,roundId:data.roundId});callback(null,this.response)}
  }
  let options,socket;globalThis.__cqIo=value=>{options=value;socket=new Socket();return socket};
- let source=await readFile(new URL('../shared-engine.js',import.meta.url),'utf8');source=source.replace(/^import .*\n/gm,'').replace(/^export \{ .*from .*\n/gm,'');
- const prefix="const io=globalThis.__cqIo;const PRIVACY_VERSION='2026-10-23';const DEFAULT_SUBJECT='Мәдениеттану';const uiText=value=>String(value);const uiTpl=(parts,...values)=>parts.map((part,index)=>part+(index<values.length?values[index]:'')).join('');\n";
+ let source=await readFile(new URL('../shared-engine.js',import.meta.url),'utf8');source=source.replace(/^import .*\n/gm,'').replace(/^export \{ .*from .*\n/gm,'');source=source.replaceAll('import.meta.url',JSON.stringify('https://example.test/shared-engine.js'));
+ const prefix="const applyRoomPresentation=()=>{};const io=globalThis.__cqIo;const PRIVACY_VERSION='2026-10-23';const DEFAULT_SUBJECT='Мәдениеттану';const uiText=value=>String(value);const uiTpl=(parts,...values)=>parts.map((part,index)=>part+(index<values.length?values[index]:'')).join('');\n";
  const {GameEngine}=await import('data:text/javascript;base64,'+Buffer.from(prefix+source).toString('base64'));
  const engine=new GameEngine('student');assert.equal(engine.connected,true);
  await engine.joinTeam('saryarka','Алия',true);assert.equal(socket.last.data.privacyConsent.accepted,true);assert.equal(socket.last.data.privacyConsent.version,'2026-10-23');assert.equal(saved.get('cq_player_token_v2'),'opaque-session-token');
