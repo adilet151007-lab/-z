@@ -1,3 +1,4 @@
+import {applyRoomPresentation} from './room-layout.js';
 import {setupSessionFinale} from './session-finale.js';
 import {createJoinQrButton} from './join-qr.js';
 import {t as uiText,tx as uiTpl} from './ui-preferences.js';
@@ -356,7 +357,7 @@ export class GameEngine {
     return ()=>{clearTimeout(timer);off();for(const event of events)document.removeEventListener(event,observe,true)};
   }
   onChange(listener) { this.listeners.add(listener); listener(this.state); return () => this.listeners.delete(listener); }
-  emit() { for (const fn of this.listeners) try{fn(this.state)}catch(error){console.error( uiText('Ошибка обновления интерфейса:'),error)} }
+  emit() { applyRoomPresentation(this.state);for (const fn of this.listeners) try{fn(this.state)}catch(error){console.error( uiText('Ошибка обновления интерфейса:'),error)} }
   onChat(listener){this.chatListeners.add(listener);listener(this.chatMeta,this.chatView);return()=>this.chatListeners.delete(listener)}
   emitChat(){for(const fn of this.chatListeners)try{fn(this.chatMeta,this.chatView)}catch(error){console.error( uiText('Ошибка обновления чата:'),error)}}
   subscribeChat(room){return this.request('chatSubscribe',{room})}
@@ -372,7 +373,7 @@ export class GameEngine {
   }
   request(event, data = {}) {
     if (!this.connected||this.legacyToken) return Promise.reject(new Error(this.legacyToken? uiText('Идёт восстановление прежнего входа. Дождитесь подключения.'): uiText('Нет связи с сервером. Дождитесь подключения.')));
-    if(this.cookieSessions&&['applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions'].includes(event))return this.httpRequest('/api/bulk/'+event,data);
+    if(this.cookieSessions&&['applyStudio','applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions'].includes(event))return this.httpRequest('/api/bulk/'+event,data);
     const input=['castVote','confirmVote','cancelVote','voteLeader','teamSubmit'].includes(event);
     if(input){const requestId=globalThis.crypto?.randomUUID?.()||('req_'+Date.now()+'_'+Math.random().toString(36).slice(2));data={...data,requestId};this.inputStatus={requestId,roundId:data.roundId,optionIdx:data.optionIdx,status:'sending'};this.emit();}
     const inputDone=status=>{if(input&&this.inputStatus?.requestId===data.requestId){this.inputStatus={...this.inputStatus,status};this.emit();}};

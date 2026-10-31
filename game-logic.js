@@ -1,3 +1,6 @@
+import {normalizeFeatures,normalizeDesign} from './room-layout.js';
+import {normalizeStudio} from './studio-schema.js';
+import {applyStudio,finishStudioRound,continueStudio,syncStudioBank} from './studio-game.js';
 import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { REGIONS, CITIES, SEAT_LIMIT, ECONOMY_PENALTY, ECONOMY_RECOVERY, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_CAP, developmentFor, MAX_TEAMS, MAX_TEAM_CAPACITY, MAX_PLAYERS, metadataFor, capacityFor, totalCapacity, normalizeRegionId, CREATOR_TEAM_ID, CREATOR_NAMES, isCreatorTeam, regularTeams } from "./game-config.js";
 import { QUESTION_BANK,isPublicDemoQuestion } from "./question-bank.js";
@@ -47,6 +50,9 @@ export function validateQuestions(questions) {
     ensure(integer(q.correct, 0, 3) && integer(q.points, 1, 1000), "Проверьте правильный вариант и баллы (1–1000).");
     ensure(integer(q.version ?? 1, 1, Number.MAX_SAFE_INTEGER), "Некорректная версия вопроса.");
     const extra = {};
+    for(const [key,min,max]of [['duration',5,3600],['resourceDelta',-100000,100000],['economyDelta',-100,100]])if(q[key]!==undefined){ensure(integer(q[key],min,max),'Проверьте данные вопроса Studio.');extra[key]=q[key];}
+    if(q.autoAdvance!==undefined){ensure(typeof q.autoAdvance==='boolean','Проверьте автопереход.');extra.autoAdvance=q.autoAdvance;}
+    for(const key of ['regionId','studioNodeId'])if(q[key])extra[key]=cleanText(q[key],1,80,key);
     for (const [key, max] of [["topic",200],["subject",80],["explanation",1200],["source",200],["sourceExcerpt",1200]]) {
       if (q[key]) extra[key] = cleanText(q[key], 1, max, key);
     }
@@ -123,6 +129,8 @@ function restoreSnapshot(raw) {
   ensure(typeof state.settings.perksEnabled==='boolean','Повреждена настройка перков.');
   validateAwardState(state,ensure);
   state.questions = validateQuestions(state.questions);
+  if(state.canvasData!==undefined)state.canvasData=normalizeStudio(state.canvasData);
+  if(state.studioPresentation)state.studioPresentation={features:normalizeFeatures(state.studioPresentation.features),design:normalizeDesign(state.studioPresentation.design)};
   if(state.match){
     const m=state.match;
     if(m.stats&&typeof m.stats==='object'&&!Array.isArray(m.stats))for(const stats of Object.values(m.stats))if(stats&&typeof stats==='object'&&!Array.isArray(stats)){
@@ -211,7 +219,7 @@ export class GameLogic {
     }
     if(restored.round&&!restored.round.resolved){restored.round.paused=true;restored.round.deadline=null;const ids=new Set(restored.regions.flatMap(t=>t.members.map(m=>m.pid)));for(const key of ['ballots','proposals'])for(const pid of Object.keys(restored.round[key]||{}))if(!ids.has(pid))delete restored.round[key][pid]}
     restored.revision=this.state.revision;restored.restorePoints=this.state.restorePoints;restored.delegatedAdmins=[];restored.accessControl=this.state.accessControl;restored.presentationEffectsEnabled=this.state.presentationEffectsEnabled;restored.exitRequests=this.state.exitRequests||[];if(this.state.settings.flexibleTeams)Object.assign(restored.settings,{flexibleTeams:true,teamDecision:restored.settings.teamDecision||'consensus',tradeEnabled:false});restored.trades=[];
-    this.state=restored;this.log('Игра восстановлена из резервной копии. Активный вопрос поставлен на паузу.');this.touch();
+    this.state=restored;this.state.canvasData??=null;this.log('Игра восстановлена из резервной копии. Активный вопрос поставлен на паузу.');this.touch();
   }
   enableUniversal(){
     if(this.state.settings.universal)return;
@@ -464,11 +472,14 @@ export class GameLogic {
     }
     this.log(`Достижение «${awardDefinition(achievementId).secret?'Открыта тайна':awardDefinition(achievementId).title}»: ${award.recipientName}.`,source==='manual'?'admin':'game');this.touch();return {achievement:structuredClone(award),duplicate:false};
   }
+  continueStudio(){return continueStudio(this);}
+  setStudio(canvasData,revision){return applyStudio(this,canvasData,revision,validateQuestions);}
   completeMatchQuestion(){
+    finishStudioRound(this);
     const match=this.ensureMatch();if(match.finishedAt!==null)return;
     evaluateAwardRound(this);
     if(!match.completedQuestionIds.includes(this.state.round.questionId))match.completedQuestionIds.push(this.state.round.questionId);
-    if(match.questionIds.length&&this.state.round.questionId===match.questionIds.at(-1))this.finishMatch();
+    if(this.state.round.studioRoute?!this.state.round.studioRoute.nextQuestionId&&!this.state.round.studioRoute.checkpoint:match.questionIds.length&&this.state.round.questionId===match.questionIds.at(-1))this.finishMatch();
   }
   finishMatch(){
     const match=this.state.match;ensure(match&&match.completedQuestionIds.length,'Сначала подведите итоги хотя бы одного вопроса.');ensure(!this.state.round||this.state.round.resolved,'Сначала подведите итоги текущего вопроса.');
@@ -488,6 +499,7 @@ export class GameLogic {
     ensure(integer(duration, 5, 3600), "Время вопроса: от 5 до 3600 секунд.");
     const question = this.state.questions.find(q => q.id === questionId);
     ensure(question, "Вопрос не найден.");
+    if(question.studioNodeId&&question.duration)duration=question.duration;
     ensure(!isPublicDemoQuestion(question)||this.state.settings.allowPublicDemo!==false,'Публичный демонстрационный вопрос отключён. Добавьте свой вопрос или явно включите деморежим.','PUBLIC_DEMO_DISABLED');
     ensure((question.subject||DEFAULT_SUBJECT)===this.state.branding.subject,'Выберите вопрос текущего предмета.');
     const match=this.ensureMatch(true);match.questionIds=this.playableQuestions().map(q=>q.id);
@@ -612,7 +624,7 @@ export class GameLogic {
     const question = round.questionSnapshot;
     if(this.state.settings.mode==='solo'){
       for(const m of this.state.regions.flatMap(t=>t.members)){
-        const chosen=round.submitted[m.pid]??round.ballots[m.pid]??null,correct=chosen===question.correct,multiplier=soloMultiplier(m.streak),awarded=correct?Math.max(0,Math.min(this.scoreLimit('player',m.pid)-m.capital,Math.round(25*multiplier))):0;
+        const chosen=round.submitted[m.pid]??round.ballots[m.pid]??null,correct=chosen===question.correct,multiplier=soloMultiplier(m.streak),awarded=correct?Math.max(0,Math.min(this.scoreLimit('player',m.pid)-m.capital,Math.round((question.studioNodeId?question.points:25)*multiplier))):0;
         this.growTerritory(this.state.regions.find(t=>t.members.includes(m)),awarded,this.scoreLimit('player',m.pid));m.capital+=awarded;m.streak=correct?m.streak+1:0;round.submitted[m.pid]=chosen;round.results[m.pid]={chosen,correct,awarded,multiplier,reason:chosen===null?'no_votes':'personal'};
       }
       round.resolved=true;round.paused=false;round.deadline=null;round.remainingMs=0;this.completeMatchQuestion();this.touch();return;
@@ -626,7 +638,7 @@ export class GameLogic {
       const match=this.ensureMatch();if(!Object.hasOwn(match.stats,region.id))Object.defineProperty(match.stats,region.id,{value:{hitCrisis:false,recoveredByQuiz:false},enumerable:true,writable:true,configurable:true});
       const stats=match.stats[region.id],beforeEconomy=region.economy,recovering=!!this.state.settings.universal&&beforeEconomy<100;
       let economyRecovered=0;
-      const awarded = correct&&!recovering ? Math.max(0,Math.min(this.state.settings.universal?25:question.points, this.scoreLimit('team',region.id) - region.points)) : 0;
+      const awarded = correct&&!recovering ? Math.max(0,Math.min(this.state.settings.universal&&!question.studioNodeId?25:question.points, this.scoreLimit('team',region.id) - region.points)) : 0;
       if(correct){
         this.growTerritory(region,awarded);region.points+=awarded;
         if(recovering){region.economy=Math.min(100,region.economy+ECONOMY_RECOVERY);economyRecovered=region.economy-beforeEconomy;if(region.economy===100&&stats.hitCrisis)stats.recoveredByQuiz=true}
@@ -764,7 +776,7 @@ export class GameLogic {
     const current=this.state.questions[index];
     ensure(expectedVersion===(current.version||1),"Вопрос уже изменён. Откройте его заново.","REVISION_CONFLICT");
     const question=validateQuestions([{...changes,subject:changes.subject||current.subject||DEFAULT_SUBJECT,id,version:(current.version||1)+1}])[0];
-    this.state.questions[index]=question;this.log("Вопрос обновлён в банке. Активный раунд использует свою сохранённую версию.");this.touch();
+    this.state.questions[index]=question;this.log("Вопрос обновлён в банке. Активный раунд использует свою сохранённую версию.");syncStudioBank(this);this.touch();
     return {questionId:id,activeRoundUnchanged:this.state.round?.questionId===id&&!this.state.round.resolved};
   }
   revokeAchievement(achievementId,scope,targetId) {
@@ -780,7 +792,7 @@ export class GameLogic {
   clearQuestions() {
     ensure(!this.state.round||this.state.round.resolved,'Сначала завершите активный вопрос.');
     this.createRestorePoint('Перед очисткой банка вопросов',false);
-    this.state.questions=[];this.state.round=null;this.state.match=null;this.state.phase='lobby';this.touch();
+    this.state.questions=[];syncStudioBank(this);this.state.round=null;this.state.match=null;this.state.phase='lobby';this.touch();
   }
   setAutoAdvance(enabled,duration=60) {
     ensure(typeof enabled==='boolean'&&integer(duration,5,3600),'Проверьте режим и длительность.');
@@ -789,17 +801,18 @@ export class GameLogic {
   }
   advanceIfDue() {
     const round=this.state.round,match=this.state.match;
-    if(!this.state.settings.autoAdvance||!round?.resolved||!match||match.finishedAt!==null)return;
+    if(!this.state.settings.autoAdvance||round?.questionSnapshot.autoAdvance===false||!round?.resolved||!match||match.finishedAt!==null)return;
+    if(round.studioRoute?.checkpoint)return;
     const lastAward=Math.max(0,...this.state.achievements.filter(a=>a.matchId===match.id).map(a=>a.earnedAt+(ANIMATION_DURATIONS[a.achievementId]??7800)));
     if(this.now()<lastAward)return;
-    const playable=new Set(this.playableQuestions().map(question=>question.id));const next=match.questionIds.find(id=>!match.completedQuestionIds.includes(id)&&playable.has(id));
+    const playable=new Set(this.playableQuestions().map(question=>question.id));const next=round.studioRoute?(playable.has(round.studioRoute.nextQuestionId)&&!match.completedQuestionIds.includes(round.studioRoute.nextQuestionId)?round.studioRoute.nextQuestionId:null):match.questionIds.find(id=>!match.completedQuestionIds.includes(id)&&playable.has(id));
     if(next)this.startRound(next,this.state.settings.autoDuration||60);else this.finishMatch();
   }
   deleteQuestion(id) {
 
     ensure(this.state.questions.some(q=>q.id===id),"Вопрос не найден.");
     ensure(!this.state.round || this.state.round.resolved || this.state.round.questionId!==id,"Сначала завершите активный вопрос.");
-    this.state.questions=this.state.questions.filter(q=>q.id!==id);this.log("Вопрос удалён из банка.");this.touch();
+    this.state.questions=this.state.questions.filter(q=>q.id!==id);syncStudioBank(this);this.log("Вопрос удалён из банка.");this.touch();
   }
   importQuestions(drafts) {
     ensure(Array.isArray(drafts)&&drafts.length>=1&&drafts.length<=60,"Можно добавить от 1 до 60 вопросов за раз.");
@@ -811,6 +824,7 @@ export class GameLogic {
     return {added:questions.length,skipped:drafts.length-questions.length};
   }
   resetGame() {
+    const canvasData=this.state.canvasData,studioPresentation=this.state.studioPresentation;
     const questions = this.state.questions, revision = this.state.revision, settings = this.state.settings;
     const awardProfiles=this.state.awardProfiles;
     const exitRequests=this.state.exitRequests,presentationEffectsEnabled=this.state.presentationEffectsEnabled,branding=this.state.branding,restorePoints=this.state.restorePoints,accessControl=this.state.accessControl;
@@ -818,6 +832,7 @@ export class GameLogic {
     this.state = freshState();
     this.state.match=null;this.state.achievements=[];this.state.awardProfiles=awardProfiles;this.state.awardSystemVersion=1;
     this.state.questions = questions;
+    if(canvasData)this.state.canvasData=canvasData;if(studioPresentation)this.state.studioPresentation=studioPresentation;
     this.state.settings = settings;
     this.state.regions = teams.map(team=>({...team,recoveryAnswers:0}));
     this.state.branding=branding;this.state.restorePoints=restorePoints;this.state.accessControl={...accessControl,invitations:[]};

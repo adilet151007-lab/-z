@@ -4,6 +4,7 @@ import {setupSyllabus} from './syllabus-ui.js';
 
 export function setupTelemetry(engine){
  let root=null,sheet=null,open=false,tab='eye',hold=null,origin=null,swipe=null,busy=false,selected='',pid='',lastIdentity='',lastPlayer='',editingQuestion=null,exitDialog=null,stopSyllabus=null,stopAwards=null,stopAdmission=null;
+ let studioLink=null;engine.onChange(state=>{if(!state?.viewer?.isCreator){studioLink?.remove();studioLink=null;return;}if(studioLink)return;studioLink=document.createElement('a');studioLink.className='studio-entry-link';studioLink.textContent='◆ ERADIS Studio';studioLink.href=location.pathname.startsWith('/rooms/')?'/creators.html':new URL('./studio.html',location.href).pathname;studioLink.target='_blank';studioLink.rel='noopener';document.body.append(studioLink);});
  const enabled=()=>engine.state?.viewer.isDevTelemetry===true,$=id=>document.getElementById(id);
  function permitted(action){
   const v=engine.state?.viewer;if(!v)return false;
@@ -14,6 +15,7 @@ export function setupTelemetry(engine){
   if(['grant-admin','revoke-admin','create-invite','rotate-local-key'].includes(action))return v.canGrantAdmin===true;
   if(action==='reset'&&!v.isCreator)return v.adminGrant?.permissions.game===true&&v.adminGrant?.permissions.players===true;
   if(action==='effect')return v.canTriggerPresentationEffect===true;
+  if(action==='studio')return v.isCreator===true;
   if(v.isCreator)return true;
   if(['chat','export'].includes(action))return true;
   const scope=/^(kick|kick-all|self-move)$/.test(action)?'players':/^(q-load|q-new|q-delete)$/.test(action)?'questions':/^(points|minus-points|economy|minus-economy|restore|previous|next|pause|timer|resolve|mode|lobby|reset|q-start)$/.test(action)?'game':null;

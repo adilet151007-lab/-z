@@ -1,3 +1,5 @@
+import {publicStudio,normalizeStudio} from './studio-schema.js';
+import {defaultDesign,normalizeFeatures,normalizeDesign,ROOM_FEATURES,roomFeatureDenied} from './room-layout.js';
 import {issueQrTicket,validQrTicket} from './qr-admission.js';
 import "dotenv/config";
 import express from "express";
@@ -43,6 +45,9 @@ export async function createGameServer(options = {}) {
   const store = options.store || await createStore();
   const saved = await store.load();
   let game = new GameLogic(saved);
+  const roomFeatures=()=>options.roomConfiguration?.()?.features||game.state.studioPresentation?.features;
+  function enforceRoomFeatures(){const f=roomFeatures();if(!f)return;game.state.settings.achievementsEnabled=f.achievements!==false;if(!f.achievements)game.state.settings.perksEnabled=false;if(!f.trading)game.state.settings.tradeEnabled=false;if(!f.presentationEffects)game.state.presentationEffectsEnabled=false;}
+  enforceRoomFeatures();
   const sessionNow=options.sessionNow||Date.now;
   const pendingPlayerActivity=new Map(),pendingTeacherActivity=new Map();
   if(!options.legacyRules)game.enableUniversal();
@@ -100,6 +105,7 @@ export async function createGameServer(options = {}) {
     next();
   });
   app.get("/", (_req, res) => res.redirect("/student.html"));
+  app.get('/api/studio-media/:id',async(req,res)=>{const doc=publishedGame.state.canvasData;if(!doc||String(req.query.v||'')!==(doc.settings.assetVersion||''))return res.sendStatus(404);const jar=cookies(req),token=jar[cookieName('player')],privileged=validTeacherToken(jar[cookieName('teacher')])||typeof token==='string'&&playerActive(publishedGame.creatorFor(hashToken(token)))||options.authorizeTeacher&&await options.authorizeTeacher(req);const surfaces=privileged?['teacher','projector','student']:['student'];const item=surfaces.flatMap(s=>doc.roomUiLayout[s]||[]).find(e=>e.id===req.params.id&&e.data.url);if(!item)return res.sendStatus(404);const match=item.data.url.match(/^data:(image\/(?:png|jpeg|webp));base64,(.+)$/);if(!match)return res.sendStatus(404);return res.type(match[1]).set('Cache-Control','private,no-store').send(Buffer.from(match[2],'base64'));});
   app.get("/health", (_req, res) => res.status(closing ? 503 : 200).json({ ok: !closing, storage: store.kind, chatStorage:chatStore.kind, creatorAccessEnabled:configured.length===2 }));
   app.get('/api/public-settings',(_req,res)=>res.json({branding:publishedGame.publicBranding(),privacyVersion:PRIVACY_VERSION,consentRequired:requireConsent}));
   app.get('/api/logo', (req,res)=>{const logo=publishedGame.state.branding.logo;if(!logo||req.query.v!==hashToken(logo).slice(0,16))return res.sendStatus(404);const [header,data]=logo.split(',');res.setHeader('Cache-Control','public, max-age=86400, immutable');res.type(header.slice(5,header.indexOf(';'))).send(Buffer.from(data,'base64'))});
@@ -112,11 +118,12 @@ export async function createGameServer(options = {}) {
     return res.redirect(303,(options.resourcePrefix||'')+'/student.html');
   });
   const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
+  for(const asset of ['studio.html','studio.css','studio-standalone.js','studio-editor.js','studio-audio.js','studio-canvas.js','studio-widgets.js','studio-i18n.js','studio-math.js','studio-model.js','studio-schema.js','studio-flow.js','studio-layout.js','studio-room.css','syllabus-files.js','studio-live.js','room-layout.js'])allowed.add('/'+asset);
   allowed.add('/syllabus-draft.js');
   allowed.add('/session-finale.js');allowed.add('/territory-models.js');allowed.add('/join-qr.js');allowed.add('/qr-generator.js');allowed.add('/ui-preferences.js');allowed.add('/ui-kz.js');
   for(const file of ['/eradis-mark.svg','/lumi.css','/lumi.js'])allowed.add(file);
   for(const file of ['./award-2d.js','./achievement-player.js','./achievement-animations.js',...Object.values(ANIMATION_MODULES)])if(/^\.\/[a-z0-9-]+\.js$/.test(file))allowed.add(file.slice(1));
-  app.use(async(req,res,next)=>{if(!allowed.has(req.path))return next();const file=path.join(directory,req.path.slice(1));if(req.path.endsWith('.html')){if(req.path==='/student.html'&&!decodeCredential(cookies(req)[cookieName('device')],'device'))cookie(res,'device',signed({role:'device',id:randomUUID(),expires:Date.now()+PROFILE_RETENTION_MS}),PROFILE_RETENTION_MS);return res.type('html').send((await readFile(file,'utf8')).replace(/<script(?=[\s>])/g,`<script nonce="${res.locals.nonce}"`))}res.sendFile(file)});
+  app.use(async(req,res,next)=>{if(!allowed.has(req.path))return next();if(req.path==='/studio.html'){const token=cookies(req)[cookieName('player')];if(typeof token!=='string'||!playerActive(publishedGame.creatorFor(hashToken(token))))return res.status(403).type('html').send('<p>Studio Max доступен только двум создателям. Войдите в ERADIS своим аккаунтом создателя.</p><a href="student.html">← ERADIS</a>');}const file=path.join(directory,req.path.slice(1));if(req.path.endsWith('.html')){if((req.path==='/student.html'||req.path==='/studio.html')&&!decodeCredential(cookies(req)[cookieName('device')],'device'))cookie(res,'device',signed({role:'device',id:randomUUID(),expires:Date.now()+PROFILE_RETENTION_MS}),PROFILE_RETENTION_MS);return res.type('html').send((await readFile(file,'utf8')).replace(/<script(?=[\s>])/g,`<script nonce="${res.locals.nonce}"`))}res.sendFile(file)});
   app.get("/vendor/pdfjs/pdf.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.mjs")));
   app.get("/vendor/pdfjs/pdf.worker.mjs", (_req,res) => res.sendFile(path.join(directory,"node_modules/pdfjs-dist/build/pdf.worker.mjs")));
   app.get("/vendor/mammoth/mammoth.browser.min.js", (_req,res) => res.sendFile(path.join(directory,"node_modules/mammoth/mammoth.browser.min.js")));
@@ -213,7 +220,7 @@ export async function createGameServer(options = {}) {
     return res.json(issueQrTicket(secret,options.resourcePrefix||'',entry.epoch,securityNow()));
   });
   const sameOrigin=req=>{const origin=req.headers.origin;if(!origin)return true;try{return new URL(origin).host===req.headers.host}catch{return false}};
-  const bulkActions=new Set(['applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions']);
+  const bulkActions=new Set(['applyStudio','applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions']);
   const httpSocket=(req,res,next)=>{const socket=io.sockets.sockets.get(req.headers['x-cq-socket']);if(!sameOrigin(req)||req.headers['x-cq-client']!=='1'||!socket||typeof req.headers['x-cq-proof']!=='string'||!equal(req.headers['x-cq-proof'],socket.data.httpProof))return res.status(403).json({ok:false,error:'Сессия изменилась. Дождитесь подключения.',code:'FORBIDDEN'});req.gameSocket=socket;next()};
   app.post('/api/session',httpSocket,express.json({limit:'4kb',inflate:false}),async(req,res)=>{
     try{const role=req.body?.role;if(!['teacher','player'].includes(role))throw new GameError('Некорректная сессия.');
@@ -277,7 +284,7 @@ export async function createGameServer(options = {}) {
     }
     return changed;
   }
-  function stateFor(socket,players,frame){const view=publishedGame.view(actor(socket),players,frame);view.admission=admissionStatus();if(view.viewer.canGrantAdmin)view.sessionControl.localAccessEnabled=!!effectiveLocalCodeHash();return view}
+  function stateFor(socket,players,frame){const view=publishedGame.view(actor(socket),players,frame);view.admission=admissionStatus();if(view.viewer.canGrantAdmin)view.sessionControl.localAccessEnabled=!!effectiveLocalCodeHash();if(publishedGame.state.canvasData)view.roomConfig={...(publishedGame.state.studioPresentation||{features:normalizeFeatures(Object.fromEntries(Object.keys(ROOM_FEATURES).map(key=>[key,true]))),design:defaultDesign()}),canvasData:publicStudio(publishedGame.state.canvasData,view.viewer.role==='teacher'||view.viewer.isCreator)};return view}
   const sendState = socket => {const players=online();socket.emit("state", stateFor(socket,players));sendChatScope(socket,false,players)};
   function publishChat(room,messageId){
     const players=online(),topology=chatTopology(players);
@@ -346,6 +353,7 @@ export async function createGameServer(options = {}) {
         try{const limit=viaHTTP?8*1024*1024:bulkActions.has(name)?240*1024:16*1024;if(Buffer.byteLength(JSON.stringify(data))>limit)throw new Error()}catch{reply({ok:false,error:'Запрос слишком большой или повреждён.',code:'PAYLOAD_TOO_LARGE'});return}
         try{
           const identity=actor(socket),player=publishedGame.findPlayer(identity.playerHash),delegated=identity.role==='delegate'&&publishedGame.adminCan(player?.pid,name);
+          if(identity.role!=='creator'&&roomFeatureDenied(name,roomFeatures()))throw new GameError('Функция отключена создателем.','FEATURE_DISABLED');
           if(permission==='student'&&!player)throw new GameError('Войдите в команду заново.','SESSION_EXPIRED');
           if(permission==='teacher'&&!['teacher','creator'].includes(identity.role)&&!delegated||permission==='creator'&&!publishedGame.creatorFor(identity.playerHash)&&!delegated||permission==='actualTeacher'&&identity.role!=='teacher'&&!(name==='revokeAchievement'&&identity.role==='creator'))throw new GameError('Для действия недостаточно прав.','FORBIDDEN');
           if(name==='teacherLogin'||name==='joinTeam'&&typeof data?.name==='string'&&/(?:ROOT_ACCESS|DEV_CONSOLE)|^CQ[IOL]-|^[A-Za-z0-9_#$!.-]{26,128}(?:\s|$)/i.test(data.name.trim()))checkLoginLimit(socket);
@@ -541,6 +549,9 @@ export async function createGameServer(options = {}) {
     handle("deleteQuestion", "teacher", data => game.deleteQuestion(data.questionId));
     handle("importQuestions", "teacher", data => game.importQuestions(Array.isArray(data.questions)?data.questions.map(q=>({...q,subject:q.subject||game.state.branding.subject})):data.questions));
     handle('updateBranding','teacher',data=>game.updateBranding(data.branding));
+    handle('getStudio','creator',()=>{if(actor(socket).role!=='creator')throw new GameError('Нужен доступ создателя.','FORBIDDEN');const presentation=game.state.studioPresentation||options.roomConfiguration?.()||{features:normalizeFeatures(Object.fromEntries(Object.keys(ROOM_FEATURES).map(key=>[key,true]))),design:defaultDesign()};return {...presentation,canvasData:game.state.canvasData||null,questions:game.state.questions.filter(q=>(q.subject||game.state.branding.subject)===game.state.branding.subject),name:game.state.branding.title,subject:game.state.branding.subject,revision:game.state.revision};});
+    handle('applyStudio','creator',data=>{if(actor(socket).role!=='creator')throw new GameError('Нужен доступ создателя.','FORBIDDEN');const presentation={features:normalizeFeatures(data.features),design:normalizeDesign(data.design)};const result=game.setStudio(data.canvasData,data.revision);game.state.studioPresentation=presentation;enforceRoomFeatures();game.touch();return result;});
+    handle('continueStudio','teacher',()=>game.continueStudio());
     handle('createBackup','teacher',()=>{const point=game.createRestorePoint();return {archive:sealBackup(point.snapshot)}});
     handle('restoreBackup','teacher',data=>{
       if(data.revision!==game.state.revision)throw new GameError('Состояние изменилось. Обновите страницу перед восстановлением.','REVISION_CONFLICT');
