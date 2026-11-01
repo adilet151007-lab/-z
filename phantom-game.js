@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 const ACTIVE = new Set([
   'diplomacy',
   'betting',
+  'ready',
   'proposal',
   'intro',
   'question',
@@ -53,6 +54,8 @@ export function initialPhantom() {
       questionCount: 5,
       duration: 30,
       betSeconds: 30,
+      negotiationSeconds: 30,
+      autoStart: false,
       reduced: false,
       volume: 0.12,
     },
@@ -368,13 +371,13 @@ export function configurePhantom(g, data) {
   need(!phantomActive(g.state), 'Сначала остановите активное событие.');
   const c = { ...s.config, ...data };
   need(
-    typeof c.enabled === 'boolean' && typeof c.reduced === 'boolean',
+    typeof c.enabled === 'boolean' && typeof c.reduced === 'boolean' && typeof c.autoStart === 'boolean',
     'Проверьте настройки режима.',
   );
   need(
     INT(c.questionCount, 1, 100) &&
       INT(c.duration, 5, 120) &&
-      INT(c.betSeconds, 5, 120),
+      INT(c.betSeconds, 5, 120) && INT(c.negotiationSeconds, 5, 120),
     'Вопросы: 1–100; время: 5–120 секунд.',
   );
   need(
@@ -449,7 +452,7 @@ export function phantomTeamAction(g, p, data) {
     e.offeredBy = own.id;
     e.amount = data.amount;
     e.offerVersion = 1;
-    e.deadline = g.now() + 120000;
+    e.deadline = g.now() + (s.config.negotiationSeconds ?? 30) * 1000;
     e.history.push({ teamId: own.id, amount: data.amount });
   } else if (data.action === 'royaleProposal') {
     need(
@@ -487,7 +490,7 @@ export function phantomTeamAction(g, p, data) {
           e.offeredBy = own.id;
           e.offerVersion++;
           e.history.push({ teamId: own.id, amount: data.amount });
-          e.deadline = g.now() + 120000;
+          e.deadline = g.now() + (s.config.negotiationSeconds ?? 30) * 1000;
         } else {
           need(
             e.teamIds.every(
@@ -610,7 +613,12 @@ export function phantomControl(g, data) {
     startFight(g, e, ids);
   } else {
     const e = requireEvent(g, data);
-    if (data.action === 'pause') {
+    if(data.action==='timer'){
+      need(['diplomacy','betting','proposal','intro','question','reveal'].includes(e.stage)&&INT(data.seconds,5,120),'Время этапа: 5–120 секунд.');
+      e.remaining=data.seconds*1000;
+      e.deadline=e.paused?null:g.now()+e.remaining;
+      journal(e,'timer',{seconds:data.seconds});
+    } else if (data.action === 'pause') {
       need(typeof data.paused === 'boolean', 'Проверьте паузу.');
       if (data.paused && !e.paused) {
         e.remaining = e.deadline ? Math.max(1, e.deadline - g.now()) : 0;
@@ -648,7 +656,7 @@ export function phantomControl(g, data) {
       } else if (data.action === 'start') {
         if (e.stage === 'proposal') finalizeProposal(g, e);
         else {
-          need(e.stage === 'betting', 'Ожидается этап ставок.');
+          need(['betting','ready'].includes(e.stage), 'Дождитесь согласия команд и приёма ставок.');
           startFight(g, e, e.teamIds);
           nextQuestion(g, e);
         }
@@ -671,8 +679,8 @@ export function tickPhantom(g) {
   const e = system(g).event;
   if (e.stage === 'question') resolve(g, e);
   else if (e.stage === 'betting') {
-    startFight(g, e, e.teamIds);
-    nextQuestion(g, e);
+    if(system(g).config.autoStart){startFight(g,e,e.teamIds);nextQuestion(g,e);}
+    else{e.stage='ready';e.stageAt=g.now();e.deadline=null;e.remaining=0;journal(e,'teacher-ready');}
   } else if (e.stage === 'intro' || e.stage === 'reveal') nextQuestion(g, e);
   else if (e.stage === 'proposal') finalizeProposal(g, e);
   else if (e.stage === 'diplomacy') {
@@ -698,6 +706,8 @@ export function phantomView(g, player, teacher) {
       duration: s.config.duration,
       questionCount: s.config.questionCount,
       betSeconds: s.config.betSeconds,
+      negotiationSeconds: s.config.negotiationSeconds ?? 30,
+      autoStart: s.config.autoStart === true,
       ...(manager
         ? {
             questionIds: s.config.questionIds,
@@ -752,9 +762,12 @@ export function validatePhantom(state, validateQuestions) {
     'Повреждена система Фантомной зоны.',
   );
   const c = s.config;
+  if(c){c.negotiationSeconds??=30;c.autoStart??=false;}
   need(
     c &&
       typeof c.enabled === 'boolean' &&
+      typeof c.autoStart === 'boolean' &&
+      INT(c.negotiationSeconds,5,120) &&
       typeof c.reduced === 'boolean' &&
       typeof c.volume === 'number' &&
       Number.isFinite(c.volume) &&

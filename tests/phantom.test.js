@@ -17,6 +17,7 @@ function fixture() {
     questionCount: 3,
     duration: 5,
     betSeconds: 5,
+    autoStart: true,
   });
   const event = () => g.state.phantom.event;
   const team = (i, action, data = {}) =>

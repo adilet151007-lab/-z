@@ -44,6 +44,13 @@ const COPY = {
   spectator: ['Вы наблюдаете за событием', 'Сіз оқиғаны бақылап отырсыз'],
   diplomacy: ['Дипломатия', 'Дипломатия'],
   betting: ['Приём ставок', 'Бәс қабылдау'],
+  ready: ['Ожидаем запуск преподавателя', 'Оқытушының бастауын күтеміз'],
+  startNow: ['Начать бой', 'Шайқасты бастау'],
+  negotiationTime: ['Время переговоров, с', 'Келіссөз уақыты, с'],
+  autoStart: ['Автоматически начать после ставок', 'Бәстен кейін автоматты бастау'],
+  teacherControl: ['Управление преподавателя', 'Оқытушының басқаруы'],
+  resetClock: ['Установить время', 'Уақытты орнату'],
+  readyNote: ['Ставки закрыты. Преподаватель запускает бой, когда команды готовы.', 'Бәс жабылды. Командалар дайын болғанда оқытушы бастайды.'],
   proposal: ['Голосование о взносе', 'Жарна туралы дауыс беру'],
   intro: ['Фантомная зона', 'Фантом аймағы'],
   question: ['Бой знаний', 'Білім шайқасы'],
@@ -281,7 +288,7 @@ export function setupPhantom(engine) {
     const key = JSON.stringify([c, questions.map((q) => [q.id, q.text])]);
     if (key === configKey || config.contains(document.activeElement)) return;
     configKey = key;
-    config.innerHTML = `<summary>${esc(tr('settings'))}</summary><form data-phantom-form="configure"><label class="phantom-check"><input type="checkbox" name="enabled" ${c.enabled ? 'checked' : ''}>${esc(tr('enable'))}</label><div class="phantom-fields">${field('count', 'number', c.questionCount, 'min="1" max="100" required')}${field('duration', 'number', c.duration, 'min="5" max="120" required')}${field('betsTime', 'number', c.betSeconds, 'min="5" max="120" required')}</div><label>${esc(tr('warQuestions'))}<select name="questionIds" multiple size="5">${options(questions, c.questionIds)}</select></label><label>${esc(tr('royaleQuestions'))}<select name="royaleQuestionIds" multiple size="5">${options(questions, c.royaleQuestionIds)}</select></label><p>${esc(tr('fallback'))}</p><label class="phantom-check"><input name="reduced" type="checkbox" ${c.reduced ? 'checked' : ''}>${esc(tr('allReduced'))}</label>${field('volume', 'range', c.volume, 'min="0" max="1" step="0.01"')}<button type="submit">${esc(tr('apply'))}</button></form>${button('preview', 'preview')}`;
+    config.innerHTML = `<summary>${esc(tr('settings'))}</summary><form data-phantom-form="configure"><label class="phantom-check"><input type="checkbox" name="enabled" ${c.enabled ? 'checked' : ''}>${esc(tr('enable'))}</label><div class="phantom-fields">${field('count', 'number', c.questionCount, 'min="1" max="100" required')}${field('duration', 'number', c.duration, 'min="5" max="120" required')}${field('betsTime', 'number', c.betSeconds, 'min="5" max="120" required')}${field('negotiationTime','number',c.negotiationSeconds??30,'min="5" max="120" required')}</div><label class="phantom-check"><input name="autoStart" type="checkbox" ${c.autoStart?'checked':''}>${esc(tr('autoStart'))}</label><label>${esc(tr('warQuestions'))}<select name="questionIds" multiple size="5">${options(questions, c.questionIds)}</select></label><label>${esc(tr('royaleQuestions'))}<select name="royaleQuestionIds" multiple size="5">${options(questions, c.royaleQuestionIds)}</select></label><p>${esc(tr('fallback'))}</p><label class="phantom-check"><input name="reduced" type="checkbox" ${c.reduced ? 'checked' : ''}>${esc(tr('allReduced'))}</label>${field('volume', 'range', c.volume, 'min="0" max="1" step="0.01"')}<button type="submit">${esc(tr('apply'))}</button></form>${button('preview', 'preview')}`;
   }
   function renderEntry() {
     const p = state?.viewer.player,
@@ -292,6 +299,8 @@ export function setupPhantom(engine) {
     if (entry.hidden) return;
     if (!entry.parentNode)
       (
+        document.querySelector('#teacher-app .t-col:last-child') ||
+        document.querySelector('#app .dock') ||
         document.getElementById('teacher-app') ||
         document.getElementById('app') ||
         document.body
@@ -330,7 +339,9 @@ export function setupPhantom(engine) {
     entry.append(notice);
   }
   function eventControls(e) {
-    return `<div class="phantom-toolbar">${button('collapse', 'collapse')}${button('reduced', 'reduced', `aria-pressed="${localReduced}"`)}${button('sound', soundOn ? 'mute' : 'sound')}${control() && e.stage !== 'result' ? button('stop', 'stop', 'class="phantom-stop"') : ''}${control() ? button('allReduced', 'allReduced', `aria-pressed="${!!state.phantom?.config.reduced}"`) : ''}${control() ? `<label class="phantom-volume">${esc(tr('volume'))}<input data-phantom-volume type="range" min="0" max="1" step="0.01" value="${state.phantom?.config.volume ?? 0.12}"></label>` : ''}${localPreview ? button('closePreview', 'close') : ''}</div>`;
+    const active=control()&&e.stage!=='result',timed=!['ready','exhausted','result'].includes(e.stage);
+    const commands=active?`<div class="phantom-command-bar" role="group" aria-label="${esc(tr('teacherControl'))}"><strong>${esc(tr('teacherControl'))}</strong>${timed||e.paused?button(e.paused?'resume':'pause',e.paused?'resume':'pause'):''}${['betting','ready','proposal'].includes(e.stage)?button('start',e.stage==='ready'?'startNow':'start'):''}${timed?`<form data-phantom-form="timer"><label>${esc(tr('duration'))}<input name="seconds" type="number" min="5" max="120" value="30" required></label><button type="submit">${esc(tr('resetClock'))}</button></form>`:''}</div>`:'';
+    return `<div class="phantom-toolbar">${button('collapse', 'collapse')}${button('reduced', 'reduced', `aria-pressed="${localReduced}"`)}${button('sound', soundOn ? 'mute' : 'sound')}${control() && e.stage !== 'result' ? button('stop', 'stop', 'class="phantom-stop"') : ''}${control() ? button('allReduced', 'allReduced', `aria-pressed="${!!state.phantom?.config.reduced}"`) : ''}${control() ? `<label class="phantom-volume">${esc(tr('volume'))}<input data-phantom-volume type="range" min="0" max="1" step="0.01" value="${state.phantom?.config.volume ?? 0.12}"></label>` : ''}${localPreview ? button('closePreview', 'close') : ''}${commands}</div>`;
   }
   function renderEvent(e) {
     const reduced = localReduced || lowPower || state.phantom?.config.reduced;
@@ -367,6 +378,7 @@ export function setupPhantom(engine) {
       body = `<div class="phantom-cinematic"><span class="phantom-terminal">ERADIS / SYSTEM EVENT</span><h1 data-cinematic-title></h1><div class="phantom-messages" aria-live="polite"></div><div class="phantom-scanline"></div></div>`;
     else if (e.stage === 'diplomacy')
       body = `<h2>${esc(tr('diplomacy'))}</h2><ol class="phantom-history">${e.history.map((h) => `<li>${esc(name(h.teamId))}: <strong>${h.amount}</strong></li>`).join('')}</ol>${leader && participating ? `${e.offeredBy !== own.id ? button('accept', 'accept') : ''}${button('reject', 'reject')}${e.offeredBy !== own.id ? `<form data-phantom-form="counter">${field('amount', 'number', e.amount, 'min="25" max="100000" step="25" required')}<button type="submit">${esc(tr('counter'))}</button></form>` : ''}` : `<p>${esc(tr('spectator'))}</p>`}`;
+    else if(e.stage==='ready')body=`<section class="phantom-ready"><h2>${esc(tr('ready'))}</h2><p>${esc(tr('readyNote'))}</p>${control()?button('start','startNow'):''}</section>`;
     else if (e.stage === 'betting') {
       const total = e.betFund,
         existing = e.bets.find((b) => b.teamId === own?.id);
@@ -643,12 +655,15 @@ export function setupPhantom(engine) {
       action = form.dataset.phantomForm,
       e = current(),
       base = { eventId: e?.id, offerVersion: e?.offerVersion };
-    if (action === 'configure') {
+    if(action==='timer'){request('phantomControl',{...base,action:'timer',seconds:Number(data.get('seconds'))});}
+    else if (action === 'configure') {
       const cfg = {
         enabled: data.has('enabled'),
         questionCount: Number(data.get('count')),
         duration: Number(data.get('duration')),
         betSeconds: Number(data.get('betsTime')),
+        negotiationSeconds: Number(data.get('negotiationTime')),
+        autoStart: data.has('autoStart'),
         reduced: data.has('reduced'),
         volume: Number(data.get('volume')),
         questionIds: data.getAll('questionIds'),

@@ -15,10 +15,52 @@ export function roomFeatureDenied(action,f={}){
  return Object.entries(groups).some(([feature,actions])=>f[feature]===false&&actions.includes(action));
 }
 const teacherSelectors={chat:'#cq-chat-root',map:'.atlas-projector',controls:'#round-control',participants:'#roster-panel',answers:'#answer-key',ranking:'#solo-ranking',admission:'#admission-tools',questions:'#question-bank-panel',editor:'#question-editor-panel',teams:'#team-manager',format:'#format-panel',achievements:'.achievement-panel',syllabus:'#syllabus-tools',branding:'#branding-panel',backups:'#backups-panel',events:'#event-log-panel'};
+function rememberNativeRoom(app,teacher){
+ if(app._nativeRoomNodes)return;
+ const selectors=teacher?Object.values(teacherSelectors).concat('#team-ranking','#session-utilities'):['.stage-wrap','#question-panel','#team-panel','.achievement-panel','#trade-panel'];
+ const nodes=[];
+ for(const selector of selectors){let node=(selector==='#cq-chat-root'?document:app).querySelector(selector);if(['#answer-key','#admission-tools'].includes(selector))node=node?.closest('details');if(node&&!nodes.includes(node))nodes.push(node);}
+ app._nativeRoomNodes=nodes.map(node=>({node,parent:node.parentNode,next:node.nextSibling}));
+}
+function restoreNativeRoom(app,surface){
+ const grid=app.querySelector('.room-layout-grid');
+ if(!grid)return;
+ applyStudioLayout(null,surface,grid,grid._roomNodes||{});
+ for(const {node,parent,next} of [...(app._nativeRoomNodes||[])].reverse()){
+  parent.insertBefore(node,next?.parentNode===parent?next:null);node.style.removeProperty('grid-column');
+ }
+ const ranking=grid._roomNodes?.ranking;if(ranking&&!ranking.childNodes.length)ranking.remove();
+ grid.classList.remove('room-layout-grid');grid.style.height='';delete grid._roomNodes;
+ if(!grid.classList.contains('t-grid')&&!grid.childNodes.length)grid.remove();
+}
+function nativeRoomPresentation(state,app,teacher){
+ const {features:f,design:d}=state.roomConfig;
+ restoreNativeRoom(app,teacher?'teacher':'student');document.documentElement.removeAttribute('data-room-layout');
+ let style=document.getElementById('cq-room-design-style');if(!style){style=document.createElement('style');style.id='cq-room-design-style';document.head.append(style);}
+ const selectors={...teacherSelectors,ranking:'#solo-ranking,#team-ranking'};
+ const hidden=[];
+ for(const [block,feature]of Object.entries(BLOCK_FEATURE))if(f[feature]===false)hidden.push(teacher?selectors[block]:{map:'.stage-wrap',achievements:'.achievement-panel',trading:'#trade-panel'}[block]);
+ if(f.chat===false)hidden.push('#cq-chat-root','#cq-chat-toggle','#cq-credits-contact');
+ if(f.achievements===false)hidden.push('.utility-button:not([data-map-review])','#achievement-tools');
+ if(f.gameRules===false)hidden.push('[data-control="auto-start"]','[data-control="auto-stop"]','[data-control="auto"]');
+ if(f.music===false)hidden.push('.music-controls');
+ if(f.map===false)hidden.push('#map-visibility','[data-map-review]','#projector-btn');
+ if(f.economyControl===false)hidden.push('[data-points]','[data-economy]','[data-capital]');
+ if(f.playerManagement===false)hidden.push('[data-remove]');
+ if(f.teamManagement===false)hidden.push('[data-team-edit]','[data-team-remove]');
+ if(f.customCode===false)hidden.push('#dev-open-btn','#dev-overlay');
+ if(f.presentationEffects===false)hidden.push('[data-presentation-effects]');
+ style.textContent=`:root{--brand-accent:${d.accent};--brand-gold:${d.gold}}`+(hidden.filter(Boolean).length?hidden.filter(Boolean).join(',')+'{display:none!important}':'');
+ if(f.playerManagement===false)style.textContent+='[data-player-edit]{pointer-events:none;border:0!important;background:none!important;color:inherit!important}';
+ if(f.map===false)document.body.classList.remove('map-review-mode');
+ window.dispatchEvent(new Event('resize'));
+}
 export function applyRoomPresentation(state){
  if(typeof document==='undefined'||!state?.roomConfig)return;
  const config=state.roomConfig,key=JSON.stringify([config,state.settings?.mode,document.body.classList.contains('projector-mode'),!!document.getElementById('cq-chat-root')]),root=document.documentElement;if(root._cqRoomDesignKey===key)return;root._cqRoomDesignKey=key;
  const f=config.features,d=config.design,teacher=document.body.classList.contains('teacher-page'),surface=teacher?'teacher':'student',app=document.getElementById(teacher?'teacher-app':'app');if(!app)return;
+ rememberNativeRoom(app,teacher);
+ if(config.canvasData?.settings.customLayout!==true){nativeRoomPresentation(state,app,teacher);return;}
  root.dataset.roomLayout='enabled';const grid=teacher?app.querySelector('.t-grid'):(app.querySelector('.room-layout-grid')||(()=>{const g=document.createElement('div');g.className='room-layout-grid';app.append(g);return g;})());if(!grid)return;grid.classList.add('room-layout-grid');if(teacher){const utilities=document.getElementById('session-utilities');if(utilities&&grid.contains(utilities))app.insertBefore(utilities,grid);}
  if(!grid._roomNodes){const nodes={};for(const id of Object.keys(BLOCKS[surface])){let node;if(id==='chat'&&!config.canvasData)continue;if(teacher){node=(id==='chat'?document:app).querySelector(teacherSelectors[id]);if(['answers','admission'].includes(id))node=node?.closest('details');if(id==='ranking'){const wrapper=document.createElement('div');for(const selector of ['#solo-ranking','#team-ranking']){const n=app.querySelector(selector);if(n)wrapper.append(n);}node=wrapper;}}else node=app.querySelector({map:'.stage-wrap',question:'#question-panel',team:'#team-panel',achievements:'.achievement-panel',trading:'#trade-panel'}[id]);if(node){node.dataset.roomBlock=id;nodes[id]=node;grid.append(node);}}grid._roomNodes=nodes;}
  if(!config.canvasData&&grid._roomNodes.chat){document.body.append(grid._roomNodes.chat);delete grid._roomNodes.chat;}

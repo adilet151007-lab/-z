@@ -96,8 +96,9 @@ export function createFutureTerritory({stage=0,unit=1,mobile=false,palette='step
      if(neonTower){put('light',p.x,top+.085,p.z+w*cap*.51,w*cap*.85,.035,.025,i%2?0x6de9f1:0xe5a0d8);if(detailed)put('trim',p.x-.1,top+.26,p.z,.025,.4,.025);}
     }
    });
-   // Public square and a regional cultural pavilion; roofs are not floating.
-   if(plan.kind==='city'&&plan.resource>=250){put('trim',.65,.05,.65,.92,.1,.92,0xd0c6aa);put('stone',.65,.24,.65,.52,.38,.52,0xe7dbc2);put('hull',.65,.47,.65,.32,.12,.32,0x659b99);put('hull',.65,.64,.65,.025,.24,.025,0xe2c57b);}
+   // Reserve the centre for the cultural pavilion; the former .65/.65 position
+   // intersected the first residential plot at .76/.76.
+   if(plan.kind==='city'&&plan.resource>=250){put('trim',0,.05,0,.92,.1,.92,0xd0c6aa);put('stone',0,.24,0,.52,.38,.52,0xe7dbc2);put('hull',0,.47,0,.32,.12,.32,0x659b99);put('hull',0,.64,0,.025,.24,.025,0xe2c57b);}
    if(neon>0){for(const side of [-1,1]){put('light',0,.045,side*.17,6.8*neon,.018,.025,0x6cddeb);put('light',side*.17,.05,0,.025,.018,6.8*neon,0xe09bca);}}
   }
   for(const [k,mesh]of Object.entries(layer.meshes)){mesh.count=count[k];mesh.boundingSphere=null;mesh.instanceMatrix.needsUpdate=true;if(mesh.instanceColor)mesh.instanceColor.needsUpdate=true;}

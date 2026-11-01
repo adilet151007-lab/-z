@@ -13,7 +13,7 @@ export function defaultStudio(questions=[]){
  const elements=questions.map((q,i)=>studioElement('quiz-card',(i%4)*420,Math.floor(i/4)*410,{...q,questionId:q.id,duration:q.duration||30,autoAdvance:q.autoAdvance??true}));
  const connections=elements.slice(1).map((n,i)=>({id:studioId(),from:elements[i].id,to:n.id,condition:'next'}));
  const layout=()=>Object.keys(STUDIO_WIDGETS).filter(id=>!['question','team','trading'].includes(id)).map((blockId,i)=>({...studioElement('widget',(i%2)*720,i<2?0:520+Math.floor((i-2)/2)*400,{blockId}),w:680,h:blockId==='map'?480:360}));
- return {version:1,viewport:{x:60,y:60,zoom:1},elements,connections,frames:[],roomUiLayout:{teacher:layout(),projector:layout().filter(e=>!['answers','editor','backups','branding','syllabus'].includes(e.data.blockId)),student:[]},settings:{mode:'flow',theme:'dark',locale:'ru',grid:'dots',snap:true,hideAnswers:true,startId:elements[0]?.id||null,routeTeamId:'',layoutWidth:1440}};
+ return {version:1,viewport:{x:60,y:60,zoom:1},elements,connections,frames:[],roomUiLayout:{teacher:layout(),projector:layout().filter(e=>!['answers','editor','backups','branding','syllabus'].includes(e.data.blockId)),student:[]},settings:{customLayout:false,mode:'flow',theme:'dark',locale:'ru',grid:'dots',snap:true,hideAnswers:true,startId:elements[0]?.id||null,routeTeamId:'',layoutWidth:1440}};
 }
 function normalizeElement(raw){
  if(!raw||!STUDIO_TYPES.includes(raw.type))fail('Неизвестный тип элемента Studio.');
@@ -41,7 +41,7 @@ export function normalizeStudio(raw){
  for(const [surface,rows] of Object.entries(roomUiLayout)){if(rows.some(e=>!['widget','media-decor','group','syllabus-frame'].includes(e.type)))fail('В UI-макете используйте функциональные виджеты и декор.');const blocks=rows.filter(e=>e.type==='widget').map(e=>e.data.blockId);if(new Set(blocks).size!==blocks.length)fail('Функциональный виджет можно разместить на экране только один раз.');const essential=surface==='teacher'?['controls','participants','admission']:surface==='student'?['question','team']:[];if(rows.some(e=>e.type==='widget'&&e.hidden&&essential.includes(e.data.blockId)))fail('Основные блоки должны оставаться видимыми.');}
  const startId=s.startId&&elements.some(e=>e.id===s.startId&&e.type==='quiz-card'&&!e.hidden)?s.startId:elements.filter(e=>e.type==='quiz-card'&&!e.hidden).sort((a,b)=>a.y-b.y||a.x-b.x)[0]?.id||null;
  if(startId&&elements.find(e=>e.id===startId)?.type!=='quiz-card')fail('Стартовым элементом должна быть карточка вопроса.');
- return {version:1,viewport:{x:num(v.x,-1000000,1000000,60),y:num(v.y,-1000000,1000000,60),zoom:num(v.zoom,.15,3,1)},elements,connections,frames:elements.filter(e=>e.type==='syllabus-frame').map(e=>e.id),roomUiLayout,settings:{mode:s.mode==='layout'?'layout':'flow',theme:s.theme==='light'?'light':'dark',locale:s.locale==='kk'?'kk':'ru',grid:['dots','lines','none'].includes(s.grid)?s.grid:'dots',snap:s.snap!==false,hideAnswers:s.hideAnswers!==false,startId,subject:str(s.subject,80),assetVersion:str(s.assetVersion,80),routeTeamId:str(s.routeTeamId,80),layoutWidth:num(s.layoutWidth,600,4000,1440)}};
+ return {version:1,viewport:{x:num(v.x,-1000000,1000000,60),y:num(v.y,-1000000,1000000,60),zoom:num(v.zoom,.15,3,1)},elements,connections,frames:elements.filter(e=>e.type==='syllabus-frame').map(e=>e.id),roomUiLayout,settings:{customLayout:s.customLayout===true,mode:s.mode==='layout'?'layout':'flow',theme:s.theme==='light'?'light':'dark',locale:s.locale==='kk'?'kk':'ru',grid:['dots','lines','none'].includes(s.grid)?s.grid:'dots',snap:s.snap!==false,hideAnswers:s.hideAnswers!==false,startId,subject:str(s.subject,80),assetVersion:str(s.assetVersion,80),routeTeamId:str(s.routeTeamId,80),layoutWidth:num(s.layoutWidth,600,4000,1440)}};
 }
 export function orderedStudioNodes(doc){
  const map=new Map(doc.elements.map(e=>[e.id,e])),out=[],visited=new Set();
@@ -56,5 +56,5 @@ export function compileStudio(raw){
 export function publicStudio(raw,privileged=false){
  if(!raw)return null;
  const roomUiLayout={};for(const surface of ['teacher','projector','student']){roomUiLayout[surface]=privileged||surface==='student'?structuredClone(raw.roomUiLayout[surface]):[];for(const e of roomUiLayout[surface])if(e.data.url)e.data.url='./api/studio-media/'+e.id+'?v='+encodeURIComponent(raw.settings.assetVersion||'');}
- return {version:1,roomUiLayout,settings:{layoutWidth:raw.settings.layoutWidth,hideAnswers:true},viewport:{x:0,y:0,zoom:1},elements:[],connections:[],frames:[]};
+ return {version:1,roomUiLayout,settings:{customLayout:raw.settings.customLayout===true,layoutWidth:raw.settings.layoutWidth,hideAnswers:true},viewport:{x:0,y:0,zoom:1},elements:[],connections:[],frames:[]};
 }

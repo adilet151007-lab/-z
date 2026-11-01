@@ -785,6 +785,7 @@ export function createMobileRoomDesigner(initial = {}, options = {}) {
       presets.append(b);
     }
     body.append(presets);
+    check(body, 'Использовать свой макет Studio вместо основного интерфейса', model.document.settings.customLayout === true, v => { model.document.settings.customLayout = v; });
     for (const [key, label] of [
       ['map', 'Карта Казахстана'],
       ['chat', 'Чат'],

@@ -90,11 +90,12 @@ function validateRegions(regions, knownMembers = null, universal = false, mode =
       const creatorId = original.creatorId;
       if (creatorId) {
         ensure(Object.hasOwn(CREATOR_NAMES,creatorId) && (universal||isCreatorTeam(r)) && !seenCreators.has(creatorId), "Некорректный персональный доступ.");
+        ensure(original.creatorAuth===undefined||['account','code'].includes(original.creatorAuth),'Некорректный источник персонального доступа.');
         seenCreators.add(creatorId);
       } else ensure(!isCreatorTeam(r), "Команда создателей доступна только по персональному коду.");
       const capital=m.capital??original.capital??0,streak=m.streak??original.streak??0;
       if(universal)ensure(integer(capital,0,limits?.players?.get(m.pid)??(knownMembers?RESOURCE_CAP:SAFE_SCORE))&&integer(streak,0,100000),'Проверьте личный рейтинг и серию.');
-      return { pid: m.pid, name: creatorId&&!universal ? CREATOR_NAMES[creatorId] : cleanText(m.name,2,40,'Имя',!knownMembers), tokenHash: original.tokenHash, joinedAt: original.joinedAt, ...(universal?{capital,streak}:{}), ...(creatorId?{creatorId}:{}),...(original.profileId?{profileId:original.profileId}:{}),...(original.privacyConsent?{privacyConsent:structuredClone(original.privacyConsent)}:{}) };
+      return { pid: m.pid, name: creatorId&&!universal ? CREATOR_NAMES[creatorId] : cleanText(m.name,2,40,'Имя',!knownMembers), tokenHash: original.tokenHash, joinedAt: original.joinedAt, ...(universal?{capital,streak}:{}), ...(creatorId?{creatorId,...(original.creatorAuth?{creatorAuth:original.creatorAuth}:{})}:{}),...(original.profileId?{profileId:original.profileId}:{}),...(original.privacyConsent?{privacyConsent:structuredClone(original.privacyConsent)}:{}) };
     });
     const cityId=r.cityId||null;ensure(!cityId||CITIES.some(c=>c.id===cityId&&c.baseRegionId===baseRegionId),'Город не относится к выбранной области.');
     const recoveryAnswers=r.recoveryAnswers??0;ensure(integer(recoveryAnswers,0,1),'Повреждён прогресс восстановления экономики.');
@@ -326,12 +327,13 @@ export class GameLogic {
   revokeAdminInvite(id){const invite=this.state.accessControl.invitations.find(i=>i.id===id);ensure(invite&&!invite.usedAt,'Неиспользованное приглашение не найдено.');invite.revokedAt=this.now();this.touch()}
   redeemAdminInvite(code,regionId,name){const invite=this.state.accessControl.invitations.find(i=>i.hash===hashToken(code));ensure(invite&&!invite.usedAt&&!invite.revokedAt&&invite.expiresAt>this.now(),'Приглашение недействительно, использовано или истекло.','BAD_INVITE');ensure(typeof name==='string'&&name.trim().length>=2,'Введите своё имя и выберите команду.','NAME_REQUIRED');const result=this.joinTeam(regionId,name);this.grantAdmin(result.player.pid,invite.permissions,invite.effectDuration,false,invite.minutes?this.now()+invite.minutes*60000:null);invite.usedAt=this.now();invite.pid=result.player.pid;return result}
   rotateAccessKey(creatorId){ensure(Object.hasOwn(CREATOR_NAMES,creatorId),'Персональный доступ не найден.');const code='CQO-'+randomBytes(24).toString('base64url');this.state.accessControl.keyOverrides[creatorId]=hashToken(code);this.touch();return {code}}
-  joinCreator(creatorId,regionId,name) {
+  joinCreator(creatorId,regionId,name,creatorAuth='code') {
+    ensure(['code','account'].includes(creatorAuth),'Некорректный источник персонального доступа.');
     ensure(Object.hasOwn(CREATOR_NAMES,creatorId), "Некорректный доступ создателя.");
     if(this.state.settings.universal){
       ensure(!this.state.regions.some(t=>t.members.some(m=>m.creatorId===creatorId)),"Доступ администратора уже занят. Продолжите в своём браузере или освободите доступ через преподавателя.",'CREATOR_OCCUPIED');
       const team=this.region(this.state.settings.mode==='solo'?this.state.regions[0].id:regionId);
-      const token=randomBytes(32).toString('base64url'),member={pid:randomUUID(),name:cleanText(name||(creatorId==='adilet'?'Адлет':'Ернур'),2,40,'Имя'),creatorId,tokenHash:hashToken(token),joinedAt:this.now(),capital:0,streak:0};
+      const token=randomBytes(32).toString('base64url'),member={pid:randomUUID(),name:cleanText(name||(creatorId==='adilet'?'Адлет':'Ернур'),2,40,'Имя'),creatorId,creatorAuth,tokenHash:hashToken(token),joinedAt:this.now(),capital:0,streak:0};
       team.members.push(member);if(this.state.settings.teamDecision==='leader'&&this.state.round&&!this.state.round.resolved&&this.state.round.submitted[team.id]===undefined)delete this.state.round.leaderChoices?.[team.id];this.touch();return {playerToken:token,isCreator:true,player:{pid:member.pid,name:member.name,regionId:team.id}};
     }
     let team=this.state.regions.find(isCreatorTeam);
@@ -341,7 +343,7 @@ export class GameLogic {
       team={id:CREATOR_TEAM_ID,name,baseRegionId:'astana',capacity:2,points:0,economy:100,members:[]};this.state.regions.push(team);
     }
     ensure(team.members.length<2,"Доступ администратора уже занят.","CREATOR_OCCUPIED");
-    const token=randomBytes(32).toString('base64url'),member={pid:randomUUID(),name:CREATOR_NAMES[creatorId],creatorId,tokenHash:hashToken(token),joinedAt:this.now()};
+    const token=randomBytes(32).toString('base64url'),member={pid:randomUUID(),name:CREATOR_NAMES[creatorId],creatorId,creatorAuth,tokenHash:hashToken(token),joinedAt:this.now()};
     team.members.push(member);this.log(`${member.name} вошёл в команду создателей.`,'admin');this.touch();
     return {playerToken:token,isCreator:true,player:{pid:member.pid,name:member.name,regionId:team.id}};
   }

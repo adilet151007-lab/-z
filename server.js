@@ -38,7 +38,9 @@ export async function createGameServer(options = {}) {
   const creatorCodes=options.creatorCodes ?? {ernur:process.env.CREATOR_ERNUR_CODE,adilet:process.env.CREATOR_ADILET_CODE};
   const localAdminCodeHash=options.localAdminCodeHash??process.env.LOCAL_ADMIN_CODE_HASH;
   if(localAdminCodeHash!==undefined&&!/^[a-f0-9]{64}$/.test(localAdminCodeHash))throw new Error('LOCAL_ADMIN_CODE_HASH должен содержать SHA-256 кода доступа.');
-  const configured=Object.keys(CREATOR_NAMES).filter(id=>typeof creatorCodes[id]==='string'&&creatorCodes[id].length>=26&&creatorCodes[id].length<=128&&!/\s/.test(creatorCodes[id]));
+  const creatorCodeHashes=options.creatorCodeHashes??{adilet:process.env.CREATOR_ADILET_CODE_HASH,ernur:process.env.CREATOR_ERNUR_CODE_HASH};
+  for(const [id,value] of Object.entries(creatorCodeHashes))if(value!==undefined&&(!Object.hasOwn(CREATOR_NAMES,id)||!/^[a-f0-9]{64}$/.test(value)))throw new Error('Некорректный хеш персонального кода создателя.');
+  const configured=Object.keys(CREATOR_NAMES).filter(id=>typeof creatorCodes[id]==='string'&&creatorCodes[id].length>=16&&creatorCodes[id].length<=128&&!/\s/.test(creatorCodes[id]));
   if(configured.length===2&&equal(creatorCodes.ernur,creatorCodes.adilet))throw new Error('Персональные коды создателей должны различаться.');
   if (typeof password !== "string" || password.length < 8 || password.length > 256 || password.includes("replace-with")) throw new Error("Задайте TEACHER_PASSWORD (от 8 до 256 символов). Локально: npm run setup.");
   if (typeof secret !== "string" || secret.length < 32 || secret.includes("replace-with")) throw new Error("Задайте SESSION_SECRET (минимум 32 случайных символа). Локально: npm run setup.");
@@ -170,7 +172,8 @@ export async function createGameServer(options = {}) {
   }
   function requireLessonAccess(){const entry=publishedGame.state.accessControl.admission;if(requireAdmission&&(!entry.open||entry.expiresAt<=Date.now()))throw new GameError('Регистрация закрыта. Обратитесь к преподавателю.','ADMISSION_CLOSED')}
   const effectiveLocalCodeHash=()=>Object.hasOwn(publishedGame.state.accessControl,'localKeyOverride')?publishedGame.state.accessControl.localKeyOverride:localAdminCodeHash;
-  function privilegedEntry(name){const code=typeof name==='string'?name.trim().split(/\s/,1)[0]:'';return Object.keys(CREATOR_NAMES).some(id=>publishedGame.state.accessControl.keyOverrides[id]?equal(hashToken(code),publishedGame.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id]))||!!effectiveLocalCodeHash()&&equal(hashToken(code),effectiveLocalCodeHash())||code.startsWith('CQI-')}
+  function creatorIdForCode(code){if(typeof code!=='string'||!code||code.length>128)return null;const hash=hashToken(code);return Object.keys(CREATOR_NAMES).find(id=>publishedGame.state.accessControl.keyOverrides[id]?equal(hash,publishedGame.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id])||typeof creatorCodeHashes[id]==='string'&&equal(hash,creatorCodeHashes[id]))||null;}
+  function privilegedEntry(name){const code=typeof name==='string'?name.trim().split(/\s/,1)[0]:'';return !!creatorIdForCode(code)||!!effectiveLocalCodeHash()&&equal(hashToken(code),effectiveLocalCodeHash())||code.startsWith('CQI-')}
   function checkDevice(socket){if(!requireAdmission||!cookieSessions)return;if(!socket.data.deviceHash)throw new GameError('Откройте страницу входа и разрешите необходимые cookie.','DEVICE_REQUIRED');const devices=publishedGame.state.accessControl.playerDevices;if(publishedGame.state.regions.some(team=>team.members.some(member=>!member.creatorId&&devices[member.pid]===socket.data.deviceHash)))throw new GameError('В этом браузере уже есть участник. Вернитесь в открытую сессию или выйдите из неё.','DEVICE_OCCUPIED')}
   const validTeacherToken = token => {
     if (typeof token !== "string" || token.length > 2000) return false;
@@ -354,7 +357,7 @@ export async function createGameServer(options = {}) {
       pendingTeacherActivity.set(hashToken(socket.data.teacherToken),{at:sessionNow(),expiresAt:expires});
     }
     socket.data.playerHash=typeof playerToken==='string'&&playerToken.length<=200?hashToken(playerToken):null;
-    if(options.onPlayerJoined&&socket.data.playerHash){const p=publishedGame.findPlayer(socket.data.playerHash);if(p){await options.onPlayerJoined(socket.request,p);if(p.creatorId&&p.creatorId!==socket.data.portalCreatorId)throw new GameError('Войдите аккаунтом создателя.','FORBIDDEN');if(socket.data.portalCreatorId&&!p.creatorId)await enqueue(async()=>{if(game.state.regions.some(t=>t.members.some(m=>m.creatorId===socket.data.portalCreatorId&&m.pid!==p.pid)))throw new GameError('Сессия создателя уже занята.','PROTECTED_SESSION');const before=structuredClone(game.state);try{game.member(p.regionId,p.pid).creatorId=socket.data.portalCreatorId;game.touch();await persistGame();broadcast(true);}catch(e){game=new GameLogic(before);throw e;}});}}
+    if(options.onPlayerJoined&&socket.data.playerHash){const p=publishedGame.findPlayer(socket.data.playerHash);if(p){await options.onPlayerJoined(socket.request,p);if(p.creatorId&&p.creatorAuth!=='code'&&p.creatorId!==socket.data.portalCreatorId)throw new GameError('Войдите аккаунтом создателя.','FORBIDDEN');if(socket.data.portalCreatorId&&!p.creatorId)await enqueue(async()=>{if(game.state.regions.some(t=>t.members.some(m=>m.creatorId===socket.data.portalCreatorId&&m.pid!==p.pid)))throw new GameError('Сессия создателя уже занята.','PROTECTED_SESSION');const before=structuredClone(game.state);try{const member=game.member(p.regionId,p.pid);member.creatorId=socket.data.portalCreatorId;member.creatorAuth='account';game.touch();await persistGame();broadcast(true);}catch(e){game=new GameLogic(before);throw e;}});}}
     if(options.syncCollections&&socket.data.playerHash)await enqueue(async()=>{await persistGame();broadcast(true);});
     const collectionToken=jar[cookieName('collection')];socket.data.collectionHash=typeof collectionToken==='string'&&collectionToken.length<=200?hashToken(collectionToken):null;
     const device=decodeCredential(jar[cookieName('device')],'device');socket.data.deviceHash=device&&typeof device.id==='string'?hashToken(device.id):null;
@@ -412,7 +415,7 @@ export async function createGameServer(options = {}) {
           const identity = actor(socket);
           if(identity.role!=='creator'&&roomFeatureDenied(name,roomFeatures()))throw new GameError('Эта функция отключена создателем для комнаты.','FEATURE_DISABLED');
           const actorPlayer = identity.playerHash ? game.findPlayer(identity.playerHash) : null;
-          if(actorPlayer?.creatorId&&options.portalCreator&&(await options.portalCreator(socket.request))?.creatorId!==actorPlayer.creatorId)throw new GameError('Войдите Google-аккаунтом создателя.','FORBIDDEN');
+          if(actorPlayer?.creatorId&&actorPlayer.creatorAuth!=='code'&&options.portalCreator&&(await options.portalCreator(socket.request))?.creatorId!==actorPlayer.creatorId)throw new GameError('Войдите Google-аккаунтом создателя.','FORBIDDEN');
           const delegatedAllowed = identity.role === 'delegate' && game.adminCan(actorPlayer?.pid, name);
           if (permission === "teacher" && !["teacher","creator"].includes(identity.role) && !delegatedAllowed) throw new GameError("Нужен вход преподавателя или создателя.", "FORBIDDEN");
           if(permission==='creator'&&!game.creatorFor(identity.playerHash)&&!delegatedAllowed)throw new GameError('Нужен персональный доступ.','FORBIDDEN');
@@ -475,9 +478,9 @@ export async function createGameServer(options = {}) {
     handle("joinTeam", "guest", async data => {
       if (socket.data.playerHash && game.findPlayer(socket.data.playerHash)) throw new GameError("Вы уже состоите в команде.");
       if(requireConsent&&(data.privacyConsent?.accepted!==true||data.privacyConsent?.version!==PRIVACY_VERSION))throw new GameError('Прочитайте политику и подтвердите согласие перед входом.','CONSENT_REQUIRED');
-      if(options.portalCreator){const account=await options.portalCreator(socket.request);if(account?.creatorId)return game.joinCreator(account.creatorId,data.regionId,data.name||account.name);}
+      if(options.portalCreator){const account=await options.portalCreator(socket.request);if(account?.creatorId){const raw=typeof data.name==='string'?data.name.trim():'',code=raw.split(/\s/,1)[0],name=creatorIdForCode(code)||/(?:ROOT_ACCESS|DEV_CONSOLE)|^CQO-/i.test(code)?raw.slice(code.length).trim()||account.name:raw||account.name;return game.joinCreator(account.creatorId,data.regionId,name,'account');}}
       const name=typeof data.name==='string'?data.name.trim():'';
-      const code=name.split(/\s/,1)[0],displayName=name.slice(code.length).trim(),creatorId=Object.keys(CREATOR_NAMES).find(id=>game.state.accessControl.keyOverrides[id]?equal(hashToken(code),game.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id]));
+      const code=name.split(/\s/,1)[0],displayName=name.slice(code.length).trim(),creatorId=creatorIdForCode(code);
       if(creatorId){const result=game.joinCreator(creatorId,data.regionId,displayName||undefined);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;}
       if(effectiveLocalCodeHash()&&equal(hashToken(code),effectiveLocalCodeHash())){checkDevice(socket);const result=game.joinLocalAdmin(data.regionId,displayName);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;}
       if(code.startsWith('CQL-'))throw new GameError('Некорректный или отозванный код локального администратора.','BAD_LOCAL_CODE');
