@@ -51,6 +51,9 @@ export class MobileRoomModel {
         gold: initial.config?.gold || '#eab308',
       },
     );
+    const teamWidget = this.document.roomUiLayout.teacher.find(
+      (e) => e.type === 'widget' && e.data.blockId === 'teams',
+    );
     this.setup = {
       name: initial.name || 'Новая пара',
       subject: initial.subject || 'Мәдениеттану',
@@ -58,8 +61,8 @@ export class MobileRoomModel {
       config: {
         mode: 'team',
         decision: 'consensus',
-        teamCount: 10,
-        capacity: 4,
+        teamCount: teamWidget?.data.teamCount ?? 10,
+        capacity: teamWidget?.data.capacity ?? 4,
         duration: 60,
         autoAdvance: true,
         perksEnabled: true,
@@ -90,14 +93,12 @@ export class MobileRoomModel {
     );
   }
   linearize(order) {
-    this.document.connections = order
-      .slice(1)
-      .map((id, i) => ({
-        id: studioId(),
-        from: order[i],
-        to: id,
-        condition: 'next',
-      }));
+    this.document.connections = order.slice(1).map((id, i) => ({
+      id: studioId(),
+      from: order[i],
+      to: id,
+      condition: 'next',
+    }));
     this.document.settings.startId = order[0] || null;
   }
   addQuestions(questions) {
@@ -207,12 +208,34 @@ export class MobileRoomModel {
 }
 
 export function createMobileRoomDesigner(initial = {}, options = {}) {
+  const live = options.roomState;
+  if (live) {
+    const values = {
+      mode: live.mode || live.settings?.mode,
+      teamCount: live.teams?.length,
+      capacity: live.settings?.teamCapacity,
+      duration: live.settings?.autoDuration,
+      autoAdvance: live.settings?.autoAdvance,
+    };
+    initial = {
+      ...initial,
+      config: {
+        ...Object.fromEntries(
+          Object.entries(values).filter(([, v]) => v !== undefined),
+        ),
+        ...initial.config,
+      },
+    };
+  }
   const model = new MobileRoomModel(initial),
     root = node('section', undefined, 'room-designer simple-room-builder'),
     toolbar = node('div', undefined, 'designer-toolbar simple-builder-heading');
   root.dataset.simpleBuilder = 'true';
   toolbar.append(
-    node('strong', 'Быстрое создание занятия'),
+    node(
+      'strong',
+      options.includeSetup ? 'Быстрое создание занятия' : 'Настройки занятия',
+    ),
     node('span', 'Обычные шаги и кнопки · без холста'),
   );
   const navigation = node('nav', undefined, 'simple-builder-steps'),

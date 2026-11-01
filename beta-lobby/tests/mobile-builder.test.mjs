@@ -110,6 +110,17 @@ test('Mobile geometry is never required and an unchanged designer preserves opti
     design: { accent: '#8b5cf6', gold: '#eab308' },
     questions: [q('one')],
   });
+  const widget = model.document.roomUiLayout.teacher.find(
+    (e) => e.data.blockId === 'teams',
+  );
+  widget.data.teamCount = 13;
+  widget.data.capacity = 6;
+  const existing = new MobileRoomModel({ canvasData: model.document });
+  const kept = existing
+    .read()
+    .canvasData.roomUiLayout.teacher.find((e) => e.data.blockId === 'teams');
+  assert.equal(kept.data.teamCount, 13);
+  assert.equal(kept.data.capacity, 6);
   const saved = model.read();
   assert.equal(saved.features.chat, false);
   assert.equal(saved.features.economyControl, true);
