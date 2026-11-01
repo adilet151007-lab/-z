@@ -22,11 +22,11 @@ export function validateTemplate(raw){
  const clean=(v,n)=>{if(typeof v!=='string'||v.trim().length<2||v.length>n||/[\u0000-\u001f\u007f]/.test(v))fail('Проверьте название и предмет.');return v.trim();};
  const name=clean(raw.name,80),subject=clean(raw.subject||'Мәдениеттану',80),type=raw.type||'strategy';
  if(!['strategy','quiz','blitz'].includes(type))fail('Неизвестный шаблон игры.');
- const c=raw.config||{},config={mode:c.mode||(type==='strategy'?'team':'solo'),decision:c.decision||'consensus',teamCount:c.teamCount??10,capacity:c.capacity??4,duration:c.duration??(type==='blitz'?15:60),autoAdvance:c.autoAdvance??true,perksEnabled:c.perksEnabled??true,tradingEnabled:c.tradingEnabled??false,accent:c.accent||'#3fe0d0',gold:c.gold||'#f3c25d'};
+ const c=raw.config||{},config={mode:c.mode||(type==='strategy'?'team':'solo'),decision:c.decision||'consensus',teamCount:c.teamCount??10,capacity:c.capacity??4,duration:c.duration??(type==='blitz'?15:60),autoAdvance:c.autoAdvance??true,perksEnabled:c.perksEnabled??true,tradingEnabled:c.tradingEnabled??false,warsEnabled:c.warsEnabled??false,accent:c.accent||'#3fe0d0',gold:c.gold||'#f3c25d'};
  if(!['consensus','leader','instant'].includes(config.decision))fail('Проверьте способ ответа команды.');
  if(!['solo','team'].includes(config.mode))fail('Проверьте режим.');
  for(const [k,min,max]of [['teamCount',1,30],['capacity',1,20],['duration',5,3600]])if(!Number.isSafeInteger(config[k])||config[k]<min||config[k]>max)fail('Недопустимое значение: '+k);
- for(const k of ['autoAdvance','perksEnabled','tradingEnabled'])if(typeof config[k]!=='boolean')fail('Проверьте переключатели.');
+ for(const k of ['autoAdvance','perksEnabled','tradingEnabled','warsEnabled'])if(typeof config[k]!=='boolean')fail('Проверьте переключатели.');
  for(const k of ['accent','gold'])if(!/^#[a-f0-9]{6}$/i.test(config[k]))fail('Цвет задаётся как #RRGGBB.');
  if(!Array.isArray(raw.questions)||raw.questions.length>100)fail('В шаблоне можно хранить до 100 вопросов.');
  const canvasData=normalizeStudio(raw.canvasData);if(canvasData)canvasData.settings.subject=subject;

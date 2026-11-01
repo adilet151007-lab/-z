@@ -12,6 +12,11 @@ import {
   ROOM_FEATURES,
 } from './room-layout.js';
 import { readSyllabusFile } from './syllabus-files.js';
+import {
+  ROOM_PRESETS,
+  roomPreset,
+  matchingRoomPreset,
+} from './room-presets.js';
 
 export function useSimpleRoomBuilder() {
   return (
@@ -67,12 +72,22 @@ export class MobileRoomModel {
         autoAdvance: true,
         perksEnabled: true,
         tradingEnabled: false,
+        warsEnabled: false,
         ...initial.config,
       },
     };
   }
   get cards() {
     return orderedStudioNodes(this.document);
+  }
+  get presetId() {
+    return matchingRoomPreset(this.features, this.setup.config);
+  }
+  applyPreset(id) {
+    const p = roomPreset(id);
+    this.features = p.features;
+    for (const key of ['perksEnabled', 'tradingEnabled', 'warsEnabled'])
+      this.setup.config[key] = p.config[key];
   }
   get simple() {
     return (
@@ -177,6 +192,7 @@ export class MobileRoomModel {
     c.perksEnabled = this.features.achievements;
     c.tradingEnabled = this.features.trading;
     return {
+      presetId: this.presetId || undefined,
       ...s,
       config: c,
       canvasData: compiled.canvasData,
@@ -431,6 +447,23 @@ export function createMobileRoomDesigner(initial = {}, options = {}) {
   function setupPage() {
     const s = model.setup,
       c = s.config;
+    const presets = node('div', undefined, 'simple-template-presets');
+    presets.setAttribute('role', 'group');
+    presets.setAttribute('aria-label', 'Готовые шаблоны комнаты');
+    for (const p of ROOM_PRESETS) {
+      const b = actionButton(p.name, () => {
+        model.applyPreset(p.id);
+        changed();
+        render();
+      });
+      b.textContent = '';
+      b.dataset.roomPreset = p.id;
+      b.setAttribute('aria-label', p.name);
+      b.setAttribute('aria-pressed', String(model.presetId === p.id));
+      b.append(node('strong', p.name), node('span', p.description));
+      presets.append(b);
+    }
+    body.append(presets);
     field(body, 'Название занятия', s.name, (v) => (s.name = v), {
       maxLength: 80,
       min: 2,
@@ -438,6 +471,27 @@ export function createMobileRoomDesigner(initial = {}, options = {}) {
     field(body, 'Предмет', s.subject, (v) => (s.subject = v), {
       maxLength: 80,
     }).minLength = 2;
+    if (options.onCreate) {
+      body.append(
+        node(
+          'p',
+          'Набор функций уже настроен. Вопросы можно добавить после создания.',
+          'simple-builder-note',
+        ),
+      );
+      body.append(
+        actionButton(
+          'Создать сразу',
+          () =>
+            run(async () => {
+              const result = await options.onCreate(model.read());
+              if (result !== false) clearDraft();
+              return result;
+            }),
+          'button button-gold',
+        ),
+      );
+    }
     select(
       body,
       'Формат',
@@ -750,6 +804,13 @@ export function createMobileRoomDesigner(initial = {}, options = {}) {
           (v) => (model.features[key] = v),
         );
     body.append(more);
+    if (includeSetup)
+      check(
+        body,
+        'Войны и ставки',
+        model.setup.config.warsEnabled,
+        (v) => (model.setup.config.warsEnabled = v),
+      );
   }
   function readyPage() {
     const value = model.read(),
