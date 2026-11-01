@@ -176,6 +176,7 @@ function requireEvent(g, data) {
 }
 function startFight(g, e, ids, first = false) {
   need(ids.length >= 2, 'Для битвы нужны минимум две команды.');
+  e.knownBankIds = g.playableQuestions().map((q) => q.id);
   e.teamIds = [...ids];
   e.first = first;
   e.kind = first ? 'royale' : e.kind;
@@ -629,10 +630,19 @@ export function phantomControl(g, data) {
           'Дождитесь итогов вопроса.',
         );
         if (e.stage === 'exhausted') {
-          const ids = new Set(e.questions.map((q) => q.id)),
-            more = pool(g, true).filter((q) => !ids.has(q.id));
+          const ids = new Set([
+              ...e.questions.map((q) => q.id),
+              ...(e.knownBankIds || []),
+            ]),
+            more = clone(
+              g
+                .playableQuestions()
+                .filter((q) => !ids.has(q.id))
+                .slice(0, 1000 - e.questions.length),
+            );
           need(more.length, 'Добавьте новые вопросы текущего предмета.');
           e.questions.push(...more);
+          e.knownBankIds = g.playableQuestions().map((q) => q.id);
         }
         nextQuestion(g, e);
       } else if (data.action === 'start') {
@@ -698,7 +708,7 @@ export function phantomView(g, player, teacher) {
     event: null,
   };
   if (!e) return out;
-  const { questions, escrow, fighters, round, ...safe } = e;
+  const { questions, escrow, fighters, round, knownBankIds, ...safe } = e;
   out.event = {
     ...clone(safe),
     questionCount: questions.length,
@@ -814,6 +824,15 @@ export function validatePhantom(state, validateQuestions) {
     'Повреждён банк битвы.',
   );
   validateQuestions(e.questions);
+  if (e.knownBankIds !== undefined)
+    need(
+      Array.isArray(e.knownBankIds) &&
+        e.knownBankIds.length <= 1000 &&
+        e.knownBankIds.every(
+          (id) => typeof id === 'string' && /^[\w-]{1,80}$/.test(id),
+        ),
+      'Повреждены ссылки банка битвы.',
+    );
   need(
     INT(e.questionIndex, -1, Math.max(-1, e.questions.length - 1)),
     'Повреждён порядок вопросов битвы.',

@@ -261,6 +261,15 @@ test('Фонд преподавателя соблюдает допуск; ре�
   f.advance(2500);
   assert.equal(f.event().stage, 'exhausted');
   assert.equal(phantomActive(f.g.state), true);
+  const extra = f.g.addCustomQuestion(
+    'Дополнительный вопрос после исчерпания выбранного списка?',
+    ['Один', 'Два', 'Три', 'Четыре'],
+    0,
+    25,
+  );
+  f.g.state.phantom.config.royaleQuestionIds = [f.event().questions[0].id];
+  f.control('next');
+  assert.equal(f.event().round.question.id, extra.questionId);
   f.control('stop');
   assert.equal(f.g.region(f.ids[0]).points, 500);
   const invalid = structuredClone(f.g.state);
