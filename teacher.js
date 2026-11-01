@@ -1,3 +1,4 @@
+import {setupPhantom} from './phantom-ui.js';
 import {setupStudioCheckpoint} from './studio-live.js';
 import {applyRoomPresentation as applyStudioPresentation} from './room-layout.js';
 import {t as uiText,tx as uiTpl,setupUIPreferences} from './ui-preferences.js';
@@ -8,6 +9,7 @@ import { setupCommunication } from "./chat-ui.js";
 setupUIPreferences();
 const $ = id => document.getElementById(id), engine = new GameEngine("teacher");
 setupStudioCheckpoint(engine);
+setupPhantom(engine);
 const accountTeacher=document.documentElement.dataset.teacherAccess==='account';
 if(accountTeacher){
  const form=$('teacher-login-form');form.querySelector('p.mut').textContent=uiText('Откройте комнату из лобби под аккаунтом преподавателя или создателя. Пароль основного сайта здесь не используется.');

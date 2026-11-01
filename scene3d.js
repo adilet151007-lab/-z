@@ -422,6 +422,9 @@ export function createScene(canvas, opts = {}) {
   }
   const observer = new ResizeObserver(resize); observer.observe(canvas); resize();
   let stateKey='';
+  const phantomOrder=[...regions].sort((a,b)=>Math.hypot(b.group.position.x,b.group.position.z)-Math.hypot(a.group.position.x,a.group.position.z));
+  const onPhantom=event=>{const detail=event.detail||{},count=detail.active?Math.floor((detail.progress||0)*phantomOrder.length):0;let changed=false;phantomOrder.forEach((r,i)=>{const dark=detail.active&&i<count;if(!!r.phantomDark!==!!dark){r.phantomDark=dark;changed=true;}});if(changed)wake();};
+  window.addEventListener('cq:phantom-scene',onPhantom);
   function update(state, selectedRegionId) {
     syncWorldAchievements(state);
     latestState=state;if(selectedRegionId!==lastFocusId){mapPreview=selectedRegionId||null;lastFocusId=selectedRegionId}const previewId=mapPreview,key=JSON.stringify([previewId,selected,state.regions.map(r=>[r.id,r.name,r.baseRegionId,r.cityId,r.points,r.developmentPoints,r.economy,r.scoreLimit,r.occupied??r.members.length])]);if(key===stateKey)return;stateKey=key;
@@ -496,12 +499,12 @@ export function createScene(canvas, opts = {}) {
       for (let i = 0; i < region.stages.length; i++) {
         const stage = region.stages[i], target = region.stage<6&&i<region.stage ? 1 : .001;
         if(Math.abs(stage.scale.y-target)>.001)settling=true;
-        stage.scale.y = THREE.MathUtils.lerp(stage.scale.y, target, rate); stage.visible = stage.scale.y > .012;
+        stage.scale.y = THREE.MathUtils.lerp(stage.scale.y, target, rate); stage.visible = stage.scale.y > .012&&!region.phantomDark;
       }
       if(region.future){
         const delta=region.buildTarget-region.buildValue;
         if(Math.abs(delta)>.1){region.buildValue=THREE.MathUtils.lerp(region.buildValue,region.buildTarget,reduceMotion?1:rate*1.7);settling=true;}else region.buildValue=region.buildTarget;
-        region.future.visible=region.buildValue>=100&&(!selected||region.meta.id===selected);region.future.userData.update(region.buildValue);
+        region.future.visible=!region.phantomDark&&region.buildValue>=100&&(!selected||region.meta.id===selected);region.future.userData.update(region.buildValue);
         setFutureDetail(region.future,region.meta.id===selected,lowPower);
         if(region.future.userData.tick(t,{animate:!reduceMotion,spin:region.meta.id===selected&&!reduceMotion}))settling=true;
         region.label.sprite.position.y=.82+region.future.userData.inspect().height*(region.data.cityRadius*.86/3.8)+.4;
@@ -521,7 +524,7 @@ export function createScene(canvas, opts = {}) {
   const visibilityObserver=typeof IntersectionObserver==='undefined'?null:new IntersectionObserver(entries=>{sceneVisible=entries[0]?.isIntersecting??true;if(sceneVisible)wake();else{cancelAnimationFrame(frame);frame=0}});visibilityObserver?.observe(canvas);
   renderingReady=true;animate();
   function dispose() {
-    disposed = true;clearWorld();cancelAnimationFrame(frame); observer.disconnect(); controls.dispose();
+    disposed = true;window.removeEventListener('cq:phantom-scene',onPhantom);clearWorld();cancelAnimationFrame(frame); observer.disconnect(); controls.dispose();
     visibilityObserver?.disconnect();document.removeEventListener('visibilitychange',onVisibility);window.removeEventListener('cq:cinema-state',onCinema);
     canvas.removeEventListener("pointerdown", onDown); canvas.removeEventListener("pointerup", onUp); hud.remove();
     const geometries = new Set(), mats = new Set(), textures = new Set();

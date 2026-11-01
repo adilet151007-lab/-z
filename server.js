@@ -1,3 +1,4 @@
+import {phantomActive,phantomDue,tickPhantom} from './phantom-game.js';
 import {publicStudio,normalizeStudio} from './studio-schema.js';
 import {defaultDesign,normalizeFeatures,normalizeDesign,ROOM_FEATURES} from './room-layout.js';
 import {issueQrTicket,validQrTicket} from './qr-admission.js';
@@ -127,7 +128,7 @@ export async function createGameServer(options = {}) {
     return res.redirect(303,(options.resourcePrefix||'')+'/student.html');
   });
   const allowed = new Set(["/student.html", "/teacher.html", "/student.js", "/teacher.js", "/shared-engine.js", "/game-config.js", "/room-layout.js", "/scene3d.js", "/region-geography.js", "/syllabus-ui.js", "/creator-overlay.js", "/chat-ui.js", "/styles.css",'/privacy.html','/licenses.html','/CLIENT_GUIDE.md','/LICENSE_AUDIT.md']);
-  for(const asset of ['studio.html','studio.css','studio-standalone.js','studio-editor.js','studio-audio.js','studio-canvas.js','studio-widgets.js','studio-i18n.js','studio-math.js','studio-model.js','studio-schema.js','studio-flow.js','studio-layout.js','studio-room.css','syllabus-files.js','studio-live.js','room-layout.js'])allowed.add('/'+asset);
+  for(const asset of ['studio.html','studio.css','studio-standalone.js','studio-editor.js','studio-audio.js','studio-canvas.js','studio-widgets.js','studio-i18n.js','studio-math.js','studio-model.js','studio-schema.js','studio-flow.js','studio-layout.js','studio-room.css','syllabus-files.js','studio-live.js','room-layout.js','phantom-ui.js','phantom.css'])allowed.add('/'+asset);
   allowed.add('/syllabus-draft.js');
   allowed.add('/session-finale.js');allowed.add('/territory-models.js');allowed.add('/join-qr.js');allowed.add('/qr-generator.js');allowed.add('/ui-preferences.js');allowed.add('/ui-kz.js');
   for(const file of ['./award-2d.js','./achievement-player.js','./achievement-animations.js',...Object.values(ANIMATION_MODULES)])if(/^\.\/[a-z0-9-]+\.js$/.test(file))allowed.add(file.slice(1));
@@ -234,7 +235,7 @@ export async function createGameServer(options = {}) {
     return res.json(issueQrTicket(secret,options.resourcePrefix||'',entry.epoch,securityNow()));
   });
   const sameOrigin=req=>{const origin=req.headers.origin;if(!origin)return true;try{return new URL(origin).host===req.headers.host}catch{return false}};
-  const bulkActions=new Set(['applyStudio','applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions']);
+  const bulkActions=new Set(['phantomConfigure','applyStudio','applyRawState','restoreBackup','updateBranding','importQuestions','analyzeSyllabus','generateQuestions']);
   const httpSocket=(req,res,next)=>{const socket=io.sockets.sockets.get(req.headers['x-cq-socket']);if(!sameOrigin(req)||req.headers['x-cq-client']!=='1'||!socket||typeof req.headers['x-cq-proof']!=='string'||!equal(req.headers['x-cq-proof'],socket.data.httpProof))return res.status(403).json({ok:false,error:'Сессия изменилась. Дождитесь подключения.',code:'FORBIDDEN'});req.gameSocket=socket;next()};
   app.post('/api/session',httpSocket,express.json({limit:'4kb',inflate:false}),async(req,res)=>{
     try{const role=req.body?.role;if(!['teacher','player'].includes(role))throw new GameError('Некорректная сессия.');
@@ -417,7 +418,7 @@ export async function createGameServer(options = {}) {
             const oldLogContext=game.logContext;
             game.logContext=['teacher','creator','delegate'].includes(identity.role)&&!['startRound','resolveRound','endRound','finishMatch','castVote','confirmVote','cancelVote','teamSubmit','voteLeader','chatSend','chatSubscribe','offerTrade','settleTrade'].includes(name)?'admin':null;
             if(fastInput)game.inputTiming=inputTiming;
-            try{result = await fn(data, player)}finally{delete game.inputTiming;game.logContext=oldLogContext}
+            try{if(name==='phantomTeam')game.phantomInputAt=receivedAt;game.phantomGuard(name);if(phantomActive(game.state)&&player&&game.state.phantom.event.teamIds.includes(player.regionId)&&['getStudio','getSnapshot','getHotfixBackup','createBackup'].includes(name))throw new GameError('Ответы битвы недоступны её участнику.','FORBIDDEN');result = await fn(data, player)}finally{delete game.inputTiming;delete game.phantomInputAt;game.logContext=oldLogContext}
             if(name==='joinTeam'&&result?.player&&options.onPlayerJoined)await options.onPlayerJoined(socket.request,result.player);
             if(result?.playerToken&&result.player){game.ensureCollection(result.player.pid,socket.data.collectionHash);game.state.accessControl.activity.players[result.player.pid]=sessionNow();if(socket.data.deviceHash&&!result.isCreator)game.state.accessControl.playerDevices[result.player.pid]=socket.data.deviceHash;}
             if(name!=='leaveTeam'&&before.delegatedAdmins?.some(grant=>(grant.tier==='local'||grant.origin==='shared-local')&&(!game.state.regions.some(team=>team.members.some(member=>member.pid===grant.pid))||!game.adminGrantFor(grant.pid)))){game.state.accessControl.localKeyOverride=null;game.touch()}
@@ -474,6 +475,9 @@ export async function createGameServer(options = {}) {
       requireLessonAccess(data.admissionToken);checkDevice(socket);const result=game.joinTeam(data.regionId, data.name);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;
     }, result => { socket.data.playerHash = hashToken(result.playerToken); });
     handle("leaveTeam", "student", (_data, p) => game.leaveTeam(p.regionId, p.pid), () => { socket.data.playerHash = null; });
+    handle('phantomConfigure','teacher',data=>game.phantomConfigure(data));
+    handle('phantomControl','teacher',data=>game.phantomControl(data));
+    handle('phantomTeam','student',(data,p)=>game.phantomTeam(p,data));
     handle("castVote", "student", (data, p) => game.castVote(p.regionId, p.pid, data.optionIdx, data.roundId));
     handle('voteLeader','student',(data,p)=>game.voteLeader(p.regionId,p.pid,data.accept,data.roundId));
     handle('setTeamRules','teacher',data=>game.setTeamRules(data.decision,data.tradeEnabled));
@@ -623,13 +627,14 @@ export async function createGameServer(options = {}) {
     const scheduledAt=Date.now(),round = game.state.round;
     const proposalsReady=round?.proposals&&Object.values(round.proposals).some(p=>p.remainingAt-game.remainingMs()>=7000);
     const expired=(game.state.delegatedAdmins||[]).some(g=>g.expiresAt&&g.expiresAt<=Date.now()),roundReady=round&&!round.resolved&&!round.paused&&(game.remainingMs()<=0||proposalsReady);
-    const advanceReady=game.state.settings.autoAdvance&&round?.resolved&&game.state.match?.finishedAt===null;
+    const advanceReady=!phantomActive(game.state)&&game.state.settings.autoAdvance&&round?.resolved&&game.state.match?.finishedAt===null;
+    const phantomReady=phantomDue(game);
     const awardReady=round&&!round.resolved&&round.paused&&Number.isFinite(round.awardPauseUntil)&&round.awardPauseUntil<=Date.now();
-    if (closing || timerBusy || !expired&&!roundReady&&!awardReady&&!advanceReady) return;
+    if (closing || timerBusy || !expired&&!roundReady&&!awardReady&&!advanceReady&&!phantomReady) return;
     timerBusy = true;
     enqueue(async () => {
       const before = structuredClone(game.state);
-      try {game.expireAdminGrants();game.resumeAwardPauseIfDue();game.advanceIfDue();if(game.state.round&&!game.state.round.resolved&&!game.state.round.paused){if(round?.id===game.state.round.id&&scheduledAt>=game.state.round.deadline)game.resolveRound();else if(game.remainingMs()>0)game.flushProposals()}game.advanceIfDue();if(game.state.revision===before.revision)return;await persistGame();broadcast();}
+      try {game.expireAdminGrants();tickPhantom(game);if(!phantomActive(game.state)){game.resumeAwardPauseIfDue();game.advanceIfDue();if(game.state.round&&!game.state.round.resolved&&!game.state.round.paused){if(round?.id===game.state.round.id&&scheduledAt>=game.state.round.deadline)game.resolveRound();else if(game.remainingMs()>0)game.flushProposals()}game.advanceIfDue();}if(game.state.revision===before.revision)return;await persistGame();broadcast();}
       catch (error) { game = new GameLogic(before); console.error("Итоги раунда не сохранены; повторная попытка автоматически:", error.message); }
     }).catch(error=>{if(error.code!=='SERVER_BUSY')console.error('Таймер:',error.message)}).finally(() => { timerBusy = false; });
   }, 250);
@@ -649,7 +654,7 @@ export async function createGameServer(options = {}) {
       if(!options.authorizePlatform||!await options.authorizePlatform(accountId))throw new GameError('Нужен доступ создателя.','FORBIDDEN');
       const methods={continueStudio:()=>game.continueStudio(),studio:()=>game.setStudio(data.canvasData,data.revision),summary:()=>game.exportSummary(),pause:()=>game.pauseRound(),resolve:()=>game.resolveRound(),next:()=>game.endRound(),start:()=>game.startRound(data.questionId,data.duration),resetTimer:()=>game.resetTimer(),reset:()=>game.resetGame(),points:()=>game.adjustPoints(data.teamId,data.delta),economy:()=>game.adjustEconomy(data.teamId,data.delta),rename:()=>game.renamePlayer(data.pid,data.name),move:()=>game.movePlayer(data.pid,data.teamId),kick:()=>{const team=game.state.regions.find(t=>t.members.some(m=>m.pid===data.pid)),member=team?.members.find(m=>m.pid===data.pid);if(!member)throw new GameError('Участник не найден.');if(member.creatorId)throw new GameError('Создатели не могут исключать друг друга.','PROTECTED_SESSION');return game.leaveTeam(team.id,member.pid);},question:()=>game.editQuestion(data.questionId,data.question,data.expectedVersion),clearQuestions:()=>game.clearQuestions(),mode:()=>game.setGameMode(data.mode),capacity:()=>game.setAllCapacities(data.capacity),layout:()=>{if(data.mode!==game.state.settings.mode){if(game.state.round?.resolved)game.endRound();game.setGameMode(data.mode);}game.setTeamCount(data.count);game.setAllCapacities(data.capacity);},rules:()=>{game.setAutoAdvance(data.autoAdvance,data.duration);game.setTeamRules(data.decision,data.trading);},teamCount:()=>game.setTeamCount(data.count),capital:()=>game.adjustCapital(data.pid,data.delta),admission:()=>{game.state.accessControl.admission.open=data.open===true;game.state.accessControl.admission.expiresAt=Date.now()+8*3600000;game.touch();},state:()=>{const pids=new Set((data.regions||[]).flatMap(t=>(t.members||[]).map(m=>m.pid)));if(game.state.regions.some(t=>t.members.some(m=>m.creatorId&&!pids.has(m.pid))))throw new GameError('JSON-патч не может исключать создателей.','PROTECTED_SESSION');return game.applyRawState(data);},configure:()=>{const c=data.config;if(game.state.round?.resolved)game.endRound();game.setGameMode(c.mode);game.setTeamCount(c.teamCount);game.setAllCapacities(c.capacity);game.updateBranding({title:data.name,subject:data.subject,subjects:[...new Set([...game.state.branding.subjects,data.subject])],accent:c.accent,gold:c.gold});game.setAutoAdvance(c.autoAdvance,c.duration);game.setPerksEnabled(c.perksEnabled);game.setTeamRules(c.decision,c.tradingEnabled);if(data.replaceQuestions){game.clearQuestions();if(data.canvasData)game.setStudio(data.canvasData);else for(let i=0;i<data.questions.length;i+=60)game.importQuestions(data.questions.slice(i,i+60));}return {configured:true};}};
       if(!Object.hasOwn(methods,action))throw new GameError('Действие недоступно.');
-      const before=structuredClone(game.state);try{const result=methods[action]();await persistGame();broadcast(true);return result||{};}catch(e){game=new GameLogic(before);throw e;}
+      const before=structuredClone(game.state);try{if(phantomActive(game.state))throw new GameError('Сначала остановите Фантомное событие.');const result=methods[action]();await persistGame();broadcast(true);return result||{};}catch(e){game=new GameLogic(before);throw e;}
     });},
     async checkInactiveSessions(){return enqueue(()=>maintainIdleSessions(true))},
     async listen(port = Number(process.env.PORT) || 3000, host = "0.0.0.0") {

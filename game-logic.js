@@ -1,3 +1,4 @@
+import {configurePhantom,phantomTeamAction,phantomControl,phantomView,validatePhantom,phantomActive,guardPhantom,pausePhantomSnapshot} from './phantom-game.js';
 import {normalizeFeatures,normalizeDesign} from './room-layout.js';
 import {normalizeStudio} from './studio-schema.js';
 import {applyStudio,finishStudioRound,continueStudio,syncStudioBank} from './studio-game.js';
@@ -129,6 +130,7 @@ function restoreSnapshot(raw) {
   ensure(typeof state.settings.perksEnabled==='boolean','Повреждена настройка перков.');
   validateAwardState(state,ensure);
   state.questions = validateQuestions(state.questions);
+  validatePhantom(state,validateQuestions);
   if(state.canvasData!==undefined)state.canvasData=normalizeStudio(state.canvasData);
   if(state.studioPresentation)state.studioPresentation={features:normalizeFeatures(state.studioPresentation.features),design:normalizeDesign(state.studioPresentation.design)};
   if(state.match){
@@ -182,6 +184,11 @@ export class GameLogic {
     r.awardClock={elapsed:0,runningSince:at};this.touch();return true;
   }
   touch() { this.state.revision++; }
+  phantomCall(fn,data,player=null){try{return fn(this,...(player?[player,data]:[data]));}catch(e){if(e.phantom)throw new GameError(e.message,e.code);throw e;}}
+  phantomConfigure(data){return this.phantomCall(configurePhantom,data)}
+  phantomTeam(player,data){return this.phantomCall(phantomTeamAction,data,player)}
+  phantomControl(data){return this.phantomCall(phantomControl,data)}
+  phantomGuard(action){return this.phantomCall(guardPhantom,action)}
   scoreLimit(scope,id){return scoreLimit(this,scope,id)}
   ensureCollection(pid,cookieHash=null){const p=ensurePlayerProfile(this,pid,cookieHash);ensure(p,'Эта коллекция уже открыта другим участником. Выйдите из прежней сессии.','COLLECTION_OCCUPIED');return p}
   collectionCookie(pid,token){const value=issueCollectionCookie(this,pid,token);ensure(value,'Коллекция уже используется.','COLLECTION_OCCUPIED');return value}
@@ -201,7 +208,7 @@ export class GameLogic {
 
   updateBranding(raw){ensure(raw&&typeof raw==='object'&&!Array.isArray(raw),'Проверьте настройки организации.');const next=validateBranding({...this.state.branding,...raw});ensure(!this.state.round||this.state.round.resolved||next.subject===this.state.branding.subject,'Завершите вопрос перед сменой предмета.');this.state.branding=next;this.log('Обновлены оформление и настройки организации.');this.touch()}
   publicBranding(){const {logo,...publicSettings}=this.state.branding;return {...publicSettings,subjects:[...publicSettings.subjects],logoUrl:logo?'/api/logo?v='+hashToken(logo).slice(0,16):''}}
-  backupSnapshot(){const snapshot=structuredClone(this.state);for(const key of ['restorePoints','hotfixBackup','migrationBackup','accessControl'])delete snapshot[key];if(snapshot.round&&!snapshot.round.resolved){snapshot.round.remainingMs=this.remainingMs();snapshot.round.paused=true;snapshot.round.deadline=null}return snapshot}
+  backupSnapshot(){const snapshot=structuredClone(this.state);pausePhantomSnapshot(snapshot,this.now());for(const key of ['restorePoints','hotfixBackup','migrationBackup','accessControl'])delete snapshot[key];if(snapshot.round&&!snapshot.round.resolved){snapshot.round.remainingMs=this.remainingMs();snapshot.round.paused=true;snapshot.round.deadline=null}return snapshot}
   createRestorePoint(label='Ручная копия',advance=true){
     const point={id:randomUUID(),at:this.now(),label:cleanText(label,2,100,'Название копии'),snapshot:this.backupSnapshot()};
     this.state.restorePoints=[point,...(this.state.restorePoints||[])].slice(0,3);if(advance)this.touch();return point;
@@ -496,6 +503,7 @@ export class GameLogic {
     this.state.phase='ended';this.log('Матч завершён. Итоговый рейтинг определён.','game');this.touch();return {finished:true,winnerTeamIds:[...match.winnerTeamIds]};
   }
   startRound(questionId, duration) {
+    this.phantomGuard("startRound");
     ensure(!this.state.round || this.state.round.resolved, "Сначала завершите текущий вопрос.");
     ensure(integer(duration, 5, 3600), "Время вопроса: от 5 до 3600 секунд.");
     const question = this.state.questions.find(q => q.id === questionId);
@@ -543,6 +551,7 @@ export class GameLogic {
     return votes;
   }
   castVote(regionId, pid, optionIdx, roundId) {
+    this.phantomGuard("castVote");
     this.member(regionId, pid);
     const round = this.requireRound(roundId, true);
     ensure(integer(optionIdx, 0, 3), "Вариант ответа должен быть от 0 до 3.");
@@ -603,6 +612,7 @@ export class GameLogic {
     this.touch();
   }
   resumeAwardPauseIfDue() {
+    if(phantomActive(this.state))return false;
     const round=this.state.round;
     if(!round||round.resolved||!round.paused||!Number.isFinite(round.awardPauseUntil)||round.awardPauseUntil>this.now())return false;
     this.pauseRound();
@@ -801,6 +811,7 @@ export class GameLogic {
     this.state.settings.autoAdvance=enabled;this.state.settings.autoDuration=duration;this.touch();
   }
   advanceIfDue() {
+    if(phantomActive(this.state))return;
     const round=this.state.round,match=this.state.match;
     if(!this.state.settings.autoAdvance||round?.questionSnapshot.autoAdvance===false||!round?.resolved||!match||match.finishedAt!==null)return;
     if(round.studioRoute?.checkpoint)return;
@@ -825,12 +836,15 @@ export class GameLogic {
     return {added:questions.length,skipped:drafts.length-questions.length};
   }
   resetGame() {
+    if(phantomActive(this.state))this.phantomControl({action:"stop",eventId:this.state.phantom.event.id});
+    const phantom=this.state.phantom?{...this.state.phantom,event:null}:undefined;
     const canvasData=this.state.canvasData,studioPresentation=this.state.studioPresentation;
     const questions = this.state.questions, revision = this.state.revision, settings = this.state.settings;
     const awardProfiles=this.state.awardProfiles;
     const exitRequests=this.state.exitRequests,presentationEffectsEnabled=this.state.presentationEffectsEnabled,branding=this.state.branding,restorePoints=this.state.restorePoints,accessControl=this.state.accessControl;
     const teams = this.state.regions.map(r => ({...r,points:0,developmentPoints:0,economy:100,members:r.members.filter(m=>m.creatorId).map(m=>({...m,...(settings.universal?{capital:0,streak:0}:{})}))}));
     this.state = freshState();
+    if(phantom)this.state.phantom=phantom;
     this.state.match=null;this.state.achievements=[];this.state.awardProfiles=awardProfiles;this.state.awardSystemVersion=1;
     this.state.questions = questions;
     if(canvasData)this.state.canvasData=canvasData;if(studioPresentation)this.state.studioPresentation=studioPresentation;
@@ -917,6 +931,8 @@ export class GameLogic {
       questions: teacher || delegated?.permissions.questions ? structuredClone(this.state.questions) : delegated?.permissions.game ? this.state.questions.map(({id,text,options,points,version,topic,subject,publicDemo})=>({id,text,options:[...options],points,version,topic,subject,publicDemo})) : [],
       round: null, log: adminView ? structuredClone(this.state.log.filter(entry=>entry.kind!=='admin'&&(entry.kind==='game'||!ADMIN_LOG_PATTERN.test(entry.msg)))) : []
     };
+    view.phantom=(teacher||player)?phantomView(this,player,teacher):null;
+    if(player&&phantomActive(this.state)&&this.state.phantom.event.teamIds.includes(player.regionId))view.questions=[];
     const awards=(this.state.achievements||[]).map(({recipientIds,...award})=>({...awardDefinition(award.achievementId),...award}));
     Object.assign(view,achievementView(this,player,teacher||!!delegated?.permissions.game));
     view.worldAchievements=player||teacher?frame.worldAchievements:[];
@@ -961,6 +977,7 @@ export class GameLogic {
       });
       if((teacher||delegated?.permissions.questions)&&this.state.settings.mode==='solo')view.round.preview=frame.leaderboard.map(m=>{const chosen=round.submitted[m.pid]??ballots[m.pid]??null;return {teamId:m.pid,name:m.name,chosen,correct:chosen===null?null:chosen===questionSnapshot.correct,submitted:round.submitted[m.pid]!==undefined,voters:chosen===null?0:1,empty:false}});
     }
+    if(player&&phantomActive(this.state)&&this.state.phantom.event.teamIds.includes(player.regionId)&&view.round){delete view.round.preview;if(!view.round.resolved){delete view.round.question.correct;delete view.round.question.explanation;}}
     return view;
   }
   hotfixBackupSnapshot() {

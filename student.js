@@ -1,3 +1,4 @@
+import {setupPhantom} from './phantom-ui.js';
 import {t as uiText,tx as uiTpl,setupUIPreferences} from './ui-preferences.js';
 import { GameEngine, REGIONS, capacityFor,totalCapacity, CRISIS_THRESHOLD, RESOURCE_CAP, DEVELOPMENT_STAGES, developmentFor, metadataFor, setupPresentationEffects, setupBranding,setupAchievements, escapeHTML as h } from "./shared-engine.js";
 import { setupTelemetry } from "./creator-overlay.js";
@@ -6,6 +7,7 @@ import { setupCommunication } from "./chat-ui.js";
 setupUIPreferences();
 try{const fragment=new URLSearchParams(location.hash.slice(1)),token=fragment.get('join');if(token&&token.length<=2000&&/^[A-Za-z0-9_.-]+$/.test(token)){sessionStorage.setItem('cq_lesson_access_v1',token);history.replaceState(null,'',location.pathname+location.search)}}catch{}
 const engine = new GameEngine("student");
+setupPhantom(engine);
 setupTelemetry(engine);
 setupCommunication(engine);
 setupPresentationEffects(engine);
