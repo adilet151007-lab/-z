@@ -264,7 +264,7 @@ export class GameLogic {
   settleTrade(regionId,pid,id,accept){this.requireTrading(regionId,pid);ensure(typeof accept==='boolean','Укажите решение.');const trade=this.state.trades?.find(t=>t.id===id);ensure(trade&&trade.status==='pending'&&trade.expiresAt>this.now(),'Предложение уже закрыто или истекло.');ensure(accept?trade.to===regionId:trade.to===regionId||trade.from===regionId,'Это предложение другой команды.','FORBIDDEN');if(accept){const from=this.region(trade.from),to=this.region(trade.to);ensure(from.points>=trade.resources&&to.points+trade.resources<=Math.max(to.points,this.scoreLimit('team',to.id))&&to.economy-trade.economy>=15&&from.economy+trade.economy<=100,'Баланс изменился или обмен превысит предел. Создайте новое предложение.');this.growTerritory(from,-trade.resources);this.growTerritory(to,trade.resources);from.points-=trade.resources;to.points+=trade.resources;from.economy+=trade.economy;to.economy-=trade.economy;if(trade.economy){this.invalidateQuizRecovery(from.id);this.invalidateQuizRecovery(to.id)}if(from.economy===100)from.recoveryAnswers=0;if(to.economy===100)to.recoveryAnswers=0;trade.status='accepted';this.log('Команды «'+from.name+'» и «'+to.name+'» подтвердили обмен.')}else trade.status='declined';this.touch()}
   ranking(){return this.state.regions.flatMap(t=>t.members.map(m=>({pid:m.pid,name:m.name,teamId:t.id,capital:m.capital??0,streak:m.streak??0,multiplier:soloMultiplier(m.streak)}))).sort((a,b)=>b.capital-a.capital||b.streak-a.streak||a.name.localeCompare(b.name,'ru'))}
   teamRanking(){
-    const rows=regularTeams(this.state.regions).map(t=>({teamId:t.id,name:t.name,points:t.points,economy:t.economy,members:t.members.filter(m=>!m.creatorId).length,capacity:t.capacity,rating:t.points+t.economy*5,development:developmentFor(t.developmentPoints??t.points).name})).sort((a,b)=>b.rating-a.rating||b.points-a.points||b.economy-a.economy||a.name.localeCompare(b.name,'ru'));
+    const rows=regularTeams(this.state.regions).map(t=>({teamId:t.id,name:t.name,points:t.points,economy:t.economy,members:t.members.length,capacity:t.capacity,rating:t.points+t.economy*5,development:developmentFor(t.developmentPoints??t.points).name})).sort((a,b)=>b.rating-a.rating||b.points-a.points||b.economy-a.economy||a.name.localeCompare(b.name,'ru'));
     const active=rows.filter(row=>this.region(row.teamId).members.length);return rows.map(row=>({...row,rank:this.region(row.teamId).members.length?1+active.filter(other=>other.rating>row.rating).length:null}));
   }
   log(msg,kind=this.logContext||'game') { this.state.log.unshift({ t: this.now(), msg,kind }); this.state.log = this.state.log.slice(0, 100); }
@@ -910,7 +910,7 @@ export class GameLogic {
     return {
       worldAchievements,
       branding:this.publicBranding(),
-      regions:this.state.regions.map(r=>({...r,scoreLimit:this.scoreLimit('team',r.id)>RESOURCE_CAP?null:RESOURCE_CAP,leaderPid:this.leaderFor(r),members:r.members.map(({pid,name,capital,streak})=>({pid,name,online:onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak,scoreLimit:this.scoreLimit('player',pid)>RESOURCE_CAP?null:RESOURCE_CAP}:{})})),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length}:{})})),
+      regions:this.state.regions.map(r=>({...r,scoreLimit:this.scoreLimit('team',r.id)>RESOURCE_CAP?null:RESOURCE_CAP,leaderPid:this.leaderFor(r),members:r.members.map(({pid,name,capital,streak})=>({pid,name,online:onlinePlayers.has(pid),...(this.state.settings.universal?{capital,streak,scoreLimit:this.scoreLimit('player',pid)>RESOURCE_CAP?null:RESOURCE_CAP}:{})})),...(this.state.settings.universal?{occupied:r.members.filter(m=>!m.creatorId).length,participantCount:r.members.length,creatorCount:r.members.filter(m=>m.creatorId).length}:{})})),
       leaderboard:this.state.settings.mode==='solo'?this.ranking():[],
       teamLeaderboard:this.state.settings.mode==='team'?this.teamRanking().filter(row=>row.rank!==null):[],
       votes:this.state.round?Object.fromEntries(this.state.regions.map(r=>[r.id,this.votesFor(r.id)])):{}
@@ -934,7 +934,7 @@ export class GameLogic {
       round: null, log: adminView ? structuredClone(this.state.log.filter(entry=>entry.kind!=='admin'&&(entry.kind==='game'||!ADMIN_LOG_PATTERN.test(entry.msg)))) : []
     };
     view.phantom=(teacher||player)?phantomView(this,player,teacher):null;
-    if(player&&phantomActive(this.state)&&this.state.phantom.event.teamIds.includes(player.regionId))view.questions=[];
+    if(player&&!teacher&&phantomActive(this.state)&&this.state.phantom.event.teamIds.includes(player.regionId))view.questions=[];
     const awards=(this.state.achievements||[]).map(({recipientIds,...award})=>({...awardDefinition(award.achievementId),...award}));
     Object.assign(view,achievementView(this,player,teacher||!!delegated?.permissions.game));
     view.worldAchievements=player||teacher?frame.worldAchievements:[];

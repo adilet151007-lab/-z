@@ -39,3 +39,19 @@ test('automatic start is an explicit teacher choice and old saved configuration 
   const old=structuredClone(f.game.state);delete old.phantom.config.autoStart;delete old.phantom.config.negotiationSeconds;
   const restored=new GameLogic(old,f.time);assert.equal(restored.state.phantom.config.autoStart,false);assert.equal(restored.state.phantom.config.negotiationSeconds,30);
 });
+test('manual question progression waits for the teacher until automatic progression is enabled',()=>{
+  const f=fixture();f.offer();f.act(1,'accept');f.control('start');f.control('autoAdvance',{enabled:false});
+  const e=f.event();for(let i=0;i<2;i++)f.act(i,'answer',{roundId:e.round.id,option:e.round.question.correct});
+  f.control('resolve');assert.equal(f.event().stage,'reveal');assert.equal(f.event().deadline,null);
+  f.advance(20000);assert.equal(f.event().stage,'reveal');
+  f.control('autoAdvance',{enabled:true});f.advance(2501);assert.equal(f.event().stage,'question');
+});
+test('manual Phantom adjustments are bounded and preserve real resources until final settlement',()=>{
+  const f=fixture();f.offer();f.act(1,'accept');f.control('start');
+  const before=f.game.state.regions.map(t=>t.points),fund=f.event().fund;
+  f.control('adjust',{teamId:'saryarka',resourceDelta:100,economyDelta:-10});
+  assert.equal(f.event().fighters[0].resources,100);assert.equal(f.event().fighters[0].economy,90);assert.equal(f.event().fund,fund);assert.deepEqual(f.game.state.regions.map(t=>t.points),before);
+  assert.throws(()=>f.control('adjust',{teamId:'saryarka',resourceDelta:.5}));
+  f.control('adjust',{teamId:'saryarka',economyDelta:-50});assert.equal(f.event().stage,'result');assert.equal(f.event().winner,'jetisu');
+  assert.equal(f.game.state.regions.reduce((sum,t)=>sum+t.points,0),1000);
+});

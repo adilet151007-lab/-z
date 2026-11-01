@@ -15,6 +15,18 @@
   font-size: 1.2rem;
   margin: 0 0 12px;
 }
+.phantom-management { margin-bottom: 12px; }
+.phantom-management .row { justify-content: space-between; align-items: center; }
+.phantom-management .qtext { overflow-wrap: anywhere; }
+.phantom-entry .phantom-toolbar { position: static; background: transparent; padding: 0; }
+.phantom-controls-host > .phantom-entry { margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.phantom-management [data-phantom-clock] { display: inline-block; min-width: 2ch; font-variant-numeric: tabular-nums; }
+.phantom-correct-answer { padding: 12px; border: 1px solid #14b8a666; border-radius: 10px; color: #70e8d8; background: #10302e; }
+.phantom-adjustments { flex: 1 0 100%; min-width: 0; padding: 12px; border: 1px solid #59728c66; border-radius: 12px; background: #111c2d; }
+.phantom-adjustment-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.phantom-adjustment-row strong { flex: 1 0 180px; overflow-wrap: anywhere; }
+.phantom-adjustment-row span { font-variant-numeric: tabular-nums; }
+.phantom-command-bar [aria-pressed='true'] { border-color: #14b8a6; background: #0d4945; }
 .phantom-entry p,
 .phantom-settings p {
   font-size: 0.85rem;

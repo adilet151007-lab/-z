@@ -117,7 +117,7 @@ export function mapRegionsFor(teams, focusedTeamId = null) {
   return REGIONS.map(base => {
     const peers = teams.filter(t => metadataFor(t).baseRegionId === base.id);
     const selected = focused && metadataFor(focused).baseRegionId === base.id ? [focused] : peers;
-    const occupied = selected.filter(t => (t.occupied??t.members.length)>0||t.members.length>0);
+    const occupied = selected.filter(t => (t.participantCount??t.occupied??t.members.length)>0||t.members.length>0);
     const source = occupied.length ? occupied : selected;
     return { id: base.id,developmentPoints:source.length?Math.max(...source.map(t=>t.developmentPoints??Math.min(DEVELOPMENT_CAP,t.points))):0,scoreLimit:source.some(t=>t.scoreLimit===null)?null:RESOURCE_CAP, points: source.length ? Math.round(source.reduce((sum, t) => sum + t.points, 0) / source.length) : 0, economy: source.length ? Math.round(source.reduce((sum, t) => sum + t.economy, 0) / source.length) : 100 };
   });

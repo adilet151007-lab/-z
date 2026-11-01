@@ -129,7 +129,7 @@ test('Ставки ограничены, отмена и восстановле�
   f.contract();
   assert.throws(() => f.team(2, 'bet', { side: f.ids[0], amount: 25 }));
 });
-test('Одновременное выбывание запускает пробуждение при 600; участники не получают правильный ответ заранее', () => {
+test('Одновременное выбывание запускает пробуждение при 600; ответы доступны преподавателю и создателю', () => {
   const f = fixture();
   f.contract(150);
   f.team(2, 'bet', { side: f.ids[0], amount: 300 });
@@ -162,8 +162,8 @@ test('Одновременное выбывание запускает проб�
     }
   live.creatorId = 'adilet';
   const participant = f.g.view({ role: 'creator', playerHash: live.tokenHash });
-  assert.equal(participant.phantom.event.round.question.correct, undefined);
-  assert.equal(participant.questions.length, 0);
+  assert.equal(participant.phantom.event.round.question.correct, f.event().round.question.correct);
+  assert.ok(participant.questions.length > 0);
   const copy = new GameLogic(f.g.state, () => 130000);
   assert.equal(copy.state.phantom.event.fund, 600);
   assert.equal(copy.state.phantom.event.round.id, f.event().round.id);

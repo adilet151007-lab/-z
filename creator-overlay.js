@@ -111,7 +111,7 @@ export function setupTelemetry(engine){
   const proTools=root.querySelector('[data-pro-tools]');if(proTools)proTools.hidden=s.viewer.canGrantAdmin!==true;
   root.querySelector('[data-access-tools]').hidden=!s.viewer.isCreator;root.querySelector('[data-invite-tools]').hidden=!s.viewer.canGrantAdmin;root.querySelector('[data-key-tools]').hidden=!s.viewer.isCreator;
   $('sys-invite-list').innerHTML=(s.sessionControl?.invitations||[]).filter(i=>!i.usedAt&&!i.revokedAt&&i.expiresAt>Date.now()+engine.offset).map(i=> uiTpl`<p class="small-note">${h(new Date(i.createdAt).toLocaleTimeString(getLocale()))} · ${i.minutes?i.minutes+ uiText(' мин.'): uiText('до сброса')} <button class="ghost" data-invite-revoke="${i.id}">Отозвать код</button></p>`).join('');
-  const teams=s.regions.map(t=>`<option value="${t.id}">${h(t.name)} · ${t.occupied??t.members.length}/${t.capacity}</option>`).join('');setOptions('sys-own-team',teams);setOptions('sys-player-team',teams);
+  const teams=s.regions.map(t=>`<option value="${t.id}">${h(t.name)} · ${t.participantCount??t.occupied??t.members.length}/${t.capacity}</option>`).join('');setOptions('sys-own-team',teams);setOptions('sys-player-team',teams);
   if($('sys-own-team').dataset.team!==identity.regionId){$('sys-own-team').value=identity.regionId;$('sys-own-team').dataset.team=identity.regionId}
   const source=s.regions.find(t=>t.members.some(m=>m.pid===pid)),member=source?.members.find(m=>m.pid===pid);
   if(member&&lastPlayer!==pid){lastPlayer=pid;$('sys-player-name').value=member.name;$('sys-player-team').value=source.id}

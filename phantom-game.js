@@ -56,6 +56,7 @@ export function initialPhantom() {
       betSeconds: 30,
       negotiationSeconds: 30,
       autoStart: false,
+      autoAdvance: true,
       reduced: false,
       volume: 0.12,
     },
@@ -334,7 +335,7 @@ function resolve(g, e) {
   }
   e.stage = 'reveal';
   e.stageAt = g.now();
-  e.deadline = g.now() + 2500;
+  e.deadline = system(g).config.autoAdvance!==false?g.now()+2500:null;
 }
 function finalizeProposal(g, e) {
   const yes = e.electorate.filter((id) => e.proposalVotes[id] === true);
@@ -371,7 +372,7 @@ export function configurePhantom(g, data) {
   need(!phantomActive(g.state), 'Сначала остановите активное событие.');
   const c = { ...s.config, ...data };
   need(
-    typeof c.enabled === 'boolean' && typeof c.reduced === 'boolean' && typeof c.autoStart === 'boolean',
+    typeof c.enabled === 'boolean' && typeof c.reduced === 'boolean' && typeof c.autoStart === 'boolean' && typeof c.autoAdvance === 'boolean',
     'Проверьте настройки режима.',
   );
   need(
@@ -613,7 +614,23 @@ export function phantomControl(g, data) {
     startFight(g, e, ids);
   } else {
     const e = requireEvent(g, data);
-    if(data.action==='timer'){
+    if(data.action==='autoAdvance'){
+      need(typeof data.enabled==='boolean','Проверьте автопереход.');
+      s.config.autoAdvance=data.enabled;
+      if(e.stage==='reveal'){
+        e.remaining=data.enabled?2500:0;
+        e.deadline=data.enabled&&!e.paused?g.now()+2500:null;
+      }
+    } else if(data.action==='adjust'){
+      need(['question','reveal','exhausted'].includes(e.stage),'Корректировка доступна во время боя.');
+      const f=e.fighters.find(f=>f.id===data.teamId),resourceDelta=data.resourceDelta??0,economyDelta=data.economyDelta??0;
+      need(f&&INT(resourceDelta,-1000000,1000000)&&INT(economyDelta,-100,100),'Проверьте команду и корректировку.');
+      f.resources=Math.max(0,Math.min(1000000,f.resources+resourceDelta));
+      f.economy=Math.max(0,Math.min(100,f.economy+economyDelta));f.alive=f.economy>=50;
+      const row=e.round?.results.find(row=>row.teamId===f.id);if(row)Object.assign(row,{resources:f.resources,economy:f.economy,alive:f.alive});
+      journal(e,'adjustment',{teamId:f.id,resourceDelta,economyDelta});
+      const alive=e.fighters.filter(f=>f.alive);if(alive.length<=1)finish(g,e,alive[0]?.id||null,alive.length===0);
+    } else if(data.action==='timer'){
       need(['diplomacy','betting','proposal','intro','question','reveal'].includes(e.stage)&&INT(data.seconds,5,120),'Время этапа: 5–120 секунд.');
       e.remaining=data.seconds*1000;
       e.deadline=e.paused?null:g.now()+e.remaining;
@@ -634,7 +651,7 @@ export function phantomControl(g, data) {
       if (data.action === 'resolve') resolve(g, e);
       else if (data.action === 'next') {
         need(
-          ['reveal', 'exhausted'].includes(e.stage),
+          ['intro','reveal', 'exhausted'].includes(e.stage),
           'Дождитесь итогов вопроса.',
         );
         if (e.stage === 'exhausted') {
@@ -696,9 +713,10 @@ export function phantomView(g, player, teacher) {
   if (!s) return null;
   const e = s.event,
     participating = !!player && !!e?.teamIds.includes(player.regionId),
-    manager = teacher && !participating;
+    manager = !!teacher;
   const out = {
     unlocked: s.unlocked,
+    permissions:{canControl:manager,canSeeAnswers:manager,participating},
     config: {
       enabled: s.config.enabled,
       reduced: s.config.reduced,
@@ -708,6 +726,7 @@ export function phantomView(g, player, teacher) {
       betSeconds: s.config.betSeconds,
       negotiationSeconds: s.config.negotiationSeconds ?? 30,
       autoStart: s.config.autoStart === true,
+      autoAdvance: s.config.autoAdvance !== false,
       ...(manager
         ? {
             questionIds: s.config.questionIds,
@@ -739,7 +758,7 @@ export function phantomView(g, player, teacher) {
       question: {
         ...clone(q),
         ...(round.resolved || manager ? { correct } : {}),
-        ...(round.resolved ? { explanation } : {}),
+        ...(round.resolved || manager ? { explanation,source,sourceExcerpt } : {}),
       },
       results: clone(round.results),
       myVote:
@@ -762,11 +781,12 @@ export function validatePhantom(state, validateQuestions) {
     'Повреждена система Фантомной зоны.',
   );
   const c = s.config;
-  if(c){c.negotiationSeconds??=30;c.autoStart??=false;}
+  if(c){c.negotiationSeconds??=30;c.autoStart??=false;c.autoAdvance??=true;}
   need(
     c &&
       typeof c.enabled === 'boolean' &&
       typeof c.autoStart === 'boolean' &&
+      typeof c.autoAdvance === 'boolean' &&
       INT(c.negotiationSeconds,5,120) &&
       typeof c.reduced === 'boolean' &&
       typeof c.volume === 'number' &&

@@ -49,6 +49,10 @@ const COPY = {
   negotiationTime: ['Время переговоров, с', 'Келіссөз уақыты, с'],
   autoStart: ['Автоматически начать после ставок', 'Бәстен кейін автоматты бастау'],
   teacherControl: ['Управление преподавателя', 'Оқытушының басқаруы'],
+  adminControl: ['Управление создателя', 'Жасаушының басқаруы'],
+  correctAnswer: ['Правильный ответ', 'Дұрыс жауап'],
+  autoAdvance: ['Автопереход вопросов', 'Сұрақтардың автоматты ауысуы'],
+  adjustments: ['Фантомные ресурсы и экономика', 'Фантом ресурстары мен экономикасы'],
   resetClock: ['Установить время', 'Уақытты орнату'],
   readyNote: ['Ставки закрыты. Преподаватель запускает бой, когда команды готовы.', 'Бәс жабылды. Командалар дайын болғанда оқытушы бастайды.'],
   proposal: ['Голосование о взносе', 'Жарна туралы дауыс беру'],
@@ -206,7 +210,7 @@ export function setupPhantom(engine) {
     (navigator.hardwareConcurrency || 8) <= 4 ||
     matchMedia('(prefers-reduced-motion: reduce)').matches;
   const manager = () =>
-    state?.viewer.role === 'teacher' || state?.viewer.isCreator;
+    state?.phantom?.permissions?.canControl ?? (state?.viewer.role === 'teacher' || state?.viewer.isCreator);
   const now = () => Date.now() + (engine.offset || 0);
   const current = () => localPreview || state?.phantom?.event;
   const name = (id) => state?.regions.find((t) => t.id === id)?.name || id;
@@ -296,6 +300,7 @@ export function setupPhantom(engine) {
       active = current() && current().stage !== 'result',
       canManage = manager();
     entry.hidden = !(canManage || (p && c?.enabled));
+    const ordinary=document.getElementById(document.body.classList.contains('teacher-page')?'round-control':'question-panel');if(ordinary)ordinary.hidden=false;
     if (entry.hidden) return;
     if (!entry.parentNode)
       (
@@ -313,13 +318,24 @@ export function setupPhantom(engine) {
         (t) =>
           t.id !== 'creators' &&
           t.id !== own?.id &&
-          (t.occupied ?? t.members.length),
+          (t.participantCount ?? t.occupied ?? t.members.length),
       );
+    const ordinaryHost=document.getElementById(document.body.classList.contains('teacher-page')?'round-control':'question-panel');
+    if(active&&ordinaryHost){
+      ordinaryHost.classList.add('phantom-controls-host');
+      if(entry.parentNode!==ordinaryHost)ordinaryHost.replaceChildren(entry);
+    }else if(ordinaryHost){
+      ordinaryHost.classList.remove('phantom-controls-host');
+      if(entry.parentNode===ordinaryHost){
+        const grid=ordinaryHost.closest('.studio-live-layout');
+        if(grid)grid.insertAdjacentElement('afterend',entry);else ordinaryHost.insertAdjacentElement('afterend',entry);
+      }
+    }
     const launch = entry.querySelector('.phantom-launch');
     const key = JSON.stringify([
       c?.enabled,
       active,
-      current()?.id,
+      current(),
       canManage,
       leader,
       state.phantom?.unlocked,
@@ -327,21 +343,31 @@ export function setupPhantom(engine) {
     ]);
     if (
       launch.dataset.key !== key &&
-      !launch.contains(document.activeElement)
+      !(launch.contains(document.activeElement)&&document.activeElement.matches('input,select,textarea'))
     ) {
+      const expanded=launch.querySelector('.phantom-adjustments')?.open;
       launch.dataset.key = key;
-      launch.innerHTML = `<h2>${esc(tr('title'))}</h2>${active ? button('open', 'show') : ''}<p>${esc(tr('rule'))}</p>${c?.enabled && leader && !active ? `<form data-phantom-form="offer"><label>${esc(tr('opponent'))}<select name="toTeamId" required>${options(available)}</select></label>${field('amount', 'number', 25, 'min="25" max="100000" step="25" required')}<button type="submit">${esc(tr('offer'))}</button></form><p>${esc(tr('leader'))}</p>` : ''}${c?.enabled && state.phantom?.unlocked && !active && (leader || canManage) ? `<form data-phantom-form="proposal">${field('amount', 'number', 25, 'min="25" max="400" step="25" required')}<button type="submit">${esc(tr('contribute'))}</button></form>` : ''}${c?.enabled && state.phantom?.unlocked && !active && canManage ? `<details><summary>${esc(tr('sponsor'))}</summary><form data-phantom-form="sponsor">${field('sponsorFund', 'number', 300, 'min="1" max="100000" required')}<select name="teamIds" multiple size="5" required>${options(state.regions.filter((t) => t.id !== 'creators' && t.members.length))}</select><button type="submit">${esc(tr('sponsorStart'))}</button></form></details>` : ''}`;
+      launch.innerHTML = active&&canManage?managementSummary(current())+eventControls(current(),true):`<h2>${esc(tr('title'))}</h2>${active ? button('open', 'show') : ''}<p>${esc(tr('rule'))}</p>${c?.enabled && leader && !active ? `<form data-phantom-form="offer"><label>${esc(tr('opponent'))}<select name="toTeamId" required>${options(available)}</select></label>${field('amount', 'number', 25, 'min="25" max="100000" step="25" required')}<button type="submit">${esc(tr('offer'))}</button></form><p>${esc(tr('leader'))}</p>` : ''}${c?.enabled && state.phantom?.unlocked && !active && (leader || canManage) ? `<form data-phantom-form="proposal">${field('amount', 'number', 25, 'min="25" max="400" step="25" required')}<button type="submit">${esc(tr('contribute'))}</button></form>` : ''}${c?.enabled && state.phantom?.unlocked && !active && canManage ? `<details><summary>${esc(tr('sponsor'))}</summary><form data-phantom-form="sponsor">${field('sponsorFund', 'number', 300, 'min="1" max="100000" required')}<select name="teamIds" multiple size="5" required>${options(state.regions.filter((t) => t.id !== 'creators' && t.members.length))}</select><button type="submit">${esc(tr('sponsorStart'))}</button></form></details>` : ''}`;
+      if(expanded&&launch.querySelector('.phantom-adjustments'))launch.querySelector('.phantom-adjustments').open=true;
     }
+    config.hidden=!!active;
     if (canManage) {
       if (config.parentNode !== entry) entry.append(config);
       renderSettings();
     } else config.remove();
-    entry.append(notice);
+    if(entry.lastElementChild!==notice)entry.append(notice);
   }
-  function eventControls(e) {
-    const active=control()&&e.stage!=='result',timed=!['ready','exhausted','result'].includes(e.stage);
-    const commands=active?`<div class="phantom-command-bar" role="group" aria-label="${esc(tr('teacherControl'))}"><strong>${esc(tr('teacherControl'))}</strong>${timed||e.paused?button(e.paused?'resume':'pause',e.paused?'resume':'pause'):''}${['betting','ready','proposal'].includes(e.stage)?button('start',e.stage==='ready'?'startNow':'start'):''}${timed?`<form data-phantom-form="timer"><label>${esc(tr('duration'))}<input name="seconds" type="number" min="5" max="120" value="30" required></label><button type="submit">${esc(tr('resetClock'))}</button></form>`:''}</div>`:'';
-    return `<div class="phantom-toolbar">${button('collapse', 'collapse')}${button('reduced', 'reduced', `aria-pressed="${localReduced}"`)}${button('sound', soundOn ? 'mute' : 'sound')}${control() && e.stage !== 'result' ? button('stop', 'stop', 'class="phantom-stop"') : ''}${control() ? button('allReduced', 'allReduced', `aria-pressed="${!!state.phantom?.config.reduced}"`) : ''}${control() ? `<label class="phantom-volume">${esc(tr('volume'))}<input data-phantom-volume type="range" min="0" max="1" step="0.01" value="${state.phantom?.config.volume ?? 0.12}"></label>` : ''}${localPreview ? button('closePreview', 'close') : ''}${commands}</div>`;
+  function managementSummary(e) {
+    const q=e.round?.question,correct=Number.isInteger(q?.correct)?q.options[q.correct]:null;
+    return `<section class="phantom-management" data-phantom-manager><div class="row"><h2>${esc(tr(state.viewer.isCreator?'adminControl':'teacherControl'))}</h2>${button('open','show')}</div><p class="phantom-terminal">${esc(tr(e.kind==='royale'?'royale':'localWar'))} · ${esc(tr(e.stage))} · <b data-phantom-clock></b></p>${q?`<p class="qtext">${esc(q.text)}</p><ol class="current-options">${q.options.map(o=>`<li>${esc(o)}</li>`).join('')}</ol>${correct!==null?`<p class="phantom-correct-answer" data-phantom-correct-answer>${esc(tr('correctAnswer'))}: <strong>${String.fromCharCode(65+q.correct)}. ${esc(correct)}</strong></p>`:''}`:''}</section>`;
+  }
+  function eventControls(e,inline=false) {
+    const canManage=control()&&!document.body.classList.contains('projector-mode');
+    const active=canManage&&e.stage!=='result',timed=!['ready','exhausted','result'].includes(e.stage);
+    const commands=active?`<div class="phantom-command-bar teacher-private" role="group" aria-label="${esc(tr(state.viewer.isCreator?'adminControl':'teacherControl'))}">${inline?'':`<strong>${esc(tr(state.viewer.isCreator?'adminControl':'teacherControl'))}</strong>`}${timed||e.paused?button(e.paused?'resume':'pause',e.paused?'resume':'pause'):''}${['betting','ready','proposal'].includes(e.stage)?button('start',e.stage==='ready'?'startNow':'start'):''}${e.stage==='question'?button('resolve','resolve'):''}${['intro','reveal','exhausted'].includes(e.stage)?button('next','next'):''}${button('autoAdvance','autoAdvance',`aria-pressed="${state.phantom.config.autoAdvance!==false}"`)}${timed?`<form data-phantom-form="timer"><label>${esc(tr('duration'))}<input name="seconds" type="number" min="5" max="120" value="${state.phantom.config.duration||30}" required></label><button type="submit">${esc(tr('resetClock'))}</button></form>`:''}</div>`:'';
+    const adjustments=active&&['question','reveal','exhausted'].includes(e.stage)?`<details class="phantom-adjustments teacher-private"><summary>${esc(tr('adjustments'))}</summary>${e.fighters.map(f=>`<div class="phantom-adjustment-row"><strong>${esc(name(f.id))}</strong><span>◈ ${f.resources} · ${f.economy}%</span>${[[25,0,'+25'],[-25,0,'−25'],[0,10,'+10%'],[0,-10,'−10%']].map(([resource,economy,label])=>`<button type="button" data-phantom="adjust" data-team="${esc(f.id)}" data-resource="${resource}" data-economy="${economy}">${label}</button>`).join('')}</div>`).join('')}</details>`:'';
+    if(inline)return `<div class="phantom-toolbar phantom-inline-controls">${commands}${adjustments}${active?button('stop','stop','class="phantom-stop teacher-private"'):''}</div>`;
+    return `<div class="phantom-toolbar">${button('collapse','collapse')}${button('reduced','reduced',`aria-pressed="${localReduced}"`)}${button('sound',soundOn?'mute':'sound')}${active?button('stop','stop','class="phantom-stop teacher-private"'):''}${canManage?button('allReduced','allReduced',`aria-pressed="${!!state.phantom.config.reduced}"`):''}${canManage?`<label class="phantom-volume teacher-private">${esc(tr('volume'))}<input data-phantom-volume type="range" min="0" max="1" step="0.01" value="${state.phantom.config.volume??.12}"></label>`:''}${localPreview?button('closePreview','close'):''}${commands}${adjustments}</div>`;
   }
   function renderEvent(e) {
     const reduced = localReduced || lowPower || state.phantom?.config.reduced;
@@ -465,7 +491,7 @@ export function setupPhantom(engine) {
   }
   function tick() {
     const e = current();
-    if (!e || arena.hidden) {
+    if (!e) {
       document.body.classList.remove('phantom-awakening');
       window.dispatchEvent(
         new CustomEvent('cq:phantom-scene', { detail: { active: false } }),
@@ -477,13 +503,14 @@ export function setupPhantom(engine) {
         Math.ceil((e.paused ? e.remaining : e.deadline - now()) / 1000),
       ),
       clock = arena.querySelector('[data-phantom-clock]');
-    if (clock) clock.textContent = e.deadline || e.paused ? seconds : '—';
+    for(const clock of [...arena.querySelectorAll('[data-phantom-clock]'),...entry.querySelectorAll('[data-phantom-clock]')])clock.textContent=e.deadline||e.paused?seconds:'—';
     const circle = arena.querySelector('.phantom-clock circle');
     if (circle)
       circle.style.strokeDashoffset = String(
         120 *
           (1 - Math.min(1, seconds / (state.phantom?.config.duration || 30))),
       );
+    if(arena.hidden){document.body.classList.remove('phantom-awakening');window.dispatchEvent(new CustomEvent('cq:phantom-scene',{detail:{active:false}}));return;}
     const payout = arena.querySelector('[data-phantom-payout]');
     if (payout) {
       const p = Math.min(1, Math.max(0, (now() - e.stageAt) / 1600));
@@ -623,7 +650,9 @@ export function setupPhantom(engine) {
     }
     if (!e) return;
     const data = { eventId: e.id, offerVersion: e.offerVersion };
-    if (action === 'answer')
+    if(action==='autoAdvance')request('phantomControl',{...data,action,enabled:state.phantom.config.autoAdvance===false});
+    else if(action==='adjust')request('phantomControl',{...data,action,teamId:target.dataset.team,resourceDelta:Number(target.dataset.resource),economyDelta:Number(target.dataset.economy)});
+    else if (action === 'answer')
       request('phantomTeam', {
         ...data,
         action,

@@ -189,7 +189,7 @@ export async function createGameServer(options = {}) {
   };
   const actor = socket => {
     const player = socket.data.playerHash && publishedGame.findPlayer(socket.data.playerHash),playerHash=playerActive(player)?socket.data.playerHash:null;
-    if (validTeacherToken(socket.data.teacherToken)) return { role: "teacher", playerHash };
+    if (validTeacherToken(socket.data.teacherToken)) return { role: "teacher", playerHash: null };
     const creator = playerHash&&publishedGame.creatorFor(playerHash);
     if (creator) return { role: "creator", playerHash: socket.data.playerHash };
     return { role: playerHash && publishedGame.adminGrantFor(player.pid) ? "delegate" : "guest", playerHash };
@@ -356,7 +356,7 @@ export async function createGameServer(options = {}) {
       socket.data.teacherToken=signed({role:'teacher',epoch:game.state.accessControl.teacherEpoch||0,sessionId:randomUUID(),expires,passwordVersion:createHmac('sha256',secret).update(password).digest('hex')});
       pendingTeacherActivity.set(hashToken(socket.data.teacherToken),{at:sessionNow(),expiresAt:expires});
     }
-    socket.data.playerHash=typeof playerToken==='string'&&playerToken.length<=200?hashToken(playerToken):null;
+    socket.data.playerHash=auth.surface==='teacher'?null:typeof playerToken==='string'&&playerToken.length<=200?hashToken(playerToken):null;
     if(options.onPlayerJoined&&socket.data.playerHash){const p=publishedGame.findPlayer(socket.data.playerHash);if(p){await options.onPlayerJoined(socket.request,p);if(p.creatorId&&p.creatorAuth!=='code'&&p.creatorId!==socket.data.portalCreatorId)throw new GameError('Войдите аккаунтом создателя.','FORBIDDEN');if(socket.data.portalCreatorId&&!p.creatorId)await enqueue(async()=>{if(game.state.regions.some(t=>t.members.some(m=>m.creatorId===socket.data.portalCreatorId&&m.pid!==p.pid)))throw new GameError('Сессия создателя уже занята.','PROTECTED_SESSION');const before=structuredClone(game.state);try{const member=game.member(p.regionId,p.pid);member.creatorId=socket.data.portalCreatorId;member.creatorAuth='account';game.touch();await persistGame();broadcast(true);}catch(e){game=new GameLogic(before);throw e;}});}}
     if(options.syncCollections&&socket.data.playerHash)await enqueue(async()=>{await persistGame();broadcast(true);});
     const collectionToken=jar[cookieName('collection')];socket.data.collectionHash=typeof collectionToken==='string'&&collectionToken.length<=200?hashToken(collectionToken):null;
@@ -434,7 +434,7 @@ export async function createGameServer(options = {}) {
             const oldLogContext=game.logContext;
             game.logContext=['teacher','creator','delegate'].includes(identity.role)&&!['startRound','resolveRound','endRound','finishMatch','castVote','confirmVote','cancelVote','teamSubmit','voteLeader','chatSend','chatSubscribe','offerTrade','settleTrade'].includes(name)?'admin':null;
             if(fastInput)game.inputTiming=inputTiming;
-            try{if(name==='phantomTeam')game.phantomInputAt=receivedAt;game.phantomGuard(name);if(phantomActive(game.state)&&player&&game.state.phantom.event.teamIds.includes(player.regionId)&&['getStudio','getSnapshot','getHotfixBackup','createBackup'].includes(name))throw new GameError('Ответы битвы недоступны её участнику.','FORBIDDEN');result = await fn(data, player)}finally{delete game.inputTiming;delete game.phantomInputAt;game.logContext=oldLogContext}
+            try{if(name==='phantomTeam')game.phantomInputAt=receivedAt;game.phantomGuard(name);if(phantomActive(game.state)&&player&&!['teacher','creator'].includes(identity.role)&&game.state.phantom.event.teamIds.includes(player.regionId)&&['getStudio','getSnapshot','getHotfixBackup','createBackup'].includes(name))throw new GameError('Ответы битвы недоступны её участнику.','FORBIDDEN');result = await fn(data, player)}finally{delete game.inputTiming;delete game.phantomInputAt;game.logContext=oldLogContext}
             if(name==='joinTeam'&&result?.player&&options.onPlayerJoined)await options.onPlayerJoined(socket.request,result.player);
             if(result?.playerToken&&result.player){game.ensureCollection(result.player.pid,socket.data.collectionHash);game.state.accessControl.activity.players[result.player.pid]=sessionNow();if(socket.data.deviceHash&&!result.isCreator)game.state.accessControl.playerDevices[result.player.pid]=socket.data.deviceHash;}
             if(name!=='leaveTeam'&&before.delegatedAdmins?.some(grant=>(grant.tier==='local'||grant.origin==='shared-local')&&(!game.state.regions.some(team=>team.members.some(member=>member.pid===grant.pid))||!game.adminGrantFor(grant.pid)))){game.state.accessControl.localKeyOverride=null;game.touch()}
