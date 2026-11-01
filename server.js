@@ -282,7 +282,20 @@ export async function createGameServer(options = {}) {
       cookie(res,'collection',collectionToken,PROFILE_RETENTION_MS);broadcast();res.json({ok:true});
     }catch(error){res.status(error instanceof GameError?403:503).json({ok:false,error:error instanceof GameError?error.message:'Коллекция временно недоступна. Повторите после подключения.',code:error.code||'STORAGE_ERROR'})}
   });
-  app.post('/api/bulk/:action',httpSocket,(req,res,next)=>{const socket=req.gameSocket,jar=cookies(req),surface=req.headers['x-cq-surface'],identity=actor(socket),player=publishedGame.findPlayer(socket.data.playerHash);const permitted=surface==='teacher'&&validTeacherToken(jar[cookieName('teacher')])&&equal(jar[cookieName('teacher')],socket.data.teacherToken)||typeof jar[cookieName('player')]==='string'&&hashToken(jar[cookieName('player')])===socket.data.playerHash;const authorized=['teacher','creator'].includes(identity.role)||identity.role==='delegate'&&publishedGame.adminCan(player?.pid,req.params.action);if(!bulkActions.has(req.params.action)||!permitted||!authorized)return res.status(403).json({ok:false,error:'Нужна действующая административная сессия.',code:'FORBIDDEN'});if(identity.role!=='creator'&&roomFeatureDenied(req.params.action,roomFeatures()))return res.status(403).json({ok:false,error:'Функция отключена создателем.',code:'FEATURE_DISABLED'});next()},express.json({limit:'8mb',inflate:false}),(req,res)=>{const action=req.gameSocket.data.bulkHandlers?.get(req.params.action);if(!action)return res.status(400).json({ok:false,error:'Действие недоступно.'});action(req.body,value=>res.json(value))});
+  app.post('/api/bulk/:action',httpSocket,async(req,res,next)=>{
+    const socket=req.gameSocket,jar=cookies(req),surface=req.headers['x-cq-surface'];
+    const identity=actor(socket),player=publishedGame.findPlayer(socket.data.playerHash);
+    const teacherCookie=surface==='teacher'&&validTeacherToken(jar[cookieName('teacher')])&&equal(jar[cookieName('teacher')],socket.data.teacherToken);
+    const playerCookie=typeof jar[cookieName('player')]==='string'&&hashToken(jar[cookieName('player')])===socket.data.playerHash;
+    // Account login creates a socket session without a separate room cookie.
+    // Revalidate the HTTP account against the account that opened this socket.
+    const accountTeacher=!teacherCookie&&!playerCookie&&surface==='teacher'&&socket.handshake.auth?.surface==='teacher'&&socket.data.portalTeacher===true&&identity.role==='teacher'&&!!await options.authorizeTeacher?.(req,socket.request);
+    const permitted=teacherCookie||playerCookie||accountTeacher;
+    const authorized=['teacher','creator'].includes(identity.role)||identity.role==='delegate'&&publishedGame.adminCan(player?.pid,req.params.action);
+    if(!bulkActions.has(req.params.action)||!permitted||!authorized)return res.status(403).json({ok:false,error:'Нужна действующая административная сессия.',code:'FORBIDDEN'});
+    if(identity.role!=='creator'&&roomFeatureDenied(req.params.action,roomFeatures()))return res.status(403).json({ok:false,error:'Функция отключена создателем.',code:'FEATURE_DISABLED'});
+    next();
+  },express.json({limit:'8mb',inflate:false}),(req,res)=>{const action=req.gameSocket.data.bulkHandlers?.get(req.params.action);if(!action)return res.status(400).json({ok:false,error:'Действие недоступно.'});action(req.body,value=>res.json(value))});
   app.use((error,_req,res,next)=>{if(res.headersSent)return next(error);if(error.type==='entity.too.large')return res.status(413).json({ok:false,error:'Файл или запрос слишком большой.',code:'PAYLOAD_TOO_LARGE'});if(error.type==='encoding.unsupported')return res.status(415).json({ok:false,error:'Сжатые тела запросов не поддерживаются.',code:'UNSUPPORTED_ENCODING'});if(error.type==='entity.parse.failed')return res.status(400).json({ok:false,error:'Некорректный JSON запроса.',code:'INVALID_ACTION'});console.error('HTTP запрос не выполнен:',error.name);res.status(500).json({ok:false,error:'Сервер не обработал запрос.',code:'SERVER_ERROR'})});
   app.use((_req,res)=>res.status(404).type('text').send('Страница не найдена.'));
   const online = () => new Set([...io.sockets.sockets.values()].map(s => s.data.playerHash && publishedGame.findPlayer(s.data.playerHash)?.pid).filter(Boolean));
