@@ -24,7 +24,7 @@ export function authoringAPI({platform,runtime}){
  router.post('/templates/:id/restore',async(req,res)=>{const result=await platform.restoreTemplate(req.platformCreator.id,req.params.id,req.body.version);await runtime.refreshTemplate(result.id);res.json(result);});
  router.post('/accounts/stats',async(req,res)=>res.json(await platform.setStats(req.platformCreator.id,req.body.accountId,req.body.totals,req.body.statsRevision,req.body.reason)));
  router.post('/rooms/create',async(req,res)=>{
-  const id=req.platformCreator.id,raw=req.body,template=raw.templateId?await platform.template(id,raw.templateId):validateTemplate({name:raw.name,subject:raw.subject,type:raw.type||'strategy',config:raw.config||{},questions:[]});
+  const id=req.platformCreator.id,raw=req.body,template=raw.templateId?await platform.template(id,raw.templateId):validateTemplate({name:raw.name,subject:raw.subject,type:raw.type||'strategy',config:raw.config||{},questions:raw.questions??[],canvasData:raw.canvasData,features:raw.features,design:raw.design,sources:{css:'',js:''}});
   const room=await platform.createRoom(id,{name:raw.name||template.name,subject:template.subject,mode:template.config.mode});
   try{await platform.setRoomConfiguration(id,room.id,template);if(raw.templateId)await platform.attachTemplate(id,room.id,raw.templateId);const r=await runtime.get(room.id);await r.server.platformControl(id,'configure',{...template,name:room.name,replaceQuestions:true});const invitation=await platform.roomInvite(id,room.id);res.status(201).json({room,invitation});}catch(e){await runtime.stop(room.id).catch(()=>{});await platform.closeRoom(id,room.id);throw e;}
  });
