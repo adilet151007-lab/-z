@@ -10,6 +10,8 @@
   <title>ERADIS · Игровое лобби</title>
   <link rel="icon" type="image/svg+xml" href="mark.svg">
   <link rel="stylesheet" href="lobby.css">
+  <link rel="stylesheet" href="lobby-refresh.css">
+  <script type="module" src="lobby-atlas.js"></script>
   <link rel="stylesheet" href="lumi.css">
   <script type="module" src="lumi.js"></script>
   <script type="module" src="lobby.js"></script>
@@ -33,56 +35,59 @@
           <svg class="moon-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 14.4A9 9 0 0 1 9.6 3.3a9 9 0 1 0 11.1 11.1Z"/></svg>
         </button>
         <div class="language-switch" role="group" data-i18n-aria="language" aria-label="Язык интерфейса"><button type="button" data-language="ru" aria-pressed="true">RU</button><button type="button" data-language="kk" aria-pressed="false">ҚАЗ</button></div>
-        <a class="teacher-link" data-teacher href="https://culture-quest-z.onrender.com/teacher.html"><span data-i18n="teacherNav">Преподавателю</span><span aria-hidden="true">↗</span></a>
+        <a class="teacher-link" data-teacher href="https://culture-quest-z.onrender.com/teacher.html"><span data-i18n="teacherNav">Преподавателю</span><svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></a>
       </div>
     </header>
 
     <main>
-      <section id="platform-section" class="platform-section" hidden aria-label="Игры и профиль"></section>
+
       <section class="hero" aria-labelledby="hero-title">
         <div class="hero-copy">
           <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span><span data-i18n="eyebrow">ERADIS / ОЙНА. ТАНЫ. ӨС.</span><span class="beta-badge" data-i18n="beta">Бета</span></p>
           <h1 id="hero-title"><span data-i18n="heroStart">Каждый ответ</span><em data-i18n="heroEnd">открывает мир.</em></h1>
           <p class="hero-intro" data-i18n="intro">Выбирайте игру, объединяйтесь в команды и превращайте знания в культурный капитал.</p>
           <a class="button button-gold browse-button" href="#games"><span data-i18n="browse">Выбрать игру</span><span aria-hidden="true">↓</span></a>
-          <div class="hero-features"><span><i aria-hidden="true">◈</i><span data-i18n="format">Команды и Solo</span></span><span><i aria-hidden="true">▯</i><span data-i18n="device">Играйте с телефона</span></span></div>
+          <div class="hero-features"><span><i aria-hidden="true">◈</i><span data-i18n="format">Команды и Solo</span></span><span><svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 19h4"/></svg><span data-i18n="device">Играйте с телефона</span></span></div>
         </div>
 
-        <section class="invitation-panel" aria-labelledby="invite-title">
+
+<figure class="atlas" aria-labelledby="atlas-caption"><div class="atlas-topline"><span data-copy="atlasKicker">ТВОЙ МИР НАЧИНАЕТСЯ ЗДЕСЬ</span><span>KZ / 01</span></div><div class="atlas-orbit orbit-one" aria-hidden="true"></div><div class="atlas-orbit orbit-two" aria-hidden="true"></div><div class="atlas-stage" id="atlas-stage"><img class="atlas-fallback" src="lobby-atlas.svg" alt="" width="800" height="600"><canvas id="lobby-scene" aria-hidden="true"></canvas></div><div class="atlas-word" aria-hidden="true">ҚАЗАҚСТАН</div><figcaption class="atlas-caption" id="atlas-caption"><span class="city-symbol" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 27h22M13 25l2-13h2l2 13M11 25h10M16 2v2"/><circle cx="16" cy="8" r="4"/><path d="M7 25V15h3v10m12 0V18h3v7"/></svg></span><span><small data-copy="atlasPreview">ОТКРОЙ КАЗАХСТАН</small><strong id="city-title">Астана</strong><span id="city-description">Город больших идей</span></span><button class="motion-button" id="motion-toggle" type="button" aria-pressed="false" aria-label="Приостановить анимацию" hidden><span aria-hidden="true">Ⅱ</span></button></figcaption><div class="city-switch" role="group" aria-label="Город на карте" data-label="cityGroup"><button type="button" data-city="astana" aria-pressed="true" data-copy="astana">Астана</button><button type="button" data-city="almaty" aria-pressed="false" data-copy="almaty">Алматы</button><button type="button" data-city="turkistan" aria-pressed="false" data-copy="turkistan">Туркестан</button></div></figure>
+      </section>
+<div class="invitation-strip">        <section class="invitation-panel" aria-labelledby="invite-title">
           <div class="ticket-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 8h22v6a3 3 0 0 0 0 6v5H5v-5a3 3 0 0 0 0-6Z"/><path d="M21 9v3m0 3v3m0 3v3M10 12h6m-6 5h4"/></svg><span>01</span></div>
           <p class="eyebrow" data-i18n="inviteEyebrow">ВАШ ПРОПУСК В ИГРУ</p>
           <h2 id="invite-title" data-i18n="inviteTitle">Есть приглашение?</h2>
           <p class="panel-description" data-i18n="inviteDescription">Вставьте ссылку, которую прислал преподаватель. Аккаунт для участия не нужен.</p>
           <form id="invitation-form" novalidate autocomplete="off">
             <label class="field-label" for="invitation-input" data-i18n="inviteLabel">Ссылка-приглашение</label>
-            <div class="invitation-input-wrap"><span aria-hidden="true">↗</span><input id="invitation-input" type="text" inputmode="url" maxlength="3200" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Вставьте ссылку занятия" data-i18n-placeholder="invitePlaceholder" aria-describedby="invitation-message"></div>
-            <button class="button button-mint" type="submit"><span data-i18n="join">Присоединиться</span><span aria-hidden="true">↗</span></button>
+            <div class="invitation-input-wrap"><svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg><input id="invitation-input" type="text" inputmode="url" maxlength="3200" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Вставьте ссылку занятия" data-i18n-placeholder="invitePlaceholder" aria-describedby="invitation-message"></div>
+            <button class="button button-mint" type="submit"><span data-i18n="join">Присоединиться</span><svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></button>
             <p id="invitation-message" class="form-message" role="status" aria-live="polite"></p>
           </form>
           <p class="invitation-note"><span aria-hidden="true">⌁</span><span data-i18n="inviteNote">Имя и команду вы выберете на странице игры.</span></p>
-        </section>
-      </section>
+        </section></div>
 
+
+      <section id="platform-section" class="platform-section" hidden aria-label="Игры и профиль"></section>
       <section class="catalog-section" id="games" aria-labelledby="catalog-title">
         <div class="section-heading"><div><p class="eyebrow" data-i18n="catalogEyebrow">ВАШЕ СЛЕДУЮЩЕЕ ПРИКЛЮЧЕНИЕ</p><h2 id="catalog-title"><span data-i18n="catalogTitle">Во что сыграем?</span><span id="game-count" class="count-badge" aria-live="polite">1 игра</span></h2></div><div class="search-wrap"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><label for="game-search" class="sr-only" data-i18n="searchLabel">Поиск игры</label><input id="game-search" type="search" placeholder="Найти игру или предмет" data-i18n-placeholder="searchPlaceholder" autocomplete="off"></div></div>
         <div class="catalog-layout">
           <div class="catalog-main">
             <article class="game-card" id="game-card">
-              <div class="game-cover"><div class="cover-topline"><span data-i18n="subject">КУЛЬТУРОЛОГИЯ</span><span class="cover-mode">3D / QUIZ</span></div><img src="ornament.svg" alt="" width="420" height="260" loading="lazy" decoding="async"><p class="cover-motto">БІЛІМ<span>МӘДЕНИЕТ</span>БОЛАШАҚ</p><div class="cover-bottomline"><span>МӘДЕНИЕТТАНУ</span><span aria-hidden="true">↗</span></div></div>
-              <div class="game-details"><span class="access-badge"><i aria-hidden="true"></i><span data-i18n="inviteBadge">Вход по приглашению</span></span><h3 data-i18n="gameTitle">Мәдениеттану 3D</h3><p data-i18n="gameDescription">От первого ответа до собственного города. Исследуйте культуру Казахстана и развивайте свой регион вместе с командой.</p><div class="game-tags"><span data-i18n="teamTag">Командная стратегия</span><span data-i18n="soloTag">Личный рейтинг</span></div><div class="game-bottom"><p data-i18n="gameAccess">Новым участникам нужна ссылка занятия от преподавателя.</p><a class="button button-outline" id="student-link" href="https://culture-quest-z.onrender.com/student.html"><span data-i18n="enterGame">Открыть игру</span><span aria-hidden="true">↗</span></a></div></div>
+              <div class="game-illustration" aria-hidden="true"><div class="game-gridlines"></div><span class="game-art-label">МӘДЕНИЕТТАНУ</span><div class="city-art"><span class="city-platform"></span><span class="tower tower-a"></span><span class="tower tower-b"></span><span class="tower tower-c"></span><span class="tower tower-d"></span><span class="city-monument"><i></i></span><span class="city-tree tree-a"></span><span class="city-tree tree-b"></span><span class="city-tree tree-c"></span></div><span class="game-art-caption">ДАЛАДАН — ҚАЛАҒА</span><span class="game-art-star">✦</span></div><div class="game-details"><span class="access-badge"><i aria-hidden="true"></i><span data-i18n="inviteBadge">Вход по приглашению</span></span><h3 data-i18n="gameTitle">Мәдениеттану 3D</h3><p data-i18n="gameDescription">От первого ответа до собственного города. Исследуйте культуру Казахстана и развивайте свой регион вместе с командой.</p><div class="game-tags"><span data-i18n="teamTag">Командная стратегия</span><span data-i18n="soloTag">Личный рейтинг</span></div><div class="game-bottom"><p data-i18n="gameAccess">Новым участникам нужна ссылка занятия от преподавателя.</p><a class="button button-outline" id="student-link" href="https://culture-quest-z.onrender.com/student.html"><span data-i18n="enterGame">Открыть игру</span><svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></a></div></div>
             </article>
             <div class="empty-state" id="empty-state" hidden><span aria-hidden="true">⌕</span><h3 data-i18n="emptyTitle">Такой игры пока нет</h3><p data-i18n="emptyDescription">Попробуйте «Мәдениеттану», «культурология» или «Solo».</p><button type="button" class="text-button" id="clear-search" data-i18n="clearSearch">Сбросить поиск</button></div>
           </div>
           <aside class="side-column">
             <section class="steps-panel"><p class="side-kicker" aria-hidden="true">START HERE ↘</p><h3 data-i18n="stepsTitle">До игры — три шага</h3><ol class="steps"><li><span class="step-number">01</span><div><strong data-i18n="stepOneTitle">Получите приглашение</strong><p data-i18n="stepOne">Преподаватель открывает вход и отправляет ссылку занятия.</p></div></li><li><span class="step-number">02</span><div><strong data-i18n="stepTwoTitle">Представьтесь</strong><p data-i18n="stepTwo">Введите имя, подтвердите согласие и выберите команду, если игра командная.</p></div></li><li><span class="step-number">03</span><div><strong data-i18n="stepThreeTitle">Играйте вместе</strong><p data-i18n="stepThree">Отвечайте на вопросы, развивайте регион и собирайте достижения.</p></div></li></ol></section>
-            <section class="saved-invite" id="saved-invite" hidden><span aria-hidden="true">↗</span><div><h3 data-i18n="savedTitle">Приглашение подготовлено</h3><p data-i18n="savedDescription">Можно присоединиться или выбрать другую ссылку.</p><button class="text-button" id="remove-invitation" type="button" data-i18n="removeInvite">Убрать приглашение</button></div></section>
-            <section class="teacher-panel"><h3 data-i18n="teacherTitle">Ведёте занятие?</h3><p data-i18n="teacherDescription">В пульте можно подготовить вопросы, настроить формат и пригласить группу.</p><a data-teacher href="https://culture-quest-z.onrender.com/teacher.html"><span data-i18n="teacherButton">Открыть пульт</span><span aria-hidden="true">↗</span></a></section>
+            <section class="saved-invite" id="saved-invite" hidden><svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg><div><h3 data-i18n="savedTitle">Приглашение подготовлено</h3><p data-i18n="savedDescription">Можно присоединиться или выбрать другую ссылку.</p><button class="text-button" id="remove-invitation" type="button" data-i18n="removeInvite">Убрать приглашение</button></div></section>
+            <section class="teacher-panel"><h3 data-i18n="teacherTitle">Ведёте занятие?</h3><p data-i18n="teacherDescription">В пульте можно подготовить вопросы, настроить формат и пригласить группу.</p><a data-teacher href="https://culture-quest-z.onrender.com/teacher.html"><span data-i18n="teacherButton">Открыть пульт</span><svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18 18 6M6 6h12v12"/></svg></a></section>
           </aside>
         </div>
       </section>
     </main>
 
-    <footer class="site-footer"><div><img class="footer-symbol" src="mark.svg" alt="" width="28" height="28"><strong>ERADIS<span>.</span></strong><span class="footer-line" data-i18n="footerLine">Знания объединяют.</span></div><div><span data-i18n="authors">Создано Адилетом и Ернуром</span><a data-privacy href="https://culture-quest-z.onrender.com/privacy.html" data-i18n="privacy">Конфиденциальность</a></div></footer>
+    <footer class="site-footer"><div><img class="footer-symbol" src="mark.svg" alt="" width="28" height="28"><strong>ERADIS<span>.</span></strong><span class="footer-line" data-i18n="footerLine">Знания объединяют.</span></div><div><span data-i18n="authors">Создано Адилетом и Ернуром</span><a data-privacy href="https://culture-quest-z.onrender.com/privacy.html" data-i18n="privacy">Конфиденциальность</a></div><a class="atlas-license" href="lobby-manrope-OFL.txt">Manrope · OFL 1.1</a><a class="atlas-license" href="lobby-sources.txt">Карта и 3D · источники</a></footer>
   </div>
   <dialog id="help-dialog" aria-labelledby="help-title"><div class="help-content"><span class="help-icon" aria-hidden="true">↗</span><h2 id="help-title" data-i18n="helpTitle">Как попасть в игру</h2><p data-i18n="helpText">Ссылку занятия создаёт преподаватель в пульте: «Вход и защита занятия» → «Открыть вход» → «Копировать ссылку».</p><p data-i18n="helpReturn">Если вы уже участвуете, нажмите «Открыть игру»: действующая сессия восстановится в том же браузере.</p><p data-i18n="helpAccess">Открытая ссылка ведёт на страницу участника. Регистрацию, наличие мест и доступ проверяет сервер игры.</p><button type="button" class="button button-mint" id="help-close" data-i18n="close">Понятно</button></div></dialog>
   <dialog id="account-dialog" aria-labelledby="account-title"><div class="help-content account-content"><span class="help-icon" aria-hidden="true">◈</span><h2 id="account-title">Ваш профиль</h2><p class="account-name" id="account-name"></p><p id="account-email"></p><p id="account-status" role="status" aria-live="polite"></p><a id="google-sign-in" class="button google-button" href="/auth/google" hidden>Войти через Google</a><button id="account-logout" type="button" class="button button-outline" hidden>Выйти из аккаунта</button><p id="account-note"></p><a class="account-privacy" id="account-privacy" href="lobby-privacy.html">Как используются данные аккаунта</a><button type="button" class="button button-mint" id="account-close">Закрыть</button></div></dialog>

@@ -7,6 +7,8 @@ import {clientAddress, RequestLimiter} from '../security-controls.js';
 
 const publicDirectory = new URL('./public/', import.meta.url);
 const assets = new Set(['room-presets.js','mobile-room-builder.js','mobile-room-builder.css','studio-schema.js', 'studio-flow.js', 'studio-model.js', 'studio-math.js', 'studio-canvas.js', 'studio-widgets.js', 'studio-editor.js', 'studio-i18n.js', 'studio-audio.js', 'studio-layout.js', 'studio-room.css', 'syllabus-files.js', 'region-geography.js', 'game-config.js'].concat(['studio.css','join-qr.js','qr-generator.js','lobby.js','lobby.css','lumi.css','lumi.js','lobby-core.js','lobby-copy.js','lobby-account.js','lobby-platform.js','lobby-creators.js','lobby-creator-tools.js','lobby-designer.js','room-layout.js','mark.svg','ornament.svg','mobile-preview.html','lobby-privacy.html']));
+for(const file of ['lobby-refresh.css', 'lobby-atlas.js', 'lobby-atlas-scene.js', 'lobby-atlas.svg', 'lobby-three.js', 'lobby-manrope-cyrillic-wght-normal.woff2', 'lobby-manrope-OFL.txt', 'lobby-manrope-latin-wght-normal.woff2', 'lobby-manrope-cyrillic-ext-wght-normal.woff2'])assets.add(file);
+assets.add('lobby-sources.txt');
 const hash = value => createHash('sha256').update(String(value)).digest();
 const equal = (left, right) => timingSafeEqual(hash(left), hash(right));
 const random = () => randomBytes(32).toString('base64url');
