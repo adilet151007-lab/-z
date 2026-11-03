@@ -12,7 +12,7 @@ npm run setup
 npm start
 ```
 
-Открыть `http://localhost:3000/student.html` и отдельно `http://localhost:3000/teacher.html`. Локальные `.env` и `data/` не публикуются в Git. Тесты: `npm test`.
+Главное лобби: `http://localhost:3000/`. Прямой вход участника: `http://localhost:3000/student.html`, пульт преподавателя: `http://localhost:3000/teacher.html`. Локальные `.env` и `data/` не публикуются в Git. Тесты: `npm test`.
 
 На Render используется один Web Service: build `npm ci --omit=dev`, start `npm start`, branch `main`. Сервер слушает `0.0.0.0` и порт `PORT`. Настройки Environment:
 
