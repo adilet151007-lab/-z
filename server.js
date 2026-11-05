@@ -41,6 +41,12 @@ export async function createGameServer(options = {}) {
   const revokeCreatorSessionIds=options.revokeCreatorSessionIds??(process.env.REVOKE_CREATOR_SESSION_IDS||'').split(',').map(value=>value.trim()).filter(Boolean);
   if(!Array.isArray(revokeCreatorSessionIds)||revokeCreatorSessionIds.length>2||!revokeCreatorSessionIds.every(id=>typeof id==='string'&&/^[\w-]{1,80}$/.test(id)))throw new Error('REVOKE_CREATOR_SESSION_IDS принимает не больше двух идентификаторов персональных сессий.');
   const store = options.store || await createStore();
+  await store.initLocalAdminLifetime?.();
+  let localAdminLifetimeRedeemed = (await store.localAdminRedeemed?.()) !== false;
+  async function requireUnusedLocalAdminAccess() {
+    if (!localAdminLifetimeRedeemed) localAdminLifetimeRedeemed = await store.localAdminRedeemed();
+    if (localAdminLifetimeRedeemed) throw new GameError('Одноразовый код Универсал уже использован','LOCAL_CODE_USED');
+  }
   const saved = await store.load();
   let game = new GameLogic(saved);
   const sessionNow=options.sessionNow||Date.now;
@@ -59,9 +65,13 @@ export async function createGameServer(options = {}) {
   if(revokedCreators.length){game.state.exitRequests=(game.state.exitRequests||[]).filter(request=>!revokedCreators.some(session=>session.pid===request.pid));game.log(`Оператор инфраструктуры завершил персональные сессии: ${revokedCreators.length}.`,'admin')}
   if (!saved||game.state.revision!==saved.revision) await store.save(game.state);
   let publishedGame = game.snapshotCopy();
-  async function persistGame(){
+  async function persistGame(redeemLocalAdmin = false){
     game.stageRoundPublication(publishedGame.state.round?.id);
-    await store.save(game.state);
+    if (redeemLocalAdmin) {
+      const redeemed = await store.redeemLocalAdmin(game.state);
+      localAdminLifetimeRedeemed = true;
+      if (!redeemed) await requireUnusedLocalAdminAccess();
+    } else await store.save(game.state);
     const activated=game.activateRoundPublication();publishedGame=game.snapshotCopy();
     if(activated)broadcast(true);
   }
@@ -148,7 +158,7 @@ export async function createGameServer(options = {}) {
   function admissionDetails(){const entry=game.state.accessControl.admission;return {required:requireAdmission,expiresAt:entry.expiresAt,open:entry.open&&entry.expiresAt>Date.now(),token:entry.expiresAt>Date.now()?signed({role:'admission',epoch:entry.epoch,expires:entry.expiresAt}):null}}
   function requireLessonAccess(){const entry=publishedGame.state.accessControl.admission;if(!requireAdmission)return;if(!entry.open||entry.expiresAt<=Date.now())throw new GameError('Регистрация закрыта. Обратитесь к преподавателю.','ADMISSION_CLOSED')}
   const effectiveLocalCodeHash=()=>Object.hasOwn(publishedGame.state.accessControl,'localKeyOverride')?publishedGame.state.accessControl.localKeyOverride:localAdminCodeHash;
-  function privilegedEntry(name){const code=typeof name==='string'?name.trim().split(/\s/,1)[0]:'';return Object.keys(CREATOR_NAMES).some(id=>publishedGame.state.accessControl.keyOverrides[id]?equal(hashToken(code),publishedGame.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id]))||!!effectiveLocalCodeHash()&&equal(hashToken(code),effectiveLocalCodeHash())||code.startsWith('CQI-')}
+  function privilegedEntry(name){const code=typeof name==='string'?name.trim().split(/\s/,1)[0]:'';return Object.keys(CREATOR_NAMES).some(id=>publishedGame.state.accessControl.keyOverrides[id]?equal(hashToken(code),publishedGame.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id]))||!!effectiveLocalCodeHash()&&equal(hashToken(code),effectiveLocalCodeHash())||code.startsWith('CQL-')||code.startsWith('CQI-')}
   function checkDevice(socket){if(!requireAdmission||!cookieSessions)return;if(!socket.data.deviceHash)throw new GameError('Откройте страницу входа и разрешите необходимые cookie.','DEVICE_REQUIRED');const devices=publishedGame.state.accessControl.playerDevices;if(publishedGame.state.regions.some(team=>team.members.some(member=>!member.creatorId&&devices[member.pid]===socket.data.deviceHash)))throw new GameError('В этом браузере уже есть участник. Вернитесь в открытую сессию или выйдите из неё.','DEVICE_OCCUPIED')}
   const validTeacherToken = token => {
     if (typeof token !== "string" || token.length > 2000) return false;
@@ -277,7 +287,10 @@ export async function createGameServer(options = {}) {
     }
     return changed;
   }
-  function stateFor(socket,players,frame){const view=publishedGame.view(actor(socket),players,frame);view.admission=admissionStatus();if(view.viewer.canGrantAdmin)view.sessionControl.localAccessEnabled=!!effectiveLocalCodeHash();return view}
+  function stateFor(socket,players,frame){const view=publishedGame.view(actor(socket),players,frame);view.admission=admissionStatus();if(view.viewer.canGrantAdmin){
+    view.sessionControl.localAccessEnabled=!localAdminLifetimeRedeemed&&!!effectiveLocalCodeHash();
+    view.sessionControl.localAdminLifetimeRedeemed=localAdminLifetimeRedeemed;
+  }return view}
   const sendState = socket => {const players=online();socket.emit("state", stateFor(socket,players));sendChatScope(socket,false,players)};
   function publishChat(room,messageId){
     const players=online(),topology=chatTopology(players);
@@ -391,7 +404,11 @@ export async function createGameServer(options = {}) {
               if((!current||current.pid!==member.pid||current.creatorId!==member.creatorId)&&!voluntary)throw new GameError('Персональную сессию можно завершить только по согласию её владельца. Используйте запрос на выход.','PROTECTED_SESSION');
             }
             if (game.state.revision !== before.revision) {
-              if(!fastInput){await persistGame();}
+              if(!fastInput){
+                const localJoin = name === 'joinTeam' && result?.player &&
+                  game.adminGrantFor(result.player.pid)?.tier === 'local';
+                await persistGame(localJoin);
+              }
               else if(!inputBatch){const rollback=game.snapshotCopy().state;rollback.round=before.round;rollback.revision=before.revision;inputBatch={before:rollback,replies:[]};}
             }
           } catch (error) {
@@ -421,13 +438,16 @@ export async function createGameServer(options = {}) {
       return { teacherToken: signed({ role: 'teacher',epoch:game.state.accessControl.teacherEpoch||0,sessionId:randomUUID(),expires:Date.now()+86400000,passwordVersion:createHmac('sha256',secret).update(password).digest('hex') }) };
     }, result => { socket.data.teacherToken = result.teacherToken; });
     handle('teacherLogout','teacher',()=>{if(socket.data.teacherToken){const list=(game.state.accessControl.revokedTeacherTokens||[]).filter(item=>item.expiresAt>Date.now());if(list.length>=1000){game.state.accessControl.teacherEpoch=(game.state.accessControl.teacherEpoch||0)+1;game.state.accessControl.revokedTeacherTokens=[]}else game.state.accessControl.revokedTeacherTokens=[...list,{hash:hashToken(socket.data.teacherToken),expiresAt:Date.now()+86400000}];delete game.state.accessControl.activity.teachers[hashToken(socket.data.teacherToken)];game.touch()}return {}},()=>{if(socket.data.teacherToken)pendingTeacherActivity.delete(hashToken(socket.data.teacherToken));socket.data.teacherToken=null});
-    handle("joinTeam", "guest", data => {
-      if (socket.data.playerHash && game.findPlayer(socket.data.playerHash)) throw new GameError("Вы уже состоите в команде.");
-      if(requireConsent&&(data.privacyConsent?.accepted!==true||data.privacyConsent?.version!==PRIVACY_VERSION))throw new GameError('Прочитайте политику и подтвердите согласие перед входом.','CONSENT_REQUIRED');
+    handle("joinTeam", "guest", async data => {
       const name=typeof data.name==='string'?data.name.trim():'';
       const code=name.split(/\s/,1)[0],displayName=name.slice(code.length).trim(),creatorId=Object.keys(CREATOR_NAMES).find(id=>game.state.accessControl.keyOverrides[id]?equal(hashToken(code),game.state.accessControl.keyOverrides[id]):configured.includes(id)&&equal(code,creatorCodes[id]));
+      const localHash = effectiveLocalCodeHash();
+      const matchesLocalCode = !!localHash && equal(hashToken(code), localHash);
+      if (!creatorId && (code.startsWith('CQL-') || matchesLocalCode)) await requireUnusedLocalAdminAccess();
+      if (socket.data.playerHash && game.findPlayer(socket.data.playerHash)) throw new GameError("Вы уже состоите в команде.");
+      if(requireConsent&&(data.privacyConsent?.accepted!==true||data.privacyConsent?.version!==PRIVACY_VERSION))throw new GameError('Прочитайте политику и подтвердите согласие перед входом.','CONSENT_REQUIRED');
       if(creatorId){const result=game.joinCreator(creatorId,data.regionId,displayName||undefined);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;}
-      if(effectiveLocalCodeHash()&&equal(hashToken(code),effectiveLocalCodeHash())){checkDevice(socket);const result=game.joinLocalAdmin(data.regionId,displayName);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;}
+      if(matchesLocalCode){checkDevice(socket);const result=game.joinLocalAdmin(data.regionId,displayName);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result;}
       if(code.startsWith('CQL-'))throw new GameError('Некорректный или отозванный код локального администратора.','BAD_LOCAL_CODE');
       if(code.startsWith('CQI-')){const result=game.redeemAdminInvite(code,data.regionId,displayName);if(requireConsent)game.member(result.player.regionId,result.player.pid).privacyConsent={version:PRIVACY_VERSION,acceptedAt:Date.now()};return result}
       if(data.regionId===CREATOR_TEAM_ID||configured.some(id=>equal(code,creatorCodes[id]))||/(?:ROOT_ACCESS|DEV_CONSOLE)|^CQO-/i.test(name)){
@@ -502,7 +522,7 @@ export async function createGameServer(options = {}) {
     handle('createAdminInvite','creator',data=>{if(game.creatorFor(socket.data.playerHash)?.creatorId!=='adilet')throw new GameError('Приглашения создаёт главный администратор.','PRO_ONLY');return game.createAdminInvite(data.permissions,data.minutes,data.effectDuration)});
     handle('revokeAdminInvite','creator',data=>{if(game.creatorFor(socket.data.playerHash)?.creatorId!=='adilet')throw new GameError('Приглашения отзывает главный администратор.','PRO_ONLY');return game.revokeAdminInvite(data.id)});
     handle('rotateAccessKey','creator',(_data,p)=>game.rotateAccessKey(p.creatorId));
-    handle('rotateLocalAccessKey','creator',()=>{if(game.creatorFor(socket.data.playerHash)?.creatorId!=='adilet')throw new GameError('Только главный администратор обновляет общий код.','PRO_ONLY');return game.rotateLocalAccessKey()});
+    handle('rotateLocalAccessKey','creator',async()=>{if(game.creatorFor(socket.data.playerHash)?.creatorId!=='adilet')throw new GameError('Только главный администратор обновляет общий код.','PRO_ONLY');await requireUnusedLocalAdminAccess();return game.rotateLocalAccessKey()});
     handle('getAdmissionLink','teacher',()=>admissionDetails());
     handle('setAdmission','teacher',data=>{if(typeof data.open!=='boolean'||data.rotate!==undefined&&typeof data.rotate!=='boolean')throw new GameError('Некорректная настройка входа.');const entry=game.state.accessControl.admission;if(data.rotate||data.open&&entry.expiresAt<=Date.now()){entry.epoch=randomUUID();entry.expiresAt=Date.now()+12*3600000}entry.open=data.open;game.touch();return admissionDetails()});
     handle('setPublicDemo','teacher',data=>game.setPublicDemo(data.enabled));

@@ -2,7 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
 import {gzipSync} from 'node:zlib';
-import {readFile} from 'node:fs/promises';
+import {readFile,mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {FileStore} from '../storage.js';
 import {io} from 'socket.io-client';
 import {createGameServer} from '../server.js';
 import {hashToken} from '../game-logic.js';
@@ -67,13 +70,18 @@ test('защита: один браузер не занимает два мес�
  await f.bind(student.socket,'player',student.playerToken);student.socket.disconnect();const resumed=await f.connect(jar);assert.equal(resumed.latest.viewer.player.pid,student.player.pid);
 });
 
-test('защита: Универсал допускает несколько людей, но отзыв закрывает старый код и не повышает чужие права',async t=>{
- const f=await fixture(t),owner=await f.owner(),one=await f.join(localCode+' Помощник один',null,'mangystau'),two=await f.join(localCode+' Помощник два',null,'turkistan');
- assert.equal(f.server.game.adminGrantFor(one.player.pid).tier,'local');assert.equal(f.server.game.adminGrantFor(two.player.pid).tier,'local');
- assert.equal((await command(one.socket,'grantAdmin',{pid:one.player.pid,permissions:{questions:true}})).code,'FORBIDDEN');assert.equal((await command(one.socket,'freeSlot',{regionId:'jetisu',pid:owner.player.pid})).code,'PROTECTED_SESSION');
- assert.equal((await command(owner.socket,'revokeAdmin',{pid:one.player.pid})).localCodeRevoked,true);await command(one.socket,'leaveTeam');const denied=await command(one.socket,'joinTeam',{name:localCode+' Помощник один',regionId:'mangystau'});assert.equal(denied.ok,false);
- assert.equal((await command(two.socket,'adjustPoints',{regionId:'mangystau',delta:25})).ok,true);
- const rotated=await command(owner.socket,'rotateLocalAccessKey');assert.match(rotated.code,/^CQL-/);const newUser=await f.join(rotated.code+' Новый помощник',null,'mangystau');assert.equal(f.server.game.adminGrantFor(newUser.player.pid).tier,'local');
+test('защита: Универсал одноразовый и сохраняет ограничения полномочий',async t=>{
+ const dir=await mkdtemp(path.join(tmpdir(),'eradiscql-security-'));
+ t.after(()=>rm(dir,{recursive:true,force:true}));
+ const f=await fixture(t,{store:new FileStore(path.join(dir,'game.json'))});
+ const owner=await f.owner(),one=await f.join(localCode+' Помощник',null,'mangystau');
+ assert.equal(f.server.game.adminGrantFor(one.player.pid).tier,'local');
+ assert.equal((await command(one.socket,'grantAdmin',{pid:one.player.pid,permissions:{questions:true}})).code,'FORBIDDEN');
+ assert.equal((await command(one.socket,'freeSlot',{regionId:'jetisu',pid:owner.player.pid})).code,'PROTECTED_SESSION');
+ assert.equal((await command(owner.socket,'revokeAdmin',{pid:one.player.pid})).localCodeRevoked,true);
+ await command(one.socket,'leaveTeam');
+ assert.equal((await command(one.socket,'joinTeam',{name:localCode+' Помощник',regionId:'mangystau'})).code,'LOCAL_CODE_USED');
+ assert.equal((await command(owner.socket,'rotateLocalAccessKey')).code,'LOCAL_CODE_USED');
 });
 
 test('защита: публичные ответы исключены из настоящей игры, импорт с новым ID не снимает пометку демо',async t=>{
