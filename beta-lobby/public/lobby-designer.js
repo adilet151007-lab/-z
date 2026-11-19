@@ -10,9 +10,8 @@ export function createRoomDesigner(initial={},options={}) {
  let editor,value=initial,disposed=false;
  function mount(simple,switched=false){
   choice.value=simple?'simple':'studio';
-  editor=(simple?createMobileRoomDesigner:createStudioEditor)(value,{...options,...(switched?{restoreDraft:false}:{})});
   bar.append(label);
-  editor.element.querySelector?.('.designer-toolbar')?.append(label);
+  editor=(simple?createMobileRoomDesigner:createStudioEditor)(value,{...options,modeControl:label,...(switched?{restoreDraft:false}:{})});
   body.replaceChildren(editor.element);root.dataset.editorMode=choice.value;
  }
  mount(options.editorMode?options.editorMode==='simple':useSimpleRoomBuilder());
