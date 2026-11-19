@@ -1,6 +1,33 @@
 import {createStudioEditor} from './studio-editor.js';
 import {createMobileRoomDesigner,useSimpleRoomBuilder} from './mobile-room-builder.js';
-export const createRoomDesigner=(initial={},options={})=>useSimpleRoomBuilder()?createMobileRoomDesigner(initial,options):createStudioEditor(initial,options);
+// One document, two editors. Switching is explicit and keeps the current data.
+export function createRoomDesigner(initial={},options={}) {
+ const root=document.createElement('section'),bar=document.createElement('div'),label=document.createElement('label'),choice=document.createElement('select'),status=document.createElement('p'),body=document.createElement('div');
+ root.className='room-designer designer-mode-shell';bar.className='platform-actions';
+ label.textContent='Редактор ';choice.setAttribute('aria-label','Режим редактора');
+ for(const [value,title] of [['studio','Studio Max · 2D-холст (как Figma)'],['simple','Простой · шаги без перемещения']]){const option=document.createElement('option');option.value=value;option.textContent=title;choice.append(option);}
+ label.append(choice);bar.append(label);status.setAttribute('role','status');root.append(bar,status,body);
+ let editor,value=initial,disposed=false;
+ function mount(simple,switched=false){
+  choice.value=simple?'simple':'studio';
+  editor=(simple?createMobileRoomDesigner:createStudioEditor)(value,{...options,...(switched?{restoreDraft:false}:{})});
+  bar.append(label);
+  editor.element.querySelector?.('.designer-toolbar')?.append(label);
+  body.replaceChildren(editor.element);root.dataset.editorMode=choice.value;
+ }
+ mount(options.editorMode?options.editorMode==='simple':useSimpleRoomBuilder());
+ choice.addEventListener('change',()=>{
+  const previous=root.dataset.editorMode;
+  try {
+   const snapshot={...value,...editor.read()};
+   const previousEditor=editor;value=snapshot;mount(choice.value==='simple',true);previousEditor.dispose?.();
+   try{localStorage.setItem('eradis_editor_mode',choice.value);}catch{}
+   status.textContent='Режим переключён. Текущие изменения сохранены в редакторе.';
+  } catch(error){choice.value=previous;status.textContent=error.message;}
+ });
+ // Both editor implementations dispose themselves when removed from the page.
+ return {element:root,read:()=>{const {features,design,canvasData}=editor.read();return {features,design,canvasData};},get simple(){return editor.simple===true;},dispose(){if(disposed)return;disposed=true;editor.dispose?.();}};
+}
 import {ROOM_FEATURES,MINIMAL_FEATURES,BLOCKS,BLOCK_FEATURE,ESSENTIAL_BLOCKS,COLLAPSIBLE_BLOCKS,defaultDesign,normalizeDesign,normalizeFeatures} from './room-layout.js';
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 const button=(text,fn)=>{const b=el('button',text);b.type='button';b.addEventListener('click',fn);return b;};

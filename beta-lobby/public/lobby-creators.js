@@ -2,7 +2,7 @@ import {createJoinQrButton} from './join-qr.js';
 import {creationPanel,accountStats,roomTools,builder,sourceEditor} from './lobby-creator-tools.js';
 const $=id=>document.getElementById(id);
 const el=(tag,text,cls)=>{const e=document.createElement(tag);if(text!==undefined)e.textContent=text;if(cls)e.className=cls;return e;};
-let overview=null,view='rooms',selected=null,room=null,busy=false,message='',issued='',roomTab='session',dirty=false;
+let overview=null,view=window.location?.hash==='#studio'?'templates':'rooms',selected=null,room=null,busy=false,message='',issued='',roomTab='session',dirty=false;
 try{document.documentElement.dataset.theme=localStorage.getItem('cq_lobby_theme_v1')==='light'?'light':'dark';}catch{}
 async function api(path,data){
  try{const r=await fetch('/api/platform/'+path,{method:data===undefined?'GET':'POST',credentials:'same-origin',headers:data===undefined?{}:{'Content-Type':'application/json','X-CQ-Lobby':'1'},body:data===undefined?undefined:JSON.stringify(data),signal:AbortSignal.timeout(20000)});const d=await r.json();if(!r.ok)throw new Error(d.error||'Запрос не выполнен.');return d;}

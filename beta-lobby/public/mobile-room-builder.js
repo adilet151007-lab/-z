@@ -19,11 +19,11 @@ import {
 } from './room-presets.js';
 
 export function useSimpleRoomBuilder() {
-  return (
-    typeof matchMedia === 'function' &&
-    matchMedia('(max-width: 760px), (pointer: coarse) and (max-width: 1100px)')
-      .matches
-  );
+  try {
+    const preferred = localStorage.getItem('eradis_editor_mode');
+    if (preferred === 'studio' || preferred === 'simple') return preferred === 'simple';
+  } catch {}
+  return typeof matchMedia === 'function' && matchMedia('(max-width: 760px)').matches;
 }
 const copy = (value) => structuredClone(value);
 const node = (tag, text, cls) => {
@@ -278,7 +278,7 @@ export function createMobileRoomDesigner(initial = {}, options = {}) {
     String(options.baseVersion || 0);
   try {
     const raw = localStorage.getItem(draftKey);
-    if (raw) {
+    if (raw && options.restoreDraft !== false) {
       model.restore(JSON.parse(raw));
       restored = true;
     }
